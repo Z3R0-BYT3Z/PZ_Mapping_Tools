@@ -30,11 +30,9 @@
 #include "fancytabwidget.h"
 #include "utils/hostosinfo.h"
 #include "utils/stylehelper.h"
-#include "utils/styledbar.h"
 
 #include <QDebug>
 
-#include <QColorDialog>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QMouseEvent>
@@ -81,7 +79,7 @@ FancyTabBar::FancyTabBar(QWidget *parent)
     m_hoverIndex = -1;
     m_currentIndex = -1;
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
-    setMinimumWidth(qMax(2 * m_rounding, 40));
+    setMinimumWidth(86);
     setAttribute(Qt::WA_Hover, true);
     setFocusPolicy(Qt::NoFocus);
     setMouseTracking(true); // Needed for hover events
@@ -102,28 +100,31 @@ QSize FancyTabBar::tabSizeHint(bool minimum) const
     boldFont.setBold(true);
     QFontMetrics fm(boldFont);
     int spacing = 8;
-    int width = 60 + spacing + 2;
+    int width = 86;
     int maxLabelwidth = 0;
     for (int tab=0 ; tab<count() ;++tab) {
+        if (!isTabVisible(tab))
+            continue;
         int width = fm.horizontalAdvance(tabText(tab));
         if (width > maxLabelwidth)
             maxLabelwidth = width;
     }
     int iconHeight = minimum ? 0 : 32;
-    return QSize(qMax(width, maxLabelwidth + 4), iconHeight + spacing + fm.height());
+    return QSize(qMax(width, maxLabelwidth + 14), iconHeight + spacing + fm.height() + 8);
 }
 
 void FancyTabBar::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event)
     QPainter p(this);
+    p.fillRect(rect(), QColor(QLatin1String("#20262E")));
 
     for (int i = 0; i < count(); ++i)
-        if (i != currentIndex())
+        if (isTabVisible(i) && i != currentIndex())
             paintTab(&p, i);
 
     // paint active tab last, since it overlaps the neighbors
-    if (currentIndex() != -1)
+    if (currentIndex() != -1 && isTabVisible(currentIndex()))
         paintTab(&p, currentIndex());
 }
 
@@ -192,23 +193,33 @@ void FancyTabBar::leaveEvent(QEvent *e)
 QSize FancyTabBar::sizeHint() const
 {
     QSize sh = tabSizeHint();
-    return QSize(sh.width(), sh.height() * m_tabs.count());
+    return QSize(sh.width(), sh.height() * visibleCount());
 }
 
 QSize FancyTabBar::minimumSizeHint() const
 {
     QSize sh = tabSizeHint(true);
-    return QSize(sh.width(), sh.height() * m_tabs.count());
+    return QSize(sh.width(), sh.height() * visibleCount());
 }
 
 QRect FancyTabBar::tabRect(int index) const
 {
+    if (!validIndex(index) || !isTabVisible(index))
+        return QRect();
+
     QSize sh = tabSizeHint();
+    const int tabsVisible = qMax(1, visibleCount());
 
-    if (sh.height() * m_tabs.count() > height())
-        sh.setHeight(height() / m_tabs.count());
+    if (sh.height() * tabsVisible > height())
+        sh.setHeight(height() / tabsVisible);
 
-    return QRect(0, index * sh.height(), sh.width(), sh.height());
+    int visibleIndex = 0;
+    for (int tab = 0; tab < index; ++tab) {
+        if (isTabVisible(tab))
+            ++visibleIndex;
+    }
+
+    return QRect(0, visibleIndex * sh.height(), sh.width(), sh.height());
 
 }
 
@@ -248,19 +259,19 @@ void FancyTabBar::paintTab(QPainter *painter, int tabIndex) const
     bool selected = (tabIndex == m_currentIndex);
     bool enabled = isTabEnabled(tabIndex);
 
-    const QPalette::ColorGroup group = enabled ? QPalette::Active : QPalette::Disabled;
-    QColor background = palette().color(group, selected ? QPalette::Highlight
-                                                         : QPalette::Window);
-    if (!selected && tabIndex == m_hoverIndex) {
-        QColor hover = palette().color(group, QPalette::Highlight);
-        hover.setAlpha(qMax(28, int(m_tabs[tabIndex]->fader())));
-        painter->fillRect(rect.adjusted(0, 0, 0, -1), background);
-        painter->fillRect(rect.adjusted(0, 0, 0, -1), hover);
-    } else {
-        painter->fillRect(rect.adjusted(0, 0, 0, -1), background);
+    QRect cardRect = rect.adjusted(7, 5, -7, -5);
+    if (selected) {
+        painter->setPen(QPen(QColor(QLatin1String("#57C8E8")), 1));
+        painter->setBrush(QColor(QLatin1String("#174A5D")));
+        painter->drawRoundedRect(cardRect, 7, 7);
+        painter->fillRect(QRect(cardRect.left(), cardRect.top() + 8,
+                                3, cardRect.height() - 16),
+                          QColor(QLatin1String("#67D4F1")));
+    } else if (tabIndex == m_hoverIndex) {
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(QLatin1String("#2B333D")));
+        painter->drawRoundedRect(cardRect, 7, 7);
     }
-    painter->setPen(palette().color(group, QPalette::Mid));
-    painter->drawLine(rect.bottomLeft(), rect.bottomRight());
 
     QString tabText(this->tabText(tabIndex));
     QRect tabTextRect(rect);
@@ -268,16 +279,18 @@ void FancyTabBar::paintTab(QPainter *painter, int tabIndex) const
     QRect tabIconRect(tabTextRect);
     tabTextRect.translate(0, drawIcon ? -2 : 1);
     QFont boldFont(painter->font());
-    boldFont.setPointSizeF(Utils::StyleHelper::sidebarFontSize());
-    boldFont.setBold(true);
+    boldFont.setPointSizeF(8.5);
+    boldFont.setWeight(QFont::DemiBold);
     painter->setFont(boldFont);
-    painter->setPen(palette().color(group, selected ? QPalette::HighlightedText
-                                                    : QPalette::WindowText));
+    painter->setPen(enabled
+                    ? QColor(selected ? QLatin1String("#F2FBFD")
+                                      : QLatin1String("#AEB7C3"))
+                    : QColor(QLatin1String("#626B78")));
     const int textFlags = Qt::AlignCenter | (drawIcon ? Qt::AlignBottom : Qt::AlignVCenter) | Qt::TextWordWrap;
 
     if (drawIcon) {
         int textHeight = painter->fontMetrics().boundingRect(QRect(0, 0, width(), height()), Qt::TextWordWrap, tabText).height();
-        tabIconRect.adjust(0, 4, 0, -textHeight);
+        tabIconRect.adjust(0, 7, 0, -textHeight - 1);
         tabIcon(tabIndex).paint(painter, tabIconRect, Qt::AlignCenter,
                                 enabled ? QIcon::Normal : QIcon::Disabled);
     }
@@ -320,31 +333,30 @@ bool FancyTabBar::isTabEnabled(int index) const
     return false;
 }
 
-
-//////
-// FancyColorButton
-//////
-
-class FancyColorButton : public QWidget
+void FancyTabBar::setTabVisible(int index, bool visible)
 {
-public:
-    FancyColorButton(QWidget *parent)
-      : m_parent(parent)
-    {
-        setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Preferred);
-    }
+    if (!validIndex(index) || m_tabs[index]->visible == visible)
+        return;
+    m_tabs[index]->visible = visible;
+    updateGeometry();
+    update();
+}
 
-    void mousePressEvent(QMouseEvent *ev)
-    {
-        if (ev->modifiers() & Qt::ShiftModifier) {
-            QColor color = QColorDialog::getColor(Utils::StyleHelper::requestedBaseColor(), m_parent);
-            if (color.isValid())
-                Utils::StyleHelper::setBaseColor(color);
-        }
+bool FancyTabBar::isTabVisible(int index) const
+{
+    return validIndex(index) && m_tabs.at(index)->visible;
+}
+
+int FancyTabBar::visibleCount() const
+{
+    int result = 0;
+    for (const FancyTab *tab : m_tabs) {
+        if (tab->visible)
+            ++result;
     }
-private:
-    QWidget *m_parent;
-};
+    return result;
+}
+
 
 //////
 // FancyTabWidget
@@ -359,13 +371,6 @@ FancyTabWidget::FancyTabWidget(QWidget *parent)
     QVBoxLayout *selectionLayout = new QVBoxLayout;
     selectionLayout->setSpacing(0);
     selectionLayout->setContentsMargins(0, 0, 0, 0);
-
-    Utils::StyledBar *bar = new Utils::StyledBar;
-    QHBoxLayout *layout = new QHBoxLayout(bar);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
-    layout->addWidget(new FancyColorButton(this));
-    selectionLayout->addWidget(bar);
 
     selectionLayout->addWidget(m_tabBar, 1);
     m_selectionWidget->setLayout(selectionLayout);
@@ -436,8 +441,8 @@ void FancyTabWidget::paintEvent(QPaintEvent *event)
 
     QRect rect = m_selectionWidget->rect().adjusted(0, 0, 1, 0);
     rect = style()->visualRect(layoutDirection(), geometry(), rect);
-    painter.fillRect(rect, palette().color(QPalette::Window));
-    painter.setPen(palette().color(QPalette::Mid));
+    painter.fillRect(rect, QColor(QLatin1String("#20262E")));
+    painter.setPen(QColor(QLatin1String("#343C47")));
     painter.drawLine(rect.topRight(), rect.bottomRight());
 }
 
@@ -493,4 +498,14 @@ void FancyTabWidget::setTabEnabled(int index, bool enable)
 bool FancyTabWidget::isTabEnabled(int index) const
 {
     return m_tabBar->isTabEnabled(index);
+}
+
+void FancyTabWidget::setTabVisible(int index, bool visible)
+{
+    m_tabBar->setTabVisible(index, visible);
+}
+
+bool FancyTabWidget::isTabVisible(int index) const
+{
+    return m_tabBar->isTabVisible(index);
 }

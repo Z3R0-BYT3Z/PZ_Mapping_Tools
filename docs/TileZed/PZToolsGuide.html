@@ -207,7 +207,7 @@
     shared paths remain in <code>PZTools.ini</code>. The directory must not be
     used as the configuration-catalog directory.
     See the <a href="../PZTools-Configuration-Files.md">configuration file
-    reference and Build 42.20 checks</a> before changing a catalogue manually.
+    reference and Build 42.20 audit</a> before changing a catalogue manually.
   </div>
 
   <h2 id="settings">Portable settings, layouts and logs</h2>
@@ -249,11 +249,11 @@
   application are retained. Lines contain severity, PID, thread ID and an
   optional worker name. They record selected paths, tileset loading, missing
   images, Building catalogs, Automapper diagnostics, WorldGen/loot loading,
-  biomemap warnings, geometry repairs, and caught crashes.</p>
+  biomemap warnings, geometry repairs, validators, and caught crashes.</p>
   <p>Only the exact non-fatal libpng incorrect-sRGB-profile warning is omitted;
   other PNG warnings and errors remain visible. See
-  <a href="../Diagnostics-and-Logs.md">Logs and useful issue reports</a> for
-  interpretation and a report checklist.</p>
+  <a href="../Diagnostics-and-Logs.md">Logs, diagnostics, and useful issue
+  reports</a> for interpretation, validator commands, and a report checklist.</p>
 
   <h3>Changing shared paths</h3>
   <p>The initial setup assistant stores the catalog and extracted game Tiles
@@ -318,6 +318,9 @@
     TMX. Generate Lots rejects that cell and reports its coordinates, path,
     and actual dimensions. Convert or recreate the TMX explicitly.
   </div>
+
+  <p>Release validation command:</p>
+  <pre><code>PZWorldEd.exe --validate-native-256-lot-geometry</code></pre>
 
   <h3>Creating a native 256 project</h3>
   <ol>
@@ -541,30 +544,6 @@
   <code>objects.lua</code> because their data is expected in the Biomemap green
   channel. <strong>Read exact zone IDs from PNG</strong> supplies that same
   channel from an external image.</p>
-
-  <p>When zone objects are rasterized, <strong>Unzoned terrain fallback</strong>
-  controls every pixel not covered by one of those seven objects. Automatic
-  uses green 171 <code>Vegitation</code> only when WorldEd detects an active
-  pixel 171 entry in the map's <code>WorldGenOverride.lua</code>. Otherwise it
-  uses Vanilla-safe green 64 <code>ForagingNav</code>. The two exact values can
-  also be selected explicitly. An external Zone PNG bypasses this setting
-  because it supplies every green value.</p>
-
-  <h3>Painting red biomes and green zones</h3>
-  <p>Enable the Biomemap overlay and select the Biomemap painting tool. Its
-  <strong>Paint</strong> control provides two independent modes:</p>
-  <table>
-    <thead><tr><th>Mode</th><th>Brush unit</th><th>Changed data</th><th>Preserved data</th></tr></thead>
-    <tbody>
-      <tr><td>Biome (red channel)</td><td>Individual map-square pixels</td><td>Red biome and ore selector ID</td><td>Green Zone, blue, and alpha</td></tr>
-      <tr><td>Zone (green channel)</td><td>Complete 8 x 8 world chunks</td><td>Green foraging-zone ID</td><td>Red Biome, blue, and alpha</td></tr>
-    </tbody>
-  </table>
-  <p>The overlay changes to the active channel so green edits are visible.
-  Each mode remembers its own ID and radius. A Zone radius of zero paints one
-  complete chunk. Larger radii are measured in chunks. Dragging cannot leave
-  partial or skipped chunks, and alignment follows absolute world coordinates
-  for both Native256 and Legacy300 projects.</p>
 
   <div class="warning">
     Do not move other WorldEd objects into the Biomemap. Vehicle zones,
@@ -966,10 +945,10 @@
   <div class="success">
     When reporting a problem, include the application name, project grid format,
     exact menu action, affected cell/TMX path and the matching portable log
-    lines. For the complete checklist, use
-    <a href="../Diagnostics-and-Logs.md">Logs and useful issue reports</a>.
-    That is usually enough to identify whether the problem comes from source
-    data or the editor.
+    lines. For the complete checklist and regression commands, use
+    <a href="../Diagnostics-and-Logs.md">Logs, diagnostics, and useful issue
+    reports</a>. That is usually enough to distinguish bad source data from an
+    editor regression.
   </div>
 </body>
 </html>

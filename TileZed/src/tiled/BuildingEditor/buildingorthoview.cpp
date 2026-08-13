@@ -1899,4 +1899,29 @@ void BuildingOrthoView::adjustScale(qreal scale)
                   mZoomable->smoothTransform());
 }
 
+void BuildingOrthoView::fitToBuilding()
+{
+    if (!scene() || viewport()->width() < 1 || viewport()->height() < 1)
+        return;
+
+    const QRectF bounds = scene()->sceneRect();
+    if (!bounds.isValid() || bounds.isEmpty())
+        return;
+
+    const qreal availableWidth = qMax(1, viewport()->width() - 96);
+    const qreal availableHeight = qMax(1, viewport()->height() - 96);
+    const qreal scale = qBound(qreal(0.06),
+                               qMin(availableWidth / bounds.width(),
+                                    availableHeight / bounds.height()),
+                               qreal(4.0));
+    mZoomable->setScale(scale);
+    centerOn(bounds.center());
+}
+
+void BuildingOrthoView::centerBuilding()
+{
+    if (scene() && scene()->sceneRect().isValid())
+        centerOn(scene()->sceneRect().center());
+}
+
 /////

@@ -70,8 +70,6 @@ LootWindow::LootWindow(QWidget *parent) :
 
     QSettings settings;
     QString d = settings.value(QLatin1String("LootWindow/GameDirectory")).toString();
-    if (d.isEmpty())
-        d = Preferences::instance()->projectZomboidDirectory();
     ui->gameDirectory->setText(QDir::toNativeSeparators(d));
 
     connect(DocumentManager::instance(), &DocumentManager::currentDocumentChanged,
@@ -289,7 +287,6 @@ void LootWindow::chooseGameDirectory()
 
     QSettings settings;
     settings.setValue(QLatin1String("LootWindow/GameDirectory"), f);
-    Preferences::instance()->setProjectZomboidDirectory(f);
 
     ui->gameDirectory->setText(QDir::toNativeSeparators(f));
 

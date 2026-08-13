@@ -129,31 +129,13 @@ public:
     { emit objectPicked(object); }
 
     // Clipboard
-    struct ClipboardTileLayer {
-        int level = 0;
-        QString layerName;
-        FloorTileGrid *tiles = nullptr;
-    };
-
     void setClipboardTiles(FloorTileGrid *tiles, const QRegion &rgn);
-    void setClipboardTileLayers(const QList<ClipboardTileLayer> &layers,
-                                const QRegion &rgn,
-                                int anchorLevel);
 
     FloorTileGrid *clipboardTiles() const
     { return mClipboardTiles; }
 
     QRegion clipboardTilesRgn() const
     { return mClipboardTilesRgn; }
-
-    const QList<ClipboardTileLayer> &clipboardTileLayers() const
-    { return mClipboardTileLayers; }
-
-    int clipboardAnchorLevel() const
-    { return mClipboardAnchorLevel; }
-
-    bool clipboardPreservesPlanes() const
-    { return mClipboardPreservesPlanes; }
 
     // +UNDO/REDO
     Room *changeRoomAtPosition(BuildingFloor *floor, const QPoint &pos, Room *room);
@@ -291,9 +273,6 @@ private:
     QRegion mTileSelection;
     FloorTileGrid *mClipboardTiles;
     QRegion mClipboardTilesRgn;
-    QList<ClipboardTileLayer> mClipboardTileLayers;
-    int mClipboardAnchorLevel = 0;
-    bool mClipboardPreservesPlanes = false;
 };
 
 } // namespace BuildingEditor

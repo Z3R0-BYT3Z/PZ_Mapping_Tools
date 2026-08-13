@@ -32,6 +32,7 @@ class BaseWorldSceneTool;
 class MapImage;
 class MapInfo;
 class LoadThumbnailsDialog;
+class NightPreviewItem;
 class PasteCellsTool;
 class Road;
 class World;
@@ -537,6 +538,7 @@ public:
     { return mOtherWorlds; }
 
     void cancelLoadingThumbnails();
+    void setNightPreviewEnabled(bool enabled);
 
 signals:
     
@@ -622,6 +624,7 @@ private:
     BiomeMapItem *mBiomeMapItem;
     bool mBMPToolActive;
     bool mDoubleClick;
+    NightPreviewItem *mNightPreviewItem;
 
     int pendingThumbnailCount() const;
     void startThumbnailProgress();

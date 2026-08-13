@@ -141,6 +141,13 @@ imported into the Windows Qt 5 tree. They are reviewed for relevant portable
 changes. Likewise, broad upstream branch merges are not assumed to be safe:
 applicable changes are ported and tested individually.
 
+Future upstream ports should be added to this table with:
+
+1. the original repository and full commit hash;
+2. the original author where it is not evident from the linked commit;
+3. whether the change was applied directly or adapted;
+4. any material deviation required by this repository.
+
 ## Relationship to CE
 
 This repository was not derived from CE. As of the provenance cutoff above, no
@@ -151,7 +158,9 @@ Similarities may result from the shared Tim Baker/TIS ancestry, compatibility
 with the same Project Zomboid formats, or independent solutions to the same
 mapping-tool problems. They do not by themselves establish a CE lineage.
 
-CE is not listed as an upstream repository or dependency.
+CE is not listed as an upstream repository or dependency. If a CE-originated
+change is intentionally incorporated in the future, it must be recorded
+separately with its source commit and attribution.
 
 ## Local and previously unreleased work
 
@@ -176,5 +185,6 @@ When adding code from another project:
 - never describe a shared-upstream or independently developed change as having
   been imported from another community fork without evidence.
 
-This file records source ancestry. Current release changes are documented in
+This file records source ancestry. Functional differences and release-level
+changes remain documented in [`CHANGELOG-PZTOOLS.md`](CHANGELOG-PZTOOLS.md) and
 [`RELEASE_CHANGELOG.md`](RELEASE_CHANGELOG.md).

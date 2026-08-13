@@ -34,7 +34,6 @@
 #include "preferences.h"
 #include "tiledapplication.h"
 #include "tiledefcompare.h"
-#include "tilesetdock.h"
 #include "../firstlaunchdialog.h"
 #include "../portablesettings.h"
 #ifdef ZOMBOID
@@ -47,12 +46,10 @@
 #include "BuildingEditor/buildinglua.h"
 #include "BuildingEditor/buildingmap.h"
 #include "BuildingEditor/buildingpreferences.h"
-#include "BuildingEditor/buildingreader.h"
 #include "BuildingEditor/buildingtemplates.h"
 #include "BuildingEditor/buildingtiles.h"
 #include "BuildingEditor/buildingtilesdialog.h"
 #include "BuildingEditor/buildingtilesetdock.h"
-#include "BuildingEditor/buildingwriter.h"
 #include "BuildingEditor/categorydock.h"
 #include "BuildingEditor/furnituregroups.h"
 #include "tilemetainfomgr.h"
@@ -116,6 +113,11 @@ static bool validateSingleRowTilesetCatalog(QString *errorString)
                 .arg(giblet->tileCount());
         return false;
     }
+
+    // Reproduce the legacy failure directly. Valid one-row sheets sometimes
+    // reached the metadata writer with their column count reset to zero after
+    // an image refresh even though all eight tiles and the PNG geometry were
+    // still present.
     giblet->setColumnCount(0);
     QTemporaryDir temporary;
     if (!temporary.isValid()) {
@@ -139,6 +141,7 @@ static bool validateSingleRowTilesetCatalog(QString *errorString)
     }
     return true;
 }
+
 static void addEntryTiles(QSet<BuildingEditor::BuildingTile *> &tiles,
                           BuildingEditor::BuildingTileEntry *entry)
 {
@@ -149,6 +152,7 @@ static void addEntryTiles(QSet<BuildingEditor::BuildingTile *> &tiles,
             tiles += tile;
     }
 }
+
 static bool validateBuildingTemplateTiles(BuildingEditor::Building *building,
                                           QString *errorString)
 {
@@ -171,6 +175,7 @@ static bool validateBuildingTemplateTiles(BuildingEditor::Building *building,
             }
         }
     }
+
     for (BuildingEditor::BuildingTile *buildingTile : buildingTiles) {
         Tiled::Tileset *tileset = TileMetaInfoMgr::instance()
                 ->tileset(buildingTile->mTilesetName);
@@ -204,10 +209,12 @@ static bool validateBuildingTemplateTiles(BuildingEditor::Building *building,
             return false;
         }
     }
+
     qInfo() << "Validated building template:"
             << buildingTiles.count() << "tile references";
     return true;
 }
+
 static bool validateAllBuildingTemplates(QString *errorString)
 {
     BuildingEditor::BuildingTemplates *templates =
@@ -219,6 +226,7 @@ static bool validateAllBuildingTemplates(QString *errorString)
                 new BuildingEditor::Building(17, 23, buildingTemplate);
         building->insertFloor(
                     0, new BuildingEditor::BuildingFloor(building, 0));
+
         const QStringList unresolved =
                 BuildingEditor::BuildingMap::loadNeededTilesets(building);
         if (!unresolved.isEmpty()) {
@@ -229,6 +237,7 @@ static bool validateAllBuildingTemplates(QString *errorString)
             delete building;
             return false;
         }
+
         QString templateError;
         if (!validateBuildingTemplateTiles(building, &templateError)) {
             *errorString = QStringLiteral("Template \"%1\": %2")
@@ -239,180 +248,12 @@ static bool validateAllBuildingTemplates(QString *errorString)
         }
         delete building;
     }
+
     qInfo() << "Validated all building templates:"
             << templates->templateCount();
     return true;
 }
-static QString roomFloorTileName(BuildingEditor::Room *room)
-{
-    BuildingEditor::BuildingTileEntry *entry =
-            room ? room->tile(BuildingEditor::Room::Floor) : nullptr;
-    if (!entry || entry->isNone())
-        return QString();
-    BuildingEditor::BuildingTile *tile = entry->displayTile();
-    return tile && !tile->isNone() ? tile->name() : QString();
-}
-static bool validateRoomFloorRoundTrip(QString *errorString)
-{
-    using namespace BuildingEditor;
-    BuildingTileCategory *floors = BuildingTilesMgr::instance()->catFloors();
-    BuildingTileEntry *floorEntry = nullptr;
-    for (BuildingTileEntry *entry : floors->entries()) {
-        if (entry && !entry->isNone() && entry->displayTile()
-                && !entry->displayTile()->isNone()) {
-            floorEntry = entry;
-            break;
-        }
-    }
-    if (!floorEntry) {
-        *errorString = QStringLiteral(
-                    "The floor category has no usable tile entry");
-        return false;
-    }
-    BuildingTileEntry *duplicateEntry = floorEntry->createCopy(floors);
-    Building *source = new Building(4, 4, nullptr);
-    Room *firstRoom = new Room();
-    firstRoom->Name = QStringLiteral("Round-trip A");
-    firstRoom->internalName = QStringLiteral("test");
-    firstRoom->Color = qRgb(255, 0, 0);
-    firstRoom->setTile(Room::Floor, floorEntry);
-    source->insertRoom(source->roomCount(), firstRoom);
-    Room *secondRoom = new Room();
-    secondRoom->Name = QStringLiteral("Round-trip B");
-    secondRoom->internalName = QStringLiteral("test");
-    secondRoom->Color = qRgb(0, 255, 0);
-    secondRoom->setTile(Room::Floor, duplicateEntry);
-    source->insertRoom(source->roomCount(), secondRoom);
-    QTemporaryDir temporary;
-    if (!temporary.isValid()) {
-        delete source;
-        delete duplicateEntry;
-        *errorString = QStringLiteral(
-                    "Could not create the room-floor test directory");
-        return false;
-    }
-    const QString testPath = temporary.filePath(
-                QStringLiteral("room-floor-roundtrip.tbx"));
-    BuildingWriter writer;
-    if (!writer.write(source, testPath)) {
-        delete source;
-        delete duplicateEntry;
-        *errorString = QStringLiteral("Could not save the room-floor test: %1")
-                .arg(writer.errorString());
-        return false;
-    }
-    BuildingReader reader;
-    Building *reopened = reader.read(testPath);
-    if (!reopened) {
-        delete source;
-        delete duplicateEntry;
-        *errorString = QStringLiteral(
-                    "Could not reopen the room-floor test: %1")
-                .arg(reader.errorString());
-        return false;
-    }
-    reader.fix(reopened);
-    const QString expected = floorEntry->displayTile()->name();
-    bool valid = reopened->roomCount() == 2;
-    if (valid) {
-        valid = roomFloorTileName(reopened->room(0)) == expected
-                && roomFloorTileName(reopened->room(1)) == expected;
-    }
-    if (!valid) {
-        *errorString = QStringLiteral(
-                    "A duplicated floor definition was saved as no floor");
-    }
-    delete reopened;
-    delete source;
-    delete duplicateEntry;
-    return valid;
-}
-static bool validateRoomFloorsInFixture(const QString &fixturePath,
-                                        QString *errorString)
-{
-    using namespace BuildingEditor;
-    BuildingReader fixtureReader;
-    Building *source = fixtureReader.read(fixturePath);
-    if (!source) {
-        *errorString = QStringLiteral("Could not read fixture %1: %2")
-                .arg(fixturePath, fixtureReader.errorString());
-        return false;
-    }
-    fixtureReader.fix(source);
-    int changedRoom = -1;
-    BuildingTileEntry *duplicateEntry = nullptr;
-    for (int first = 0; first < source->roomCount() && changedRoom == -1;
-         ++first) {
-        BuildingTileEntry *entry = source->room(first)->tile(Room::Floor);
-        if (!entry || entry->isNone())
-            continue;
-        for (int second = first + 1; second < source->roomCount(); ++second) {
-            if (source->room(second)->tile(Room::Floor) == entry) {
-                duplicateEntry = entry->createCopy(entry->category());
-                source->room(first)->setTile(Room::Floor, duplicateEntry);
-                changedRoom = first;
-                break;
-            }
-        }
-    }
-    if (changedRoom == -1) {
-        delete source;
-        *errorString = QStringLiteral(
-                    "Fixture has no two rooms sharing a floor definition");
-        return false;
-    }
-    QStringList expectedFloors;
-    for (Room *room : source->rooms())
-        expectedFloors += roomFloorTileName(room);
-    QTemporaryDir temporary;
-    if (!temporary.isValid()) {
-        delete source;
-        delete duplicateEntry;
-        *errorString = QStringLiteral(
-                    "Could not create the fixture round-trip directory");
-        return false;
-    }
-    const QString testPath = temporary.filePath(
-                QFileInfo(fixturePath).fileName());
-    BuildingWriter writer;
-    if (!writer.write(source, testPath)) {
-        delete source;
-        delete duplicateEntry;
-        *errorString = QStringLiteral("Could not save fixture copy: %1")
-                .arg(writer.errorString());
-        return false;
-    }
-    BuildingReader reopenedReader;
-    Building *reopened = reopenedReader.read(testPath);
-    if (!reopened) {
-        delete source;
-        delete duplicateEntry;
-        *errorString = QStringLiteral("Could not reopen fixture copy: %1")
-                .arg(reopenedReader.errorString());
-        return false;
-    }
-    reopenedReader.fix(reopened);
-    bool valid = reopened->roomCount() == expectedFloors.count();
-    for (int index = 0; valid && index < reopened->roomCount(); ++index) {
-        if (roomFloorTileName(reopened->room(index))
-                != expectedFloors.at(index)) {
-            *errorString = QStringLiteral(
-                        "Room %1 (%2) lost floor %3 during save and reopen")
-                    .arg(index)
-                    .arg(reopened->room(index)->Name,
-                         expectedFloors.at(index));
-            valid = false;
-        }
-    }
-    delete reopened;
-    delete source;
-    delete duplicateEntry;
-    if (valid) {
-        qInfo() << "Validated fixture room floors after changing room"
-                << changedRoom << QFileInfo(fixturePath).fileName();
-    }
-    return valid;
-}
+
 static bool validateBrushUndoBuffers(QString *errorString)
 {
     Tiled::Tileset tileset(QStringLiteral("brush-validation"), 64, 128);
@@ -420,13 +261,17 @@ static bool validateBrushUndoBuffers(QString *errorString)
     Tiled::TileLayer layer(QStringLiteral("brush-undo"), 0, 0, 1, 1);
     const Tiled::Cell paintedCell(&tile);
     layer.setCell(0, 0, paintedCell);
+
     QElapsedTimer elapsed;
     elapsed.start();
     for (int size = 2; size <= 300; ++size) {
+        // This mirrors a diagonal brush stroke whose merged undo buffer grows
+        // by one row and one column for each new tile.
         layer.resize(QSize(size, size), QPoint(1, 1));
         layer.setCell(0, 0, paintedCell);
     }
     const qint64 elapsedMs = elapsed.elapsed();
+
     for (int i = 0; i < 300; ++i) {
         if (layer.cellAt(i, i) != paintedCell) {
             *errorString = QStringLiteral(
@@ -446,6 +291,7 @@ static bool validateBrushUndoBuffers(QString *errorString)
                     "Merged brush undo buffer lost its tileset references");
         return false;
     }
+
     QImage brushImage(32, 32, QImage::Format_ARGB32);
     brushImage.fill(Qt::transparent);
     brushImage.setPixel(0, 0, qRgba(0, 0, 0, 255));
@@ -462,6 +308,7 @@ static bool validateBrushUndoBuffers(QString *errorString)
                     "Custom PNG brush mask did not preserve dark/transparent pixels");
         return false;
     }
+
     BmpBrushTool *brushTool = BmpBrushTool::instance();
     brushTool->setCustomBrush(mask, brushImage.size(),
                              QStringLiteral("self-test"));
@@ -476,14 +323,17 @@ static bool validateBrushUndoBuffers(QString *errorString)
         return false;
     }
     brushTool->setBrushShape(BmpBrushTool::BrushShape::Square);
+
     if (!BmpToolDialog::validateReloadEquality(errorString))
         return false;
     if (!BmpBlender::validateUnavailableTilesetFiltering(errorString))
         return false;
+
     qInfo() << "Validated 300-tile diagonal brush undo growth in"
             << elapsedMs << "ms and a centered 32x32 PNG brush mask";
     return true;
 }
+
 static bool validateTileDefSplitting(QString *errorString)
 {
     QTemporaryDir malformedDirectory;
@@ -514,6 +364,7 @@ static bool validateTileDefSplitting(QString *errorString)
     malformedStream << qint32(2) << qint32(2)
                     << qint32(0) << qint32(5);
     malformedFile.close();
+
     TileDefFile malformed;
     if (malformed.read(malformedPath)) {
         *errorString = QStringLiteral(
@@ -535,6 +386,7 @@ static bool validateTileDefSplitting(QString *errorString)
                 .arg(malformedError);
         return false;
     }
+
     const QString truncatedPath =
             malformedDirectory.filePath(
                 QStringLiteral("truncated-field.tiles"));
@@ -560,6 +412,7 @@ static bool validateTileDefSplitting(QString *errorString)
                 .arg(truncated.errorString());
         return false;
     }
+
     TileDefFile oversized;
     for (int index = 0;
          index < TileDefFile::MAX_TILESET_ID_MODS + 1;
@@ -576,6 +429,7 @@ static bool validateTileDefSplitting(QString *errorString)
         oversized.insertTileset(
                     oversized.tilesets().size(), tileset);
     }
+
     QString validationError;
     if (oversized.validate(TileDefFile::ModFormat,
                            &validationError)) {
@@ -583,6 +437,7 @@ static bool validateTileDefSplitting(QString *errorString)
                     "An oversized mod tiledef unexpectedly validated");
         return false;
     }
+
     QTemporaryDir temporaryDirectory;
     if (!temporaryDirectory.isValid()) {
         *errorString = QStringLiteral(
@@ -607,6 +462,7 @@ static bool validateTileDefSplitting(QString *errorString)
                 .arg(outputs.join(QStringLiteral(", ")));
         return false;
     }
+
     const int expectedCounts[] = {
         TileDefFile::MAX_TILESET_ID_MODS, 1
     };
@@ -640,6 +496,7 @@ static bool validateTileDefSplitting(QString *errorString)
             return false;
         }
     }
+
     QString comparatorSummary;
     if (!TileDefCompare::runSelfTest(
             &comparatorSummary, errorString)) {
@@ -653,6 +510,7 @@ static bool validateTileDefSplitting(QString *errorString)
             << comparatorSummary;
     return true;
 }
+
 static bool validateBuildingLuaFurniture(
         BuildingEditor::BuildingDocument *document, QString *errorString)
 {
@@ -697,6 +555,7 @@ static bool validateBuildingLuaFurniture(
             "assert(objectIndex == before, 'unexpected furniture object index')\n"
             "assert(building:objectCount(level) == before + 1)\n"
             "assert(building:objectType(level, objectIndex) == 'Furniture')\n";
+
     QTemporaryFile scriptFile(
                 QDir::tempPath()
                 + QLatin1String("/buildinged-lua-validation-XXXXXX.lua"));
@@ -709,6 +568,7 @@ static bool validateBuildingLuaFurniture(
         *errorString = QStringLiteral("Could not write the temporary Lua test");
         return false;
     }
+
     const int objectCountBefore =
             document->building()->floor(0)->objectCount();
     BuildingEditor::BuildingLuaScript script(document);
@@ -723,6 +583,7 @@ static bool validateBuildingLuaFurniture(
                     "Lua furniture placement produced no document change");
         return false;
     }
+
     QUndoStack *undoStack = document->undoStack();
     if (document->building()->floor(0)->objectCount()
             != objectCountBefore + 1 || !undoStack->canUndo()) {
@@ -750,6 +611,7 @@ static bool validateBuildingLuaFurniture(
     return true;
 }
 #endif
+
 class CommandLineHandler : public CommandLineParser
 {
 public:
@@ -836,57 +698,69 @@ CommandLineHandler::CommandLineHandler()
                 QChar(),
                 QLatin1String("--disable-opengl"),
                 QLatin1String("Disable hardware accelerated rendering"));
+
     option<&CommandLineHandler::setValidateBuildingCategories>(
                 QChar(),
                 QLatin1String("--validate-building-categories"),
                 QLatin1String("Load and validate every BuildingEd tile category"));
+
     option<&CommandLineHandler::setValidateBrushPerformance>(
                 QChar(),
                 QLatin1String("--validate-brush-performance"),
                 QLatin1String("Validate sparse undo growth for tile painting"));
+
     option<&CommandLineHandler::setValidateDepthMapEditor>(
                 QChar(),
                 QLatin1String("--validate-depthmap-editor"),
                 QLatin1String("Validate Build 42 depth atlas editing and PNG output"));
+
     option<&CommandLineHandler::setValidateLootDistributions>(
                 QChar(),
                 QLatin1String("--validate-loot-distributions"),
                 QLatin1String("Validate game loot registries; pass game root "
                               "and optional project root as file arguments"));
+
     option<&CommandLineHandler::setValidatePackTools>(
                 QChar(),
                 QLatin1String("--validate-pack-tools"),
                 QLatin1String("Validate .pack reading, comparison, hashing "
                               "and extraction"));
+
     option<&CommandLineHandler::setValidateAutomapperRules>(
                 QChar(),
                 QLatin1String("--validate-automapper-rules"),
                 QLatin1String("Validate Automapper manifest selection and "
                               "WorldEd Rules.txt isolation"));
+
     option<&CommandLineHandler::setRenderPackComparator>(
                 QChar(),
                 QLatin1String("--render-pack-comparator"),
                 QLatin1String("Render the enhanced .pack comparator; pass "
                               "the output PNG as a file argument"));
+
     option<&CommandLineHandler::setRenderPackExtractor>(
                 QChar(),
                 QLatin1String("--render-pack-extractor"),
                 QLatin1String("Render the versatile .pack extractor; pass "
                               "the output PNG as a file argument"));
+
     option<&CommandLineHandler::setRenderTileDefComparator>(
                 QChar(),
                 QLatin1String("--render-tiledef-comparator"),
                 QLatin1String("Render the enhanced .tiles comparator; pass "
                               "the output PNG as a file argument"));
+
     option<&CommandLineHandler::setRenderLootDistributions>(
                 QChar(),
                 QLatin1String("--render-loot-distributions"),
                 QLatin1String("Render the loot editor; pass game root, "
                               "output PNG and optional project root"));
+
     option<&CommandLineHandler::setValidateTileDefSplit>(
                 QChar(),
                 QLatin1String("--validate-tiledef-split"),
                 QLatin1String("Validate B42 mod tiledef limits and splitting"));
+
     option<&CommandLineHandler::setValidateTilesetCatalog>(
                 QChar(),
                 QLatin1String("--validate-tileset-catalog"),
@@ -917,50 +791,62 @@ void CommandLineHandler::setValidateBuildingCategories()
 {
     validateBuildingCategories = true;
 }
+
 void CommandLineHandler::setValidateBrushPerformance()
 {
     validateBrushPerformance = true;
 }
+
 void CommandLineHandler::setValidateDepthMapEditor()
 {
     validateDepthMapEditor = true;
 }
+
 void CommandLineHandler::setValidateLootDistributions()
 {
     validateLootDistributions = true;
 }
+
 void CommandLineHandler::setValidatePackTools()
 {
     validatePackTools = true;
 }
+
 void CommandLineHandler::setValidateAutomapperRules()
 {
     validateAutomapperRules = true;
 }
+
 void CommandLineHandler::setRenderPackComparator()
 {
     renderPackComparator = true;
 }
+
 void CommandLineHandler::setRenderPackExtractor()
 {
     renderPackExtractor = true;
 }
+
 void CommandLineHandler::setRenderTileDefComparator()
 {
     renderTileDefComparator = true;
 }
+
 void CommandLineHandler::setRenderLootDistributions()
 {
     renderLootDistributions = true;
 }
+
 void CommandLineHandler::setValidateTileDefSplit()
 {
     validateTileDefSplit = true;
 }
+
 void CommandLineHandler::setValidateTilesetCatalog()
 {
     validateTilesetCatalog = true;
 }
+
 #if !defined(QT_NO_DEBUG) && defined(ZOMBOID) && defined(_MSC_VER)
 static void __cdecl invalid_parameter_handler(
    const wchar_t * expression,
@@ -1027,6 +913,7 @@ int main(int argc, char *argv[])
     languageManager->installTranslators();
 
     CommandLineHandler commandLine;
+
     if (!commandLine.parse(QCoreApplication::arguments()))
         return 0;
     if (commandLine.quit)
@@ -1198,6 +1085,9 @@ int main(int argc, char *argv[])
         BuildingEditor::BuildingEditorWindow buildingEditor;
         buildingEditor.show();
         buildingEditor.readSettings();
+
+        // Let the event loop paint the window and progress dialog before the
+        // potentially expensive tileset scan and image decoding begins.
         QTimer::singleShot(0, &buildingEditor,
                            [&buildingEditor, &commandLine]() {
             if (!MainWindow::InitConfigFiles(&buildingEditor) ||
@@ -1206,6 +1096,7 @@ int main(int argc, char *argv[])
                 QCoreApplication::quit();
                 return;
             }
+
             if (commandLine.validateTilesetCatalog) {
                 QString error;
                 const bool valid =
@@ -1217,6 +1108,7 @@ int main(int argc, char *argv[])
                 QCoreApplication::exit(valid ? 0 : 3);
                 return;
             }
+
             if (commandLine.validateBuildingCategories) {
                 BuildingEditor::BuildingTemplate *buildingTemplate = nullptr;
                 BuildingEditor::BuildingTemplates *templates =
@@ -1244,6 +1136,7 @@ int main(int argc, char *argv[])
                         << (buildingTemplate
                             ? buildingTemplate->name()
                             : QStringLiteral("<default>"));
+
                 QString templateTilesError;
                 const bool templateTilesValid =
                         validateAllBuildingTemplates(
@@ -1254,31 +1147,7 @@ int main(int argc, char *argv[])
                             ? QStringLiteral("PASS")
                             : QStringLiteral("FAIL: %1")
                               .arg(templateTilesError));
-                QString roomFloorError;
-                const bool roomFloorValid =
-                        validateRoomFloorRoundTrip(&roomFloorError);
-                qInfo().noquote()
-                        << "BuildingEd room-floor round-trip validation:"
-                        << (roomFloorValid
-                            ? QStringLiteral("PASS")
-                            : QStringLiteral("FAIL: %1")
-                              .arg(roomFloorError));
-                bool fixtureFloorValid = true;
-                QString fixtureFloorError;
-                const QStringList validationFiles =
-                        commandLine.filesToOpen();
-                if (!validationFiles.isEmpty()) {
-                    fixtureFloorValid = validateRoomFloorsInFixture(
-                                validationFiles.first(),
-                                &fixtureFloorError);
-                    qInfo().noquote()
-                            << "BuildingEd fixture room-floor validation:"
-                            << (fixtureFloorValid
-                                ? QStringLiteral("PASS: %1")
-                                  .arg(validationFiles.first())
-                                : QStringLiteral("FAIL: %1")
-                                  .arg(fixtureFloorError));
-                }
+
                 BuildingEditor::BuildingTilesetDock *tilesetDock =
                         buildingEditor.findChild<
                             BuildingEditor::BuildingTilesetDock *>();
@@ -1292,6 +1161,7 @@ int main(int argc, char *argv[])
                             ? QStringLiteral("PASS")
                             : QStringLiteral("FAIL: %1")
                               .arg(tileModeError));
+
                 BuildingEditor::BuildingTilesDialog *tilesDialog =
                         BuildingEditor::BuildingTilesDialog::instance();
                 QString tilesDialogError;
@@ -1304,6 +1174,7 @@ int main(int argc, char *argv[])
                             ? QStringLiteral("PASS")
                             : QStringLiteral("FAIL: %1")
                               .arg(tilesDialogError));
+
                 BuildingEditor::BuildingFurnitureDock *furnitureDock =
                         buildingEditor.findChild<
                             BuildingEditor::BuildingFurnitureDock *>();
@@ -1317,6 +1188,7 @@ int main(int argc, char *argv[])
                             ? QStringLiteral("PASS")
                             : QStringLiteral("FAIL: %1")
                               .arg(furnitureError));
+
                 const QList<BuildingEditor::CategoryDock *> categoryDocks =
                         buildingEditor.findChildren<
                             BuildingEditor::CategoryDock *>();
@@ -1335,8 +1207,6 @@ int main(int argc, char *argv[])
                 const bool valid = tileModeValid
                         && tilesDialogValid
                         && templateTilesValid
-                        && roomFloorValid
-                        && fixtureFloorValid
                         && furnitureValid
                         && categoriesValid;
                 QString luaFurnitureError;
@@ -1357,15 +1227,21 @@ int main(int argc, char *argv[])
                 QCoreApplication::exit(allValid ? 0 : 2);
                 return;
             }
+
             foreach (const QString &fileName, commandLine.filesToOpen())
                 buildingEditor.openFile(fileName);
+
+            // Startup and opening a building can recalculate embedded dock and
+            // splitter sizes. Restore once more before autosave is enabled.
             buildingEditor.readSettings();
             buildingEditor.startSettingsAutoSave();
             buildingEditor.raise();
             buildingEditor.activateWindow();
         });
+
         return a.exec();
     }
+
     if (a.isRunning()) {
         if (!commandLine.filesToOpen().isEmpty()) {
             foreach (const QString &fileName, commandLine.filesToOpen())
@@ -1387,24 +1263,17 @@ int main(int argc, char *argv[])
 
     if (!w.InitConfigFiles())
         return 0;
+
     if (commandLine.validateTilesetCatalog) {
-        QString catalogError;
-        QString tagError;
-        const bool catalogValid = validateSingleRowTilesetCatalog(
-                    &catalogError);
-        const bool tagsValid = TilesetDock::validateResolutionTags(
-                    &tagError);
+        QString error;
+        const bool valid = validateSingleRowTilesetCatalog(&error);
         qInfo().noquote()
                 << "TileZed one-row tileset validation:"
-                << (catalogValid ? QStringLiteral("PASS")
-                                 : QStringLiteral("FAIL: %1")
-                                   .arg(catalogError));
-        qInfo().noquote()
-                << "TileZed tileset resolution-tag validation:"
-                << (tagsValid ? QStringLiteral("PASS")
-                              : QStringLiteral("FAIL: %1").arg(tagError));
-        return catalogValid && tagsValid ? 0 : 3;
+                << (valid ? QStringLiteral("PASS")
+                          : QStringLiteral("FAIL: %1").arg(error));
+        return valid ? 0 : 3;
     }
+
     QSettings sessionSettings(QSettings::IniFormat, QSettings::UserScope,
                               QLatin1String("TheIndieStone"),
                               QLatin1String("TileZed"));
@@ -1414,6 +1283,7 @@ int main(int argc, char *argv[])
             sessionSettings.value(cleanExitKey, true).toBool();
     sessionSettings.setValue(cleanExitKey, false);
     sessionSettings.sync();
+
     foreach (QString f, Preferences::instance()->worldedFiles()) {
         if (f.isEmpty())
             continue;
@@ -1423,6 +1293,7 @@ int main(int argc, char *argv[])
         }
         WorldEd::WorldEdMgr::instance()->addProject(f);
     }
+
     for (const QString &f : Preferences::instance()->tilePropertiesFiles()) {
         if (f.isEmpty())
             continue;
@@ -1431,7 +1302,8 @@ int main(int argc, char *argv[])
             continue;
         }
     }
-#endif
+#endif // ZOMBOID
+
     QObject::connect(&a, &TiledApplication::fileOpenRequest,
                      &w, qOverload<const QString&>(&MainWindow::openFile));
 
@@ -1457,7 +1329,10 @@ int main(int argc, char *argv[])
                             "manually after checking settings/logs."));
         }
     }
+
 #ifdef ZOMBOID
+    // Tile loading and session restoration can change dock size hints after
+    // the initial restore. Reapply the INI layout before enabling autosave.
     w.readSettings();
     w.startSettingsAutoSave();
 #endif

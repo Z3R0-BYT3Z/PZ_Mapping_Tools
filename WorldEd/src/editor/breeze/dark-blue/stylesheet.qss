@@ -2219,6 +2219,10 @@ QTableView
     border-radius: 0em;
 }
 
+/*
+ * Item text inherits QAbstractItemView's color. Do not set color on ::item:
+ * model ForegroundRole brushes are used for status colors.
+ */
 
 QAbstractItemView::item:pressed
 {

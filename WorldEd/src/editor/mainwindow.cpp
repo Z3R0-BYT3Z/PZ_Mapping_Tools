@@ -58,7 +58,6 @@
 #include "scenetools.h"
 #include "searchdock.h"
 #include "streetnamesdock.h"
-#include "regionsdock.h"
 #include "simplefile.h"
 #include "templatesdialog.h"
 #include "thumbnailsettingsmgr.h"
@@ -79,14 +78,11 @@
 #include "writeworldobjectsdialog.h"
 #include "zoomable.h"
 #include "biomemapgeneratordialog.h"
-#include "osmterrainimportdialog.h"
-#include "osmprojectdata.h"
 #include "biomemapimageprocessor.h"
 #include "biomemapitem.h"
 #include "terrainimageeditordialog.h"
 #include "worldgenpreviewdialog.h"
 #include "tilesetcleanupdialog.h"
-#include "../portablesettings.h"
 
 #include "InGameMap/ingamemapfeaturegenerator.h"
 #include "InGameMap/ingamemapdock.h"
@@ -99,6 +95,7 @@
 
 #include <quazip.h>
 #include <quazipfile.h>
+
 #include "shortcut/actionmanager.h"
 #include "shortcut/shortcuteditorwidget.h"
 #include "shortcut/keyboardshortcutwindow.h"
@@ -115,7 +112,6 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QColorDialog>
-#include <QDateTime>
 #include <QComboBox>
 #include <QDebug>
 #include <QFileDialog>
@@ -126,7 +122,6 @@
 #include <QHBoxLayout>
 #include <QPainter>
 #include <QPainterPath>
-#include <QProgressDialog>
 #include <QPushButton>
 #include <QPixmap>
 #include <QRandomGenerator>
@@ -149,6 +144,7 @@ using namespace Tiled;
 using namespace Tiled::Internal;
 
 namespace {
+
 bool moveFile(const QString &source, const QString &destination,
               QString *error)
 {
@@ -163,6 +159,7 @@ bool moveFile(const QString &source, const QString &destination,
     }
     return false;
 }
+
 bool commitFilePair(const QStringList &temporaryFiles,
                     const QStringList &destinationFiles,
                     QString *error)
@@ -187,6 +184,7 @@ bool commitFilePair(const QStringList &temporaryFiles,
         backupFiles += backup;
         hadDestination += QFileInfo::exists(destination);
     }
+
     int backedUp = 0;
     for (; backedUp < destinationFiles.size(); ++backedUp) {
         if (!hadDestination.at(backedUp))
@@ -201,6 +199,7 @@ bool commitFilePair(const QStringList &temporaryFiles,
             return false;
         }
     }
+
     int committed = 0;
     for (; committed < temporaryFiles.size(); ++committed) {
         if (!moveFile(temporaryFiles.at(committed),
@@ -216,6 +215,7 @@ bool commitFilePair(const QStringList &temporaryFiles,
             return false;
         }
     }
+
     for (int index = 0; index < backupFiles.size(); ++index) {
         if (hadDestination.at(index)
                 && !QFile::remove(backupFiles.at(index))) {
@@ -225,6 +225,7 @@ bool commitFilePair(const QStringList &temporaryFiles,
     }
     return true;
 }
+
 bool writeInGameMapFilePair(
         World *world, const QString &xmlFileName,
         QString *error,
@@ -241,6 +242,7 @@ bool writeInGameMapFilePair(
         }
         return false;
     }
+
     QTemporaryFile xmlTemporary(destinationDirectory.filePath(
             QLatin1String(".pzworlded-worldmap-XXXXXX.xml")));
     QTemporaryFile binaryTemporary(destinationDirectory.filePath(
@@ -263,6 +265,7 @@ bool writeInGameMapFilePair(
     binaryTemporary.close();
     xmlTemporary.remove();
     binaryTemporary.remove();
+
     InGameMapWriter writer;
     writer.setFeatureScope(scope);
     if (!writer.writeWorld(world, xmlTemporaryName)) {
@@ -285,6 +288,7 @@ bool writeInGameMapFilePair(
         }
         return false;
     }
+
     const bool committed = commitFilePair(
                 { xmlTemporaryName, binaryTemporaryName },
                 { xmlFileName, xmlFileName + QLatin1String(".bin") },
@@ -295,6 +299,7 @@ bool writeInGameMapFilePair(
     }
     return committed;
 }
+
 QImage createForestFeatureImage(
         World *world, int *featureCount, QString *error)
 {
@@ -305,6 +310,7 @@ QImage createForestFeatureImage(
             *error = QObject::tr("No world is open.");
         return QImage();
     }
+
     const int cellSize = world->cellSize();
     const QSize imageSize(world->size() * cellSize);
     QImage image(imageSize, QImage::Format_ARGB32);
@@ -320,6 +326,7 @@ QImage createForestFeatureImage(
     QPainter painter(&image);
     const QBrush brush(Qt::white);
     int drawnFeatures = 0;
+
     for (int cellY = 0; cellY < world->height(); ++cellY) {
         for (int cellX = 0; cellX < world->width(); ++cellX) {
             WorldCell *cell = world->cellAt(cellX, cellY);
@@ -336,6 +343,7 @@ QImage createForestFeatureImage(
                         || feature->mGeometry.mCoordinates.isEmpty()) {
                     continue;
                 }
+
                 QPolygonF polygon;
                 QVector<QPolygonF> holes;
                 const InGameMapCoordinates &outer =
@@ -344,6 +352,7 @@ QImage createForestFeatureImage(
                     polygon += QPointF(point.x, point.y);
                 if (polygon.isEmpty())
                     continue;
+
                 const bool clockwise = outer.isClockwise();
                 for (int index = 1;
                      index < feature->mGeometry.mCoordinates.size();
@@ -364,6 +373,7 @@ QImage createForestFeatureImage(
                     }
                     holes += hole;
                 }
+
                 if (!polygon.isClosed())
                     polygon += polygon.first();
                 QPainterPath path;
@@ -387,6 +397,7 @@ QImage createForestFeatureImage(
         *featureCount = drawnFeatures;
     return image;
 }
+
 bool writeInGameMapForestBundle(
         World *world, const QString &outputDirectory,
         QStringList *writtenFiles, QString *error)
@@ -399,6 +410,7 @@ bool writeInGameMapForestBundle(
         }
         return false;
     }
+
     int forestFeatureCount = 0;
     QString imageError;
     const QImage forestImage = createForestFeatureImage(
@@ -417,6 +429,7 @@ bool writeInGameMapForestBundle(
         }
         return false;
     }
+
     QTemporaryDir staging(destination.filePath(
             QStringLiteral(".pzworlded-forest-XXXXXX")));
     if (!staging.isValid()) {
@@ -427,6 +440,7 @@ bool writeInGameMapForestBundle(
         }
         return false;
     }
+
     const QDir stagingDirectory(staging.path());
     const QString xmlTemporary = stagingDirectory.filePath(
                 QStringLiteral("worldmap-forest.xml"));
@@ -436,6 +450,7 @@ bool writeInGameMapForestBundle(
                 QStringLiteral("forest.png"));
     const QString pyramidTemporary = stagingDirectory.filePath(
                 QStringLiteral("forest.pyramid.zip"));
+
     if (!writeInGameMapFilePair(
                 world, xmlTemporary, error,
                 InGameMapFeatureScope::ForestFeatures)) {
@@ -448,6 +463,7 @@ bool writeInGameMapForestBundle(
         }
         return false;
     }
+
     const GenerateLotsSettings settings =
             world->getGenerateLotsSettings();
     const int cellSize = world->cellSize();
@@ -469,6 +485,7 @@ bool writeInGameMapForestBundle(
         }
         return false;
     }
+
     const QStringList temporaryFiles = {
         xmlTemporary,
         binaryTemporary,
@@ -483,6 +500,7 @@ bool writeInGameMapForestBundle(
     };
     if (!commitFilePair(temporaryFiles, destinationFiles, error))
         return false;
+
     if (writtenFiles)
         *writtenFiles = destinationFiles;
     qInfo() << "Worldmap-Forest export completed:"
@@ -490,13 +508,16 @@ bool writeInGameMapForestBundle(
             << worldBounds << "files" << destinationFiles;
     return true;
 }
+
 bool tmxContainsMapContent(const QString &filePath)
 {
     if (filePath.isEmpty() || !QFileInfo::exists(filePath))
         return false;
+
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
-        return true;
+        return true; // An unreadable file must never be deleted implicitly.
+
     QXmlStreamReader xml(&file);
     while (!xml.atEnd()) {
         xml.readNext();
@@ -510,8 +531,12 @@ bool tmxContainsMapContent(const QString &filePath)
             return true;
         }
     }
+
+    // A malformed TMX is protected so this operation can never hide data
+    // merely because the file could not be inspected.
     return xml.hasError();
 }
+
 int floorDivision(int value, int divisor)
 {
     int result = value / divisor;
@@ -519,15 +544,26 @@ int floorDivision(int value, int divisor)
         --result;
     return result;
 }
+
 QDockWidget *visibleDockInTabGroup(QMainWindow *window,
                                    QDockWidget *reference)
 {
     QList<QDockWidget*> group = window->tabifiedDockWidgets(reference);
     group.prepend(reference);
+
+    // QDockWidget::isVisible() is true for every dock in a tabified group,
+    // including the tabs that are currently covered. Those covered docks keep
+    // stale geometries, so reading their height loses the user's separator
+    // position. The selected tab is the only one with a non-empty visible
+    // region.
     for (QDockWidget *dock : group) {
         if (!dock->isFloating() && !dock->visibleRegion().isEmpty())
             return dock;
     }
+
+    // During the first pending layout pass visibleRegion() may not be ready.
+    // Prefer the largest usable geometry instead of blindly returning the
+    // reference dock, whose cached size may belong to an old tab selection.
     QDockWidget *largestDock = nullptr;
     int largestArea = -1;
     for (QDockWidget *dock : group) {
@@ -541,9 +577,12 @@ QDockWidget *visibleDockInTabGroup(QMainWindow *window,
     }
     if (largestDock)
         return largestDock;
+
     return reference;
 }
-}
+
+} // namespace
+
 bool MainWindow::validateInGameMapForestExport(
         QString *summary, QString *error)
 {
@@ -552,6 +591,7 @@ bool MainWindow::validateInGameMapForestExport(
     settings.worldOrigin = QPoint(5, 7);
     world.setGenerateLotsSettings(settings);
     WorldCell *cell = world.cellAt(0, 0);
+
     InGameMapFeature *forest = new InGameMapFeature(&cell->inGameMap());
     forest->mGeometry.mType = QStringLiteral("Polygon");
     InGameMapCoordinates forestCoordinates;
@@ -563,6 +603,7 @@ bool MainWindow::validateInGameMapForestExport(
     forest->mProperties.set(
                 QStringLiteral("natural"), QStringLiteral("forest"));
     cell->inGameMap().features() += forest;
+
     InGameMapFeature *building =
             new InGameMapFeature(&cell->inGameMap());
     building->mGeometry.mType = QStringLiteral("Polygon");
@@ -576,12 +617,14 @@ bool MainWindow::validateInGameMapForestExport(
                 QStringLiteral("building"),
                 QStringLiteral("Residential"));
     cell->inGameMap().features() += building;
+
     QTemporaryDir output;
     if (!output.isValid()) {
         if (error)
             *error = tr("Could not create the Forest export test folder.");
         return false;
     }
+
     QStringList forestFiles;
     QString exportError;
     if (!writeInGameMapForestBundle(
@@ -599,6 +642,7 @@ bool MainWindow::validateInGameMapForestExport(
             *error = exportError;
         return false;
     }
+
     const auto readFile = [](const QString &path, QByteArray *data) {
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly))
@@ -639,6 +683,7 @@ bool MainWindow::validateInGameMapForestExport(
         }
         return false;
     }
+
     const QString forestImagePath = directory.filePath(
                 QStringLiteral("forest.png"));
     const QImage forestImage(forestImagePath);
@@ -651,6 +696,7 @@ bool MainWindow::validateInGameMapForestExport(
         }
         return false;
     }
+
     const QString pyramidPath = directory.filePath(
                 QStringLiteral("forest.pyramid.zip"));
     QuaZip zip(pyramidPath);
@@ -690,6 +736,7 @@ bool MainWindow::validateInGameMapForestExport(
         }
         return false;
     }
+
     if (forestFiles.size() != 4) {
         if (error)
             *error = tr("The Forest export did not report all four output files.");
@@ -701,6 +748,7 @@ bool MainWindow::validateInGameMapForestExport(
     }
     return true;
 }
+
 MainWindow *MainWindow::mInstance = 0;
 
 MainWindow *MainWindow::instance()
@@ -718,7 +766,6 @@ MainWindow::MainWindow(QWidget *parent)
     , mPropertiesDock(new PropertiesDock(this))
     , mSearchDock(new SearchDock(this))
     , mStreetNamesDock(new StreetNamesDock(this))
-    , mRegionsDock(new RegionsDock(this))
     , mInGameMapDock(new InGameMapDock(this))
 #ifdef ROAD_UI
     , mRoadsDock(new RoadsDock(this))
@@ -827,7 +874,6 @@ MainWindow::MainWindow(QWidget *parent)
     ui->menuView->addAction(mPropertiesDock->toggleViewAction());
     ui->menuView->addAction(mSearchDock->toggleViewAction());
     ui->menuView->addAction(mStreetNamesDock->toggleViewAction());
-    ui->menuView->addAction(mRegionsDock->toggleViewAction());
     ui->menuView->addSeparator();
     QAction *renderDiagnosticsAction = new QAction(
                 tr("Render Diagnostics"), this);
@@ -846,9 +892,23 @@ MainWindow::MainWindow(QWidget *parent)
         for (BaseGraphicsView *view : views)
             view->setRenderDiagnosticsEnabled(enabled);
     });
+    mNightPreviewAction = new QAction(tr("Night Preview"), this);
+    mNightPreviewAction->setCheckable(true);
+    mNightPreviewAction->setToolTip(
+                tr("Dim the map and preview tiledef lights and powered rooms"));
+    // Preview state is intentionally session-only. A project must always
+    // open in its authored, unmodified daytime view.
+    mSettings.setValue(QLatin1String("NightPreview/Enabled"), false);
     mSettings.setValue(QLatin1String("EnvironmentPreview/Powered"), false);
     mSettings.setValue(QLatin1String("EnvironmentPreview/Snow"), false);
     mSettings.setValue(QLatin1String("EnvironmentPreview/Jumbo"), false);
+    mNightPreviewAction->setChecked(false);
+    // Retain the experimental implementation for later renderer work, but do
+    // not present it as an in-game-faithful preview.
+    mNightPreviewAction->setVisible(false);
+    mNightPreviewAction->setEnabled(false);
+    ui->menuView->addAction(mNightPreviewAction);
+
     const QString previewStyle = QStringLiteral(
         "QToolButton { padding: 2px 7px; border: 1px solid #68717d;"
         " border-radius: 4px; background: rgba(32,36,42,220);"
@@ -866,23 +926,100 @@ MainWindow::MainWindow(QWidget *parent)
         button->setMinimumHeight(24);
         return button;
     };
+    mNightPreviewButton = makePreviewButton(
+        mNightPreviewAction->isChecked() ? tr("NIGHT") : tr("DAY"),
+        tr("Toggle day/night and tiledef lighting preview"));
+    mNightPreviewButton->setVisible(false);
     mPoweredPreviewButton = makePreviewButton(
         tr("POWER"), tr("Preview matching *_on tile variants"));
     mSnowPreviewButton = makePreviewButton(
         tr("SNOW"), tr("Preview SnowTile mappings and roof coverage"));
     mJumboPreviewButton = makePreviewButton(
         tr("JUMBO"), tr("Preview deterministic Jumbo XL/XXL variants"));
+    QMenu *nightSettingsMenu = new QMenu(
+                tr("Night Preview Settings"), mNightPreviewButton);
+    const auto addNightSlider = [this, nightSettingsMenu](
+            const QString &title, const QString &key,
+            int minimum, int maximum, int defaultValue,
+            qreal divisor) {
+        QWidget *row = new QWidget(nightSettingsMenu);
+        QHBoxLayout *layout = new QHBoxLayout(row);
+        layout->setContentsMargins(8, 3, 8, 3);
+        QLabel *label = new QLabel(row);
+        QSlider *slider = new QSlider(Qt::Horizontal, row);
+        slider->setRange(minimum, maximum);
+        slider->setMinimumWidth(150);
+        const qreal stored = mSettings.value(key,
+                            qreal(defaultValue) / divisor).toReal();
+        slider->setValue(qRound(stored * divisor));
+        const auto updateLabel = [label, title, divisor](int value) {
+            label->setText(divisor == 1.0
+                    ? QStringLiteral("%1: %2").arg(title).arg(value)
+                    : QStringLiteral("%1: %2").arg(title).arg(
+                          qreal(value) / divisor, 0, 'f', 2));
+        };
+        updateLabel(slider->value());
+        connect(slider, &QSlider::valueChanged, this,
+                [this, key, divisor, updateLabel](int value) {
+            updateLabel(value);
+            mSettings.setValue(key, qreal(value) / divisor);
+            if (!mCurrentDocument)
+                return;
+            if (CellDocument *cellDoc =
+                    mCurrentDocument->asCellDocument())
+                cellDoc->scene()->rebuildNightPreview();
+            mCurrentDocument->view()->scene()->update();
+        });
+        layout->addWidget(label);
+        layout->addWidget(slider, 1);
+        QWidgetAction *action = new QWidgetAction(nightSettingsMenu);
+        action->setDefaultWidget(row);
+        nightSettingsMenu->addAction(action);
+    };
+    addNightSlider(tr("Darkness"),
+                   QStringLiteral("NightPreview/Darkness"),
+                   15, 92, 68, 100.0);
+    addNightSlider(tr("Light intensity"),
+                   QStringLiteral("NightPreview/LightIntensity"),
+                   5, 100, 65, 100.0);
+    addNightSlider(tr("Fallback radius"),
+                   QStringLiteral("NightPreview/FallbackRadius"),
+                   1, 20, 4, 1.0);
+    QAction *lightColorAction = nightSettingsMenu->addAction(
+                tr("Fallback light color..."));
+    connect(lightColorAction, &QAction::triggered, this, [this]() {
+        const QColor current(mSettings.value(
+            QStringLiteral("NightPreview/FallbackColor"),
+            QStringLiteral("#ffdca4")).toString());
+        const QColor selected = QColorDialog::getColor(
+                    current, this, tr("Fallback Light Color"));
+        if (!selected.isValid())
+            return;
+        mSettings.setValue(
+                    QStringLiteral("NightPreview/FallbackColor"),
+                    selected.name(QColor::HexRgb));
+        if (mCurrentDocument) {
+            if (CellDocument *cellDoc =
+                    mCurrentDocument->asCellDocument())
+                cellDoc->scene()->rebuildNightPreview();
+        }
+    });
+    mNightPreviewButton->setMenu(nightSettingsMenu);
+    mNightPreviewButton->setPopupMode(QToolButton::MenuButtonPopup);
+    mNightPreviewButton->setChecked(mNightPreviewAction->isChecked());
     mPoweredPreviewButton->setChecked(false);
     mSnowPreviewButton->setChecked(false);
     mJumboPreviewButton->setChecked(false);
     const int previewInsertIndex =
             qMax(0, ui->horizontalLayout->count() - 2);
     ui->horizontalLayout->insertWidget(
-        previewInsertIndex, mPoweredPreviewButton);
+        previewInsertIndex, mNightPreviewButton);
     ui->horizontalLayout->insertWidget(
-        previewInsertIndex + 1, mSnowPreviewButton);
+        previewInsertIndex + 1, mPoweredPreviewButton);
     ui->horizontalLayout->insertWidget(
-        previewInsertIndex + 2, mJumboPreviewButton);
+        previewInsertIndex + 2, mSnowPreviewButton);
+    ui->horizontalLayout->insertWidget(
+        previewInsertIndex + 3, mJumboPreviewButton);
 #ifdef ROAD_UI
     ui->menuView->addAction(mRoadsDock->toggleViewAction());
 #endif
@@ -892,7 +1029,6 @@ MainWindow::MainWindow(QWidget *parent)
     addDockWidget(Qt::LeftDockWidgetArea, mObjectsDock);
     addDockWidget(Qt::LeftDockWidgetArea, mSearchDock);
     addDockWidget(Qt::LeftDockWidgetArea, mStreetNamesDock);
-    addDockWidget(Qt::LeftDockWidgetArea, mRegionsDock);
 #ifdef ROAD_UI
     addDockWidget(Qt::LeftDockWidgetArea, mRoadsDock);
 #endif
@@ -903,9 +1039,14 @@ MainWindow::MainWindow(QWidget *parent)
     tabifyDockWidget(mLayersDock, mMapsDock);
     tabifyDockWidget(mObjectsDock, mLotsDock);
     tabifyDockWidget(mLotsDock, mInGameMapDock);
+    // Street Names belongs with Search in the lower-left dock group. Keep
+    // Objects as the initial upper-left workflow and Search as the initially
+    // visible lower-left tab.
     tabifyDockWidget(mSearchDock, mStreetNamesDock);
-    tabifyDockWidget(mStreetNamesDock, mRegionsDock);
     mSearchDock->raise();
+    // Keep the established Objects workflow as the default tab. Users can
+    // explicitly open Street Names without the new dock taking focus on a
+    // fresh layout.
     mObjectsDock->raise();
 
     addDockWidget(Qt::RightDockWidgetArea, mUndoDock);
@@ -971,6 +1112,7 @@ MainWindow::MainWindow(QWidget *parent)
                 != QMessageBox::Yes) {
             return;
         }
+
         PROGRESS progress(tr("Scanning Tiles PNG sheets..."), this);
         int added = 0;
         int updated = 0;
@@ -982,6 +1124,7 @@ MainWindow::MainWindow(QWidget *parent)
                         TileMetaInfoMgr::instance()->errorString());
             return;
         }
+
         progress.release();
         TilesetManager::instance()->tilesetDirectoryChanged();
         TilesetManager::instance()->waitForTilesets(
@@ -1070,6 +1213,30 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->actionZoomOut, &QAction::triggered, this, &MainWindow::zoomOut);
     connect(ui->actionZoomNormal, &QAction::triggered, this, &MainWindow::zoomNormal);
     connect(ui->actionShowInvisibleTiles, &QAction::toggled, prefs, &Preferences::setShowInvisibleTiles);
+    connect(mNightPreviewAction, &QAction::toggled, this,
+            [this](bool enabled) {
+        mSettings.setValue(QLatin1String("NightPreview/Enabled"), enabled);
+        if (mNightPreviewButton) {
+            const QSignalBlocker blocker(mNightPreviewButton);
+            mNightPreviewButton->setChecked(enabled);
+            mNightPreviewButton->setText(
+                        enabled ? tr("NIGHT") : tr("DAY"));
+        }
+        if (!mCurrentDocument)
+            return;
+        if (CellDocument *cellDoc =
+                mCurrentDocument->asCellDocument()) {
+            cellDoc->scene()->setNightPreviewEnabled(enabled);
+        } else if (WorldDocument *worldDoc =
+                   mCurrentDocument->asWorldDocument()) {
+            if (WorldScene *scene =
+                    static_cast<WorldScene*>(worldDoc->view()->scene()))
+                scene->setNightPreviewEnabled(enabled);
+        }
+        mCurrentDocument->view()->setNightPreviewEnabled(enabled);
+    });
+    connect(mNightPreviewButton, &QToolButton::toggled,
+            mNightPreviewAction, &QAction::setChecked);
     connect(mPoweredPreviewButton, &QToolButton::toggled,
             this, [this](bool enabled) {
         mSettings.setValue(
@@ -1107,8 +1274,6 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::generateBiomeMap);
     connect(ui->actionTerrainImageEditor, &QAction::triggered,
             this, &MainWindow::terrainImageEditor);
-    connect(ui->actionImportOpenStreetMapTerrain, &QAction::triggered,
-            this, &MainWindow::importOpenStreetMapTerrain);
     connect(ui->actionWorldGenPreview, &QAction::triggered,
             this, &MainWindow::worldGenPreview);
     connect(ui->actionWorldGenPrefabEditor, &QAction::triggered,
@@ -1118,8 +1283,8 @@ MainWindow::MainWindow(QWidget *parent)
     tilesetCleanupAction->setToolTip(
                 tr("Check Build 42 TMX maps, TBX buildings, dependencies, "
                    "and tile paths; preview safe fixes and create backups"));
-    ui->menuProjectUtilities->insertAction(
-                ui->actionLotPackViewer, tilesetCleanupAction);
+    ui->menuTools->insertAction(ui->actionTerrainImageEditor,
+                                tilesetCleanupAction);
     connect(tilesetCleanupAction, &QAction::triggered,
             this, &MainWindow::tilesetCleanup);
 //    connect(ui->actionReadOldWaterDotLua, &QAction::triggered, this, &MainWindow::readOldWaterDotLua);
@@ -1199,9 +1364,11 @@ MainWindow::MainWindow(QWidget *parent)
     heatTool->setPreviewB42x40(mSettings.value(
                                   QLatin1String("ZombieHeatmap/PreviewB42x40"),
                                   true).toBool());
+
     QToolBar *toolsBar = toolManager->toolBar();
     QList<QAction*> heatControlActions;
     heatControlActions += toolsBar->addSeparator();
+
     QLabel *radiusLabel = new QLabel(tr("Heat radius:"), toolsBar);
     heatControlActions += toolsBar->addWidget(radiusLabel);
     QSpinBox *radiusSpin = new QSpinBox(toolsBar);
@@ -1212,6 +1379,7 @@ MainWindow::MainWindow(QWidget *parent)
                               "One sample covers 10x10 squares in a legacy "
                               "project or 8x8 squares in a native-256 project."));
     heatControlActions += toolsBar->addWidget(radiusSpin);
+
     QLabel *intensityLabel = new QLabel(tr("Raw intensity:"), toolsBar);
     heatControlActions += toolsBar->addWidget(intensityLabel);
     QSpinBox *intensitySpin = new QSpinBox(toolsBar);
@@ -1225,6 +1393,7 @@ MainWindow::MainWindow(QWidget *parent)
     hexLabel->setMinimumWidth(hexLabel->fontMetrics()
                               .horizontalAdvance(QStringLiteral("0xFF")) + 8);
     heatControlActions += toolsBar->addWidget(hexLabel);
+
     QCheckBox *previewCheck = new QCheckBox(tr("B42 preview x40"), toolsBar);
     previewCheck->setChecked(heatTool->previewB42x40());
     previewCheck->setToolTip(tr("Amplifies only the WorldView preview by 40, "
@@ -1235,6 +1404,7 @@ MainWindow::MainWindow(QWidget *parent)
     expandButton->setToolTip(tr("Zero-pad the Zombie Heatmap so it covers "
                                 "every cell in the current project."));
     heatControlActions += toolsBar->addWidget(expandButton);
+
     connect(radiusSpin, QOverload<int>::of(&QSpinBox::valueChanged),
             this, [this, heatTool](int value) {
         heatTool->setBrushRadius(value);
@@ -1265,124 +1435,66 @@ MainWindow::MainWindow(QWidget *parent)
     });
     for (QAction *action : heatControlActions)
         action->setVisible(false);
+
     BiomeMapTool *biomeTool = BiomeMapTool::instance();
-    biomeTool->setBiomeBrushRadius(mSettings.value(
-                                      QLatin1String("BiomeMap/BiomeBrushRadius"),
-                                      mSettings.value(
-                                          QLatin1String("BiomeMap/BrushRadius"),
-                                          4)).toInt());
-    biomeTool->setZoneBrushRadius(mSettings.value(
-                                     QLatin1String("BiomeMap/ZoneBrushRadius"),
-                                     0).toInt());
+    biomeTool->setBrushRadius(mSettings.value(
+                                 QLatin1String("BiomeMap/BrushRadius"), 4).toInt());
     biomeTool->setBiomeValue(mSettings.value(
                                 QLatin1String("BiomeMap/BiomeValue"), 171).toInt());
-    biomeTool->setZoneValue(mSettings.value(
-                               QLatin1String("BiomeMap/ZoneValue"), 64).toInt());
-    biomeTool->setPaintChannel(
-                mSettings.value(QLatin1String("BiomeMap/PaintChannel"), 0)
-                .toInt() == 1
-                ? BiomeMapTool::ZoneChannel
-                : BiomeMapTool::BiomeChannel);
+
     QList<QAction*> biomeControlActions;
     biomeControlActions += toolsBar->addSeparator();
-    QLabel *biomeModeLabel = new QLabel(tr("Paint:"), toolsBar);
-    biomeControlActions += toolsBar->addWidget(biomeModeLabel);
-    QComboBox *biomeMode = new QComboBox(toolsBar);
-    biomeMode->addItem(tr("Biome (red channel)"),
-                       int(BiomeMapTool::BiomeChannel));
-    biomeMode->addItem(tr("Zone (green channel)"),
-                       int(BiomeMapTool::ZoneChannel));
-    biomeMode->setCurrentIndex(
-                biomeMode->findData(int(biomeTool->paintChannel())));
-    biomeMode->setToolTip(
-                tr("Biome mode paints only red. Zone mode paints only green "
-                   "and always fills complete 8 x 8 chunks."));
-    biomeControlActions += toolsBar->addWidget(biomeMode);
-    QLabel *biomeRadiusLabel = new QLabel(toolsBar);
+
+    QLabel *biomeRadiusLabel = new QLabel(tr("Biome radius:"), toolsBar);
     biomeControlActions += toolsBar->addWidget(biomeRadiusLabel);
     QSpinBox *biomeRadiusSpin = new QSpinBox(toolsBar);
+    biomeRadiusSpin->setRange(0, 128);
+    biomeRadiusSpin->setValue(biomeTool->brushRadius());
+    biomeRadiusSpin->setSuffix(tr(" px"));
+    biomeRadiusSpin->setToolTip(
+                tr("Brush radius in map-square Biomemap pixels."));
     biomeControlActions += toolsBar->addWidget(biomeRadiusSpin);
-    QLabel *biomePaletteLabel = new QLabel(toolsBar);
+
+    QLabel *biomePaletteLabel = new QLabel(tr("Biome:"), toolsBar);
     biomeControlActions += toolsBar->addWidget(biomePaletteLabel);
     QComboBox *biomePalette = new QComboBox(toolsBar);
+    for (const BiomeMapImageProcessor::PaletteEntry &entry :
+         BiomeMapImageProcessor::palette()) {
+        QPixmap swatch(16, 16);
+        swatch.fill(entry.color);
+        QString label = tr("%1 (ID %2)").arg(entry.name).arg(entry.value);
+        if (!entry.enabledByDefault)
+            label += tr(" [map override]");
+        const int itemIndex = biomePalette->count();
+        biomePalette->addItem(QIcon(swatch),
+                              label,
+                              entry.value);
+        biomePalette->setItemData(
+                    itemIndex,
+                    tr("Pixel ID: %1\nBiome: %2\nOre selector: %3\n"
+                       "Ore meaning: %4\nZone: %5%6")
+                    .arg(entry.value)
+                    .arg(entry.biome.isEmpty() ? tr("(none)") : entry.biome)
+                    .arg(entry.ore.isEmpty() ? tr("(none)") : entry.ore)
+                    .arg(BiomeMapImageProcessor::oreSelectorDescription(
+                             entry.ore))
+                    .arg(entry.zone)
+                    .arg(entry.enabledByDefault
+                         ? QString()
+                         : tr("\nAvailability: map-specific "
+                              "WorldGenOverride.lua required")),
+                    Qt::ToolTipRole);
+    }
+    const int paletteIndex = biomePalette->findData(biomeTool->biomeValue());
+    if (paletteIndex >= 0)
+        biomePalette->setCurrentIndex(paletteIndex);
+    biomePalette->setToolTip(
+                tr("Palette value written to the red Biome channel. "
+                   "Item details reproduce the Build 42.20 "
+                   "biome_map_config fields. map_forest selects surface "
+                   "boulders, limestone, or flint, not iron or copper."));
     biomeControlActions += toolsBar->addWidget(biomePalette);
-    auto updateBiomeControls = [this, biomeTool, biomeRadiusLabel,
-            biomeRadiusSpin, biomePaletteLabel, biomePalette]() {
-        const bool zoneMode =
-                biomeTool->paintChannel() == BiomeMapTool::ZoneChannel;
-        biomeRadiusLabel->setText(zoneMode
-                                  ? tr("Chunk radius:")
-                                  : tr("Biome radius:"));
-        biomePaletteLabel->setText(zoneMode ? tr("Zone:") : tr("Biome:"));
-        {
-            const QSignalBlocker blocker(biomeRadiusSpin);
-            biomeRadiusSpin->setRange(0, zoneMode ? 16 : 128);
-            biomeRadiusSpin->setSuffix(zoneMode ? tr(" chunks") : tr(" px"));
-            biomeRadiusSpin->setValue(biomeTool->brushRadius());
-            biomeRadiusSpin->setToolTip(
-                        zoneMode
-                        ? tr("Radius in 8 x 8 chunks. Zero paints exactly "
-                             "one complete chunk.")
-                        : tr("Brush radius in map-square Biomemap pixels."));
-        }
-        const QSignalBlocker blocker(biomePalette);
-        biomePalette->clear();
-        for (const BiomeMapImageProcessor::PaletteEntry &entry :
-             BiomeMapImageProcessor::palette()) {
-            QPixmap swatch(16, 16);
-            swatch.fill(entry.color);
-            QString label;
-            if (zoneMode) {
-                label = tr("%1 (ID %2)").arg(entry.zone).arg(entry.value);
-                if (entry.value == 254)
-                    label += tr(" [Dirt mapping]");
-            } else {
-                label = tr("%1 (ID %2)").arg(entry.name).arg(entry.value);
-            }
-            if (!entry.enabledByDefault)
-                label += tr(" [map override]");
-            const int itemIndex = biomePalette->count();
-            biomePalette->addItem(QIcon(swatch), label, entry.value);
-            biomePalette->setItemData(
-                        itemIndex,
-                        zoneMode
-                        ? tr("Green pixel ID: %1\nForaging zone: %2%3\n"
-                             "The red Biome channel is preserved.")
-                          .arg(entry.value)
-                          .arg(entry.zone)
-                          .arg(entry.enabledByDefault
-                               ? QString()
-                               : tr("\nAvailability: map-specific "
-                                    "WorldGenOverride.lua required"))
-                        : tr("Red pixel ID: %1\nBiome: %2\nOre selector: %3\n"
-                             "Ore meaning: %4%5\nThe green Zone channel is "
-                             "preserved.")
-                          .arg(entry.value)
-                          .arg(entry.biome.isEmpty()
-                               ? tr("(none)") : entry.biome)
-                          .arg(entry.ore.isEmpty()
-                               ? tr("(none)") : entry.ore)
-                          .arg(BiomeMapImageProcessor::oreSelectorDescription(
-                                   entry.ore))
-                          .arg(entry.enabledByDefault
-                               ? QString()
-                               : tr("\nAvailability: map-specific "
-                                    "WorldGenOverride.lua required")),
-                        Qt::ToolTipRole);
-        }
-        const int paletteIndex = biomePalette->findData(
-                    biomeTool->paintValue());
-        if (paletteIndex >= 0)
-            biomePalette->setCurrentIndex(paletteIndex);
-        biomePalette->setToolTip(
-                    zoneMode
-                    ? tr("Value written to the green Foraging Zone channel "
-                         "in complete 8 x 8 chunks.")
-                    : tr("Value written to the red Biome channel. "
-                         "map_forest selects surface boulders, limestone, "
-                         "or flint, not iron or copper."));
-    };
-    updateBiomeControls();
+
     QLabel *biomeOpacityLabel = new QLabel(tr("Opacity:"), toolsBar);
     biomeControlActions += toolsBar->addWidget(biomeOpacityLabel);
     QSpinBox *biomeOpacitySpin = new QSpinBox(toolsBar);
@@ -1390,35 +1502,17 @@ MainWindow::MainWindow(QWidget *parent)
     biomeOpacitySpin->setSuffix(tr("%"));
     biomeOpacitySpin->setValue(qRound(prefs->biomeMapOpacity() * 100.0));
     biomeControlActions += toolsBar->addWidget(biomeOpacitySpin);
+
     connect(biomeRadiusSpin, QOverload<int>::of(&QSpinBox::valueChanged),
             this, [this, biomeTool](int value) {
         biomeTool->setBrushRadius(value);
-        mSettings.setValue(
-                    biomeTool->paintChannel() == BiomeMapTool::ZoneChannel
-                    ? QLatin1String("BiomeMap/ZoneBrushRadius")
-                    : QLatin1String("BiomeMap/BiomeBrushRadius"), value);
-    });
-    connect(biomeMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this, biomeTool, biomeMode, updateBiomeControls](int index) {
-        biomeTool->setPaintChannel(
-                    BiomeMapTool::PaintChannel(
-                        biomeMode->itemData(index).toInt()));
-        mSettings.setValue(QLatin1String("BiomeMap/PaintChannel"),
-                           int(biomeTool->paintChannel()));
-        updateBiomeControls();
+        mSettings.setValue(QLatin1String("BiomeMap/BrushRadius"), value);
     });
     connect(biomePalette, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this, biomeTool, biomePalette](int index) {
-        if (index < 0)
-            return;
         const int value = biomePalette->itemData(index).toInt();
-        if (biomeTool->paintChannel() == BiomeMapTool::ZoneChannel) {
-            biomeTool->setZoneValue(value);
-            mSettings.setValue(QLatin1String("BiomeMap/ZoneValue"), value);
-        } else {
-            biomeTool->setBiomeValue(value);
-            mSettings.setValue(QLatin1String("BiomeMap/BiomeValue"), value);
-        }
+        biomeTool->setBiomeValue(value);
+        mSettings.setValue(QLatin1String("BiomeMap/BiomeValue"), value);
     });
     connect(biomeOpacitySpin, QOverload<int>::of(&QSpinBox::valueChanged),
             this, [prefs](int value) {
@@ -1434,6 +1528,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
     for (QAction *action : biomeControlActions)
         action->setVisible(false);
+
     // Do this after all ToolManager::register() calls.
     QString error;
     mActionManager->load(error);
@@ -1610,6 +1705,10 @@ void MainWindow::documentAdded(Document *doc)
         scene->setJumboPreviewEnabled(mSettings.value(
             QLatin1String("EnvironmentPreview/Jumbo"), false).toBool());
         cellDoc->setScene(scene);
+        view->setNightPreviewEnabled(mNightPreviewAction &&
+                                     mNightPreviewAction->isChecked());
+        connect(view, &BaseGraphicsView::nightPreviewToggled,
+                mNightPreviewAction, &QAction::setChecked);
 
         int pos = docman()->documents().indexOf(doc);
         ui->documentTabWidget->insertTab(pos, view,
@@ -1631,11 +1730,16 @@ void MainWindow::documentAdded(Document *doc)
         WorldScene *scene = new WorldScene(worldDoc, view);
         view->setScene(scene);
         doc->setView(view);
+        view->setNightPreviewEnabled(mNightPreviewAction &&
+                                     mNightPreviewAction->isChecked());
+        connect(view, &BaseGraphicsView::nightPreviewToggled,
+                mNightPreviewAction, &QAction::setChecked);
 
         QShortcut *selectAllShortcut = new QShortcut(QKeySequence::SelectAll, view);
         connect(selectAllShortcut, &QShortcut::activated, worldDoc, [worldDoc]() {
             worldDoc->setSelectedCells(worldDoc->world()->cells().toList());
         });
+
         int pos = docman()->documents().indexOf(doc);
         ui->documentTabWidget->insertTab(pos, view, tr("The World"));
         ui->documentTabWidget->setTabToolTip(pos, doc->fileName());
@@ -1726,7 +1830,6 @@ void MainWindow::currentDocumentChanged(Document *doc)
         mObjectsDock->setDocument(doc);
         mSearchDock->setDocument(doc);
         mStreetNamesDock->setDocument(doc);
-        mRegionsDock->setDocument(doc);
 #ifdef ROAD_UI
         mRoadsDock->setDocument(doc);
 #endif
@@ -1745,13 +1848,23 @@ void MainWindow::currentDocumentChanged(Document *doc)
         mObjectsDock->clearDocument();
         mSearchDock->clearDocument();
         mStreetNamesDock->clearDocument();
-        mRegionsDock->clearDocument();
 #ifdef ROAD_UI
         mRoadsDock->clearDocument();
 #endif
     }
 
     ToolManager::instance()->setScene(doc ? doc->view()->scene() : 0);
+    if (doc && mNightPreviewAction) {
+        const bool enabled = mNightPreviewAction->isChecked();
+        if (CellDocument *cellDoc = doc->asCellDocument()) {
+            cellDoc->scene()->setNightPreviewEnabled(enabled);
+        } else if (WorldDocument *worldDoc = doc->asWorldDocument()) {
+            if (WorldScene *scene =
+                    static_cast<WorldScene*>(worldDoc->view()->scene()))
+                scene->setNightPreviewEnabled(enabled);
+        }
+        doc->view()->setNightPreviewEnabled(enabled);
+    }
     mPropertiesDock->setDocument(doc);
 
     ui->documentTabWidget->setCurrentIndex(docman()->indexOf(doc));
@@ -1868,62 +1981,6 @@ bool MainWindow::openFile(const QString &fileName)
 
     DefaultsFile::oldWorld(world);
 
-    qint64 totalLots = 0;
-    qint64 totalObjects = 0;
-    qint64 totalInGameMapFeatures = 0;
-    qint64 osmProxyLots = 0;
-    qint64 osmGeneratedObjects = 0;
-    qint64 osmInGameMapFeatures = 0;
-    for (WorldCell *cell : world->cells()) {
-        totalLots += cell->lots().size();
-        totalObjects += cell->objects().size();
-        totalInGameMapFeatures += cell->inGameMap().features().size();
-        for (WorldCellLot *lot : cell->lots()) {
-            const QString mapName = QDir::fromNativeSeparators(
-                        lot->mapName());
-            if (mapName.contains(QStringLiteral("/osm-generated/"),
-                                 Qt::CaseInsensitive)
-                    || mapName.startsWith(QStringLiteral("osm-generated/"),
-                                          Qt::CaseInsensitive)) {
-                ++osmProxyLots;
-            }
-        }
-        for (WorldCellObject *object : cell->objects()) {
-            if (object->group()
-                    && object->group()->name()
-                    == QLatin1String("OSM Generated")) {
-                ++osmGeneratedObjects;
-            }
-        }
-        for (InGameMapFeature *feature : cell->inGameMap().features()) {
-            if (feature->properties().contains(
-                        QStringLiteral("source"), QStringLiteral("osm"))) {
-                ++osmInGameMapFeatures;
-            }
-        }
-    }
-    qInfo().noquote()
-            << QStringLiteral(
-                   "World project composition: cells %1, lots %2, objects %3, InGameMap features %4")
-               .arg(world->width() * world->height())
-               .arg(totalLots).arg(totalObjects)
-               .arg(totalInGameMapFeatures);
-    if (osmProxyLots > 0 || osmGeneratedObjects > 0
-            || osmInGameMapFeatures > 0) {
-        const bool highRisk = osmProxyLots > 2000
-                || osmGeneratedObjects > 5000
-                || osmInGameMapFeatures > 10000;
-        const QString profile = QStringLiteral(
-                    "OSM project load profile: proxy lots %1, generated zone objects %2, OSM InGameMap features %3, interactive risk %4")
-                .arg(osmProxyLots).arg(osmGeneratedObjects)
-                .arg(osmInGameMapFeatures)
-                .arg(highRisk ? QStringLiteral("high")
-                              : QStringLiteral("normal"));
-        if (highRisk)
-            qWarning().noquote() << profile;
-        else
-            qInfo().noquote() << profile;
-    }
     docman()->addDocument(new WorldDocument(world, fileName));
     if (docman()->failedToAdd())
         return false;
@@ -2015,56 +2072,13 @@ void MainWindow::openLastFiles()
 
 void MainWindow::startSettingsAutoSave()
 {
-    if (!findChild<QTimer*>(QStringLiteral("settingsAutoSaveTimer"))) {
-        QTimer *settingsSaveTimer = new QTimer(this);
-        settingsSaveTimer->setObjectName(QStringLiteral("settingsAutoSaveTimer"));
-        settingsSaveTimer->setInterval(5000);
-        connect(settingsSaveTimer, &QTimer::timeout,
-                this, &MainWindow::writeSettings);
-        settingsSaveTimer->start();
-    }
-    if (!findChild<QTimer*>(QStringLiteral("documentAutoSaveTimer"))) {
-        QTimer *documentAutoSaveTimer = new QTimer(this);
-        documentAutoSaveTimer->setObjectName(
-                    QStringLiteral("documentAutoSaveTimer"));
-        connect(documentAutoSaveTimer, &QTimer::timeout,
-                this, &MainWindow::autoSaveCurrentDocument);
-        connect(Preferences::instance(),
-                &Preferences::autoSaveIntervalChanged,
-                this, &MainWindow::updateDocumentAutoSaveTimer);
-    }
-    updateDocumentAutoSaveTimer();
+    QTimer *settingsSaveTimer = new QTimer(this);
+    settingsSaveTimer->setInterval(5000);
+    connect(settingsSaveTimer, &QTimer::timeout,
+            this, &MainWindow::writeSettings);
+    settingsSaveTimer->start();
 }
 
-void MainWindow::updateDocumentAutoSaveTimer()
-{
-    QTimer *timer = findChild<QTimer*>(
-                QStringLiteral("documentAutoSaveTimer"));
-    if (!timer)
-        return;
-    const int minutes = Preferences::instance()->autoSaveIntervalMinutes();
-    if (minutes <= 0) {
-        timer->stop();
-        return;
-    }
-    timer->start(minutes * 60 * 1000);
-}
-
-void MainWindow::autoSaveCurrentDocument()
-{
-    if (!mCurrentDocument || QApplication::activeModalWidget())
-        return;
-    WorldDocument *worldDocument = mCurrentDocument->asWorldDocument();
-    if (!worldDocument && mCurrentDocument->isCellDocument())
-        worldDocument = mCurrentDocument->asCellDocument()->worldDocument();
-    if (!worldDocument || !worldDocument->isModified() ||
-            worldDocument->fileName().isEmpty())
-        return;
-    if (saveFile(worldDocument->fileName()))
-        qInfo().noquote() << "WorldEd auto-saved"
-                          << QDir::toNativeSeparators(
-                                 worldDocument->fileName());
-}
 #include "BuildingEditor/buildingtiles.h"
 #include "BuildingEditor/buildingtemplates.h"
 #include "BuildingEditor/buildingtmx.h"
@@ -2104,6 +2118,10 @@ bool MainWindow::InitConfigFiles()
                               .arg(TileMetaInfoMgr::instance()->errorString()));
         return false;
     }
+    // PZ map generation, BMP rules, blend layers and adjacent cells can use
+    // any installed sheet regardless of the normal GIDs in the active TMX.
+    // Load the complete discovered catalogue before a project is exposed.
+    // Resolution always prefers a readable 2x sheet and falls back to 1x.
     progress.update(tr("Preparing the complete tileset catalogue"));
     const QList<Tileset *> completeTilesetCatalog =
             TileMetaInfoMgr::instance()->tilesets();
@@ -2368,16 +2386,18 @@ void MainWindow::generateBiomeMap()
     WorldDocument *worldDocument = currentWorldDocument();
     if (!worldDocument)
         return;
-    BiomeMapGeneratorDialog dialog(worldDocument->world(),
-                                   worldDocument->fileName(), this);
+
+    BiomeMapGeneratorDialog dialog(worldDocument->world(), this);
     if (dialog.exec() != QDialog::Accepted)
         return;
+
     if (!dialog.generatedBiomeMapFile().isEmpty()) {
         GenerateLotsSettings settings =
                 worldDocument->world()->getGenerateLotsSettings();
         settings.biomeMap = dialog.generatedBiomeMapFile();
         worldDocument->changeGenerateLotsSettings(settings);
     }
+
     if (worldDocument->view() && worldDocument->view()->scene()
             && worldDocument->view()->scene()->asWorldScene()) {
         WorldScene *scene = worldDocument->view()->scene()->asWorldScene();
@@ -2387,322 +2407,37 @@ void MainWindow::generateBiomeMap()
         }
     }
 }
+
 void MainWindow::terrainImageEditor()
 {
     WorldDocument *worldDocument = currentWorldDocument();
     if (!worldDocument)
         return;
+
     TerrainImageEditorDialog dialog(worldDocument, this);
     dialog.exec();
 }
-void MainWindow::importOpenStreetMapTerrain()
-{
-    WorldDocument *worldDocument = currentWorldDocument();
-    OsmTerrainImportDialog importDialog(worldDocument, this);
-    if (importDialog.exec() != QDialog::Accepted)
-        return;
-    bool safeCityMode = false;
-    const OsmTerrainImportResult &generatedResult =
-            importDialog.generatedResult();
-    const bool detailedCityDataRequested =
-            importDialog.generatesProxyBuildings()
-            || importDialog.generatesInGameMapFeatures();
-    const bool largeCityImport = generatedResult.buildingCount > 2000
-            || generatedResult.roadCount > 10000;
-    if (detailedCityDataRequested && largeCityImport) {
-        QMessageBox warning(
-                    QMessageBox::Warning,
-                    tr("Large OSM City Import"),
-                    tr("This area contains %1 building footprints and %2 "
-                       "road segments. Creating every proxy TBX and detailed "
-                       "InGameMap feature would add thousands of files and "
-                       "objects, make the PZW difficult to edit, and can "
-                       "exhaust WorldEd while thumbnails are loaded.\n\n"
-                       "Safe City Mode keeps streets.xml, major-road data, "
-                       "water, compact terrain zones, rectangular road Nav "
-                       "meshes, and TownZone coverage. It retains a stable "
-                       "distributed sample of up to 2,048 editable proxy "
-                       "buildings, including footprints that cross cell "
-                       "boundaries. Use a smaller import area when every "
-                       "building must remain editable.")
-                    .arg(generatedResult.buildingCount)
-                    .arg(generatedResult.roadCount),
-                    QMessageBox::NoButton,
-                    this);
-        QPushButton *safeButton = warning.addButton(
-                    tr("Use Safe City Mode"), QMessageBox::AcceptRole);
-        warning.addButton(QMessageBox::Cancel);
-        warning.setDefaultButton(safeButton);
-        warning.exec();
-        if (warning.clickedButton() != safeButton)
-            return;
-        safeCityMode = true;
-        qInfo().noquote()
-                << QStringLiteral(
-                       "OSM Safe City Mode accepted: buildings %1, roads %2")
-                   .arg(generatedResult.buildingCount)
-                   .arg(generatedResult.roadCount);
-    }
-    const auto projectDataEnabled = [&importDialog]() {
-        return importDialog.generatesStreets()
-                || importDialog.generatesInGameMapFeatures()
-                || importDialog.generatesProxyBuildings()
-                || importDialog.generatesRoadMarkings()
-                || importDialog.generatesNavZones()
-                || importDialog.generatesForagingZones();
-    };
-    const auto projectDataOptions = [&importDialog, safeCityMode](
-            const QString &projectPath, const QPoint &cellOrigin) {
-        OsmProjectDataOptions options;
-        options.projectFilePath = projectPath;
-        options.cellOrigin = cellOrigin;
-        options.generateStreets = importDialog.generatesStreets();
-        options.generateInGameMapFeatures =
-                importDialog.generatesInGameMapFeatures();
-        options.generateProxyBuildings =
-                importDialog.generatesProxyBuildings();
-        options.generateRoadMarkings =
-                importDialog.generatesRoadMarkings();
-        options.generateNavZones = importDialog.generatesNavZones();
-        options.generateForagingZones =
-                importDialog.generatesForagingZones();
-        options.safeCityMode = safeCityMode;
-        return options;
-    };
-    const auto streetsFileName = [](WorldDocument *document) {
-        const QString exportDirectory = document->world()
-                ->getGenerateLotsSettings().exportDir;
-        if (!exportDirectory.trimmed().isEmpty()) {
-            return QDir(exportDirectory).absoluteFilePath(
-                        QStringLiteral("streets.xml"));
-        }
-        return QDir(QFileInfo(document->fileName()).absolutePath())
-                .absoluteFilePath(QStringLiteral("streets.xml"));
-    };
-    const auto backupStreetFile = [this](const QString &fileName) {
-        if (!QFileInfo::exists(fileName))
-            return true;
-        QString backup = fileName + QStringLiteral(".osm-backup-")
-                + QDateTime::currentDateTimeUtc().toString(
-                    QStringLiteral("yyyyMMdd-HHmmss"));
-        int suffix = 2;
-        while (QFileInfo::exists(backup))
-            backup = fileName + QStringLiteral(".osm-backup-")
-                    + QString::number(suffix++);
-        if (QFile::copy(fileName, backup))
-            return true;
-        QMessageBox::warning(
-                    this, tr("Street Backup Failed"),
-                    tr("WorldEd did not replace streets.xml because its "
-                       "safety backup could not be created:\n%1")
-                    .arg(QDir::toNativeSeparators(backup)));
-        return false;
-    };
-    const auto installStreets = [this, &importDialog, &streetsFileName,
-                                 &backupStreetFile](
-            WorldDocument *document,
-            const QVector<StreetNameRecord> &streets) {
-        if (!importDialog.generatesStreets())
-            return true;
-        const QString fileName = streetsFileName(document);
-        if (!backupStreetFile(fileName))
-            return false;
-        mStreetNamesDock->applySnapshot(streets, streets.isEmpty() ? -1 : 0);
-        return mStreetNamesDock->saveForProject();
-    };
-    const auto showProjectDataSummary = [this](
-            const OsmProjectDataSummary &summary) {
-        QStringList zoneDetails;
-        QStringList zoneTypes = summary.zoneTypeCounts.keys();
-        zoneTypes.sort(Qt::CaseInsensitive);
-        for (const QString &zoneType : zoneTypes) {
-            zoneDetails += tr("%1: %2")
-                    .arg(zoneType)
-                    .arg(summary.zoneTypeCounts.value(zoneType));
-        }
-        QString message = tr(
-                    "Generated %1 street record(s), %2 InGameMap feature(s), "
-                    "%3 simple TBX building(s), %4 road-marking segment(s), "
-                    "%5 Nav zone(s), and %6 typed ground zone(s).\n\n"
-                    "The generated source manifest is:\n%7")
-                .arg(summary.streets)
-                .arg(summary.inGameMapFeatures)
-                .arg(summary.proxyBuildings)
-                .arg(summary.roadMarkings)
-                .arg(summary.navZones)
-                .arg(summary.foragingZones)
-                .arg(QDir::toNativeSeparators(summary.manifestPath));
-        if (!zoneDetails.isEmpty()) {
-            message += tr("\n\nZone types:\n%1")
-                    .arg(zoneDetails.join(QStringLiteral("\n")));
-        }
-        if (summary.safeCityMode) {
-            message.prepend(tr("Safe City Mode was used.\n\n"));
-            message += tr("\n\nSkipped %1 proxy building(s) and %2 "
-                          "detailed InGameMap feature(s).")
-                    .arg(summary.skippedProxyBuildings)
-                    .arg(summary.skippedInGameMapFeatures);
-        }
-        if (!summary.warnings.isEmpty())
-            message += QStringLiteral("\n\n") + summary.warnings.join(
-                        QStringLiteral("\n"));
-        QMessageBox::information(this, tr("OSM Project Data Generated"),
-                                 message);
-    };
-    const auto applyProjectData = [this](
-            WorldDocument *document,
-            const OsmTerrainImportResult &generated,
-            const OsmProjectDataOptions &options,
-            const QVector<StreetNameRecord> &currentStreets,
-            QVector<StreetNameRecord> *mergedStreets,
-            OsmProjectDataSummary *summary,
-            QString *error) {
-        QProgressDialog progressDialog(
-                    tr("Preparing OpenStreetMap project data..."),
-                    QString(), 0, 1, this);
-        progressDialog.setWindowTitle(tr("Creating OpenStreetMap Project"));
-        progressDialog.setWindowModality(Qt::ApplicationModal);
-        progressDialog.setCancelButton(nullptr);
-        progressDialog.setMinimumDuration(0);
-        progressDialog.setAutoClose(false);
-        progressDialog.setAutoReset(false);
-        progressDialog.resize(qMax(560, progressDialog.sizeHint().width()),
-                              progressDialog.sizeHint().height());
-        progressDialog.show();
-        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-        const OsmProjectProgress progress = [&progressDialog](
-                int value, int maximum, const QString &message) {
-            progressDialog.setRange(0, qMax(1, maximum));
-            progressDialog.setLabelText(message);
-            progressDialog.setValue(qBound(0, value, maximum));
-            qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-        };
-        const bool succeeded = OsmProjectData::apply(
-                    document, generated, options, currentStreets,
-                    mergedStreets, summary, error, progress);
-        progressDialog.setValue(progressDialog.maximum());
-        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-        return succeeded;
-    };
-    if (importDialog.createsNewProject()) {
-        const QString projectPath = importDialog.projectFilePath();
-        if (projectPath.isEmpty())
-            return;
-        if (QFileInfo::exists(projectPath)) {
-            const QMessageBox::StandardButton answer = QMessageBox::question(
-                        this, tr("Replace Existing Project"),
-                        tr("The project already exists:\n%1\n\nReplace its "
-                           "PZW file with the newly generated project?")
-                        .arg(QDir::toNativeSeparators(projectPath)),
-                        QMessageBox::Yes | QMessageBox::No,
-                        QMessageBox::No);
-            if (answer != QMessageBox::Yes)
-                return;
-        }
-        if (!QDir().mkpath(QFileInfo(projectPath).absolutePath())) {
-            QMessageBox::critical(
-                        this, tr("Create Project"),
-                        tr("The project directory could not be created:\n%1")
-                        .arg(QDir::toNativeSeparators(
-                                 QFileInfo(projectPath).absolutePath())));
-            return;
-        }
-        const QSize size = importDialog.projectSize();
-        World *newWorld = new World(size.width(), size.height(),
-                                    importDialog.gridFormat());
-        DefaultsFile::newWorld(newWorld);
-        WorldDocument *newDocument = new WorldDocument(
-                    newWorld, projectPath);
-        TerrainImageEditorDialog editor(newDocument, this);
-        if (!editor.importImages(
-                    importDialog.groundImage(),
-                    importDialog.vegetationImage(), QPoint(0, 0),
-                    importDialog.suggestedGroundPath(),
-                    importDialog.sourceMetadata())
-                || !editor.saveImportedImages()) {
-            delete newDocument;
-            return;
-        }
-        QVector<StreetNameRecord> importedStreets;
-        OsmProjectDataSummary projectSummary;
-        if (projectDataEnabled()) {
-            QString projectDataError;
-            if (!applyProjectData(
-                        newDocument, importDialog.generatedResult(),
-                        projectDataOptions(projectPath, QPoint(0, 0)), {},
-                        &importedStreets, &projectSummary,
-                        &projectDataError)) {
-                QMessageBox::critical(
-                            this, tr("OSM Project Data Generation Failed"),
-                            projectDataError);
-                delete newDocument;
-                return;
-            }
-        }
-        QString error;
-        if (!newDocument->save(projectPath, error)) {
-            QMessageBox::critical(
-                        this, tr("Create Project"),
-                        tr("The terrain PNG files were saved, but the PZW "
-                           "project could not be created.\n\n%1").arg(error));
-            delete newDocument;
-            return;
-        }
-        docman()->addDocument(newDocument);
-        if (projectDataEnabled()) {
-            installStreets(newDocument, importedStreets);
-            showProjectDataSummary(projectSummary);
-        }
-        editor.exec();
-        if (!newDocument->undoStack()->isClean())
-            saveFile(projectPath);
-        return;
-    }
-    TerrainImageEditorDialog editor(worldDocument, this);
-    if (!editor.importImages(
-                importDialog.groundImage(),
-                importDialog.vegetationImage(),
-                importDialog.cellOrigin(),
-                importDialog.suggestedGroundPath(),
-                importDialog.sourceMetadata())) {
-        return;
-    }
-    if (projectDataEnabled()) {
-        QVector<StreetNameRecord> mergedStreets;
-        OsmProjectDataSummary projectSummary;
-        QString projectDataError;
-        if (!applyProjectData(
-                    worldDocument, importDialog.generatedResult(),
-                    projectDataOptions(worldDocument->fileName(),
-                                       importDialog.cellOrigin()),
-                    mStreetNamesDock->streets(), &mergedStreets,
-                    &projectSummary, &projectDataError)) {
-            QMessageBox::critical(
-                        this, tr("OSM Project Data Generation Failed"),
-                        projectDataError);
-            return;
-        }
-        installStreets(worldDocument, mergedStreets);
-        showProjectDataSummary(projectSummary);
-    }
-    editor.exec();
-}
+
 void MainWindow::worldGenPreview()
 {
     WorldDocument *worldDocument = currentWorldDocument();
     if (!worldDocument || worldDocument->fileName().isEmpty())
         return;
+
     WorldGenPreviewDialog dialog(worldDocument, this);
     dialog.exec();
 }
+
 void MainWindow::worldGenPrefabEditor()
 {
     WorldDocument *worldDocument = currentWorldDocument();
     if (!worldDocument || worldDocument->fileName().isEmpty())
         return;
+
     WorldGenPrefabDialog dialog(worldDocument, this);
     dialog.exec();
 }
+
 void MainWindow::tilesetCleanup()
 {
     QString root;
@@ -2717,9 +2452,11 @@ void MainWindow::tilesetCleanup()
         root = mSettings.value(QLatin1String("TilesetCleanup/Root")).toString();
     if (root.isEmpty())
         root = QDir::currentPath();
+
     TilesetCleanupDialog dialog(root, projectFile, this);
     dialog.exec();
 }
+
 #include "waterflow.h"
 void MainWindow::readOldWaterDotLua()
 {
@@ -3302,18 +3039,7 @@ static void generateLots8x8(MainWindow *mainWin, Document *doc,
     }
     if (dialog.exec() != QDialog::Accepted)
         return;
-    LotFilesManager256 *lotManager = LotFilesManager256::instance();
-    if (!dialog.fillHolesDuringExport()) {
-        lotManager->setHoleFillMode(LotFilesManager256::ReportHoles);
-    } else if (dialog.fillHolesWithNearestTile()) {
-        lotManager->setHoleFillMode(
-                    LotFilesManager256::FillHolesWithNearestTile);
-    } else {
-        lotManager->setHoleFillMode(
-                    LotFilesManager256::FillHolesWithSpecificTile,
-                    dialog.holeFillTileName());
-    }
-    if (lotManager->generateWorld(worldDoc, mode) == false) {
+    if (LotFilesManager256::instance()->generateWorld(worldDoc, mode) == false) {
         QMessageBox::warning(mainWin, mainWin->tr("Lot Generation Failed!"), LotFilesManager256::instance()->errorString());
         return;
     }
@@ -3343,6 +3069,7 @@ void MainWindow::exportModAll8x8()
 {
     generateLots8x8(this, mCurrentDocument, LotFilesManager256::GenerateAll, true);
 }
+
 void MainWindow::generateLotSettingsChanged()
 {
     // Update the tab names when worldOrigin changes.
@@ -3475,7 +3202,6 @@ void MainWindow::initActionManager()
     const QString CATEGORY_MENU_WORLD = QStringLiteral("World");
     const QString CATEGORY_MENU_CELL = QStringLiteral("Cell");
     const QString CATEGORY_MENU_INGAME_MAP = QStringLiteral("InGameMap");
-    const QString CATEGORY_MENU_TOOLS = QStringLiteral("Tools");
 
     ActionManager *actionManager = mActionManager;
     actionManager->registerAction(ui->actionNew, CONTEXT_MENU, CATEGORY_MENU_FILE, QStringLiteral("Menu.File.New"));
@@ -3561,17 +3287,6 @@ void MainWindow::initActionManager()
     actionManager->registerAction(ui->actionCreateWorldImage, CONTEXT_MENU, CATEGORY_MENU_INGAME_MAP, QStringLiteral("Menu.InGameMap.CreateWorldImage"));
     actionManager->registerAction(ui->actionCreateImagePyramid, CONTEXT_MENU, CATEGORY_MENU_INGAME_MAP, QStringLiteral("Menu.InGameMap.CreateImagePyramid"));
 
-    actionManager->registerAction(ui->actionLotPackViewer, CONTEXT_MENU, CATEGORY_MENU_TOOLS, QStringLiteral("Menu.Tools.ProjectUtilities.LotPackViewer"));
-    actionManager->registerAction(ui->actionLootInspector, CONTEXT_MENU, CATEGORY_MENU_TOOLS, QStringLiteral("Menu.Tools.ProjectUtilities.LootInspector"));
-    actionManager->registerAction(ui->actionFromToAll, CONTEXT_MENU, CATEGORY_MENU_TOOLS, QStringLiteral("Menu.Tools.ProjectUtilities.TilesFromToAll"));
-    actionManager->registerAction(ui->actionFromToSelected, CONTEXT_MENU, CATEGORY_MENU_TOOLS, QStringLiteral("Menu.Tools.ProjectUtilities.TilesFromToSelected"));
-    actionManager->registerAction(ui->actionBuildingsToPNG, CONTEXT_MENU, CATEGORY_MENU_TOOLS, QStringLiteral("Menu.Tools.ProjectUtilities.BuildingsToPNG"));
-    actionManager->registerAction(ui->actionZonesToPNG, CONTEXT_MENU, CATEGORY_MENU_TOOLS, QStringLiteral("Menu.Tools.ProjectUtilities.ZonesToPNG"));
-    actionManager->registerAction(ui->actionImportOpenStreetMapTerrain, CONTEXT_MENU, CATEGORY_MENU_TOOLS, QStringLiteral("Menu.Tools.Terrain.ImportOpenStreetMap"));
-    actionManager->registerAction(ui->actionTerrainImageEditor, CONTEXT_MENU, CATEGORY_MENU_TOOLS, QStringLiteral("Menu.Tools.Terrain.ImageEditor"));
-    actionManager->registerAction(ui->actionGenerateBiomeMap, CONTEXT_MENU, CATEGORY_MENU_TOOLS, QStringLiteral("Menu.Tools.Terrain.GenerateBiomeMap"));
-    actionManager->registerAction(ui->actionWorldGenPreview, CONTEXT_MENU, CATEGORY_MENU_TOOLS, QStringLiteral("Menu.Tools.WorldGen.Preview"));
-    actionManager->registerAction(ui->actionWorldGenPrefabEditor, CONTEXT_MENU, CATEGORY_MENU_TOOLS, QStringLiteral("Menu.Tools.WorldGen.PrefabEditor"));
     connect(actionManager, &ActionManager::shortcutEdited, ToolManager::instance(), &ToolManager::shortcutEdited);
 }
 
@@ -4393,6 +4108,7 @@ QRect MainWindow::retainedWorldBounds(WorldDocument *worldDoc) const
         retained = hasContent ? retained.united(clipped) : clipped;
         hasContent = true;
     };
+
     for (WorldCell *cell : world->cells()) {
         const bool hasProjectContent =
                 !cell->lots().isEmpty() ||
@@ -4403,6 +4119,8 @@ QRect MainWindow::retainedWorldBounds(WorldDocument *worldDoc) const
         if (hasProjectContent || tmxContainsMapContent(cell->mapFilePath()))
             includeBounds(QRect(cell->pos(), QSize(1, 1)));
     }
+
+    // Roads use square coordinates, while BMP bounds already use cells.
     const int cellSize = world->cellSize();
     for (Road *road : world->roads()) {
         const QRect bounds = road->bounds();
@@ -4414,6 +4132,7 @@ QRect MainWindow::retainedWorldBounds(WorldDocument *worldDoc) const
     }
     for (WorldBMP *bmp : world->bmps())
         includeBounds(bmp->bounds());
+
     return hasContent ? retained : QRect();
 }
 
@@ -4421,6 +4140,11 @@ bool MainWindow::canRemoveEmptyBorderCells() const
 {
     WorldDocument *worldDoc = mCurrentDocument
             ? mCurrentDocument->asWorldDocument() : nullptr;
+    // This method is called while menus are being constructed.  Determining
+    // the exact retained bounds opens every TMX in the world and made a
+    // right-click take minutes on large projects.  Keep menu-state checks
+    // constant-time; removeEmptyBorderCells() performs the authoritative
+    // scan only after the user actually chooses the action.
     return worldDoc && worldDoc->world()
             && worldDoc->world()->width() * worldDoc->world()->height() > 1;
 }
@@ -4431,6 +4155,7 @@ void MainWindow::removeEmptyBorderCells()
             ? mCurrentDocument->asWorldDocument() : nullptr;
     if (!worldDoc)
         return;
+
     World *world = worldDoc->world();
     const QRect retained = retainedWorldBounds(worldDoc);
     if (retained.isEmpty()) {
@@ -4447,6 +4172,7 @@ void MainWindow::removeEmptyBorderCells()
                        "Empty cells inside the rectangular world cannot be removed individually."));
         return;
     }
+
     const int removed = world->width() * world->height() -
             retained.width() * retained.height();
     const QPoint oldOrigin = world->getGenerateLotsSettings().worldOrigin;
@@ -4469,6 +4195,7 @@ void MainWindow::removeEmptyBorderCells()
                               QMessageBox::No) != QMessageBox::Yes) {
         return;
     }
+
     qInfo() << "Removing empty PZW border cells:"
             << "old-size" << world->size()
             << "retained-bounds" << retained
@@ -4501,6 +4228,7 @@ void MainWindow::checkForHoles()
                            "one tile."));
             return;
         }
+
         QMessageBox dialog(
                     QMessageBox::Warning,
                     tr("Hole Detection"),
@@ -4520,6 +4248,7 @@ void MainWindow::checkForHoles()
         dialog.exec();
         if (dialog.clickedButton() != fixButton)
             return;
+
         QString backupPath;
         QString error;
         const int repaired =
@@ -4635,6 +4364,7 @@ void MainWindow::overwriteInGameMapFeaturesXML()
                        "overwrite. Use the export command first."));
         return;
     }
+
     const QFileInfo exportInfo(fileName);
     QString error;
     if (exportInfo.fileName().compare(
@@ -4785,10 +4515,12 @@ void MainWindow::writeSettings()
         if (isDocumentGroup && documentIndex >= i)
             mSettings.remove(group);
     }
+
     setValueIfChanged(QLatin1String("count"), i);
     mSettings.endGroup();
     mSettings.sync();
 }
+
 void MainWindow::generateInGameMapRoadFeatures()
 {
     if (auto *cellDoc = mCurrentDocument->asCellDocument()) {
@@ -4803,11 +4535,13 @@ void MainWindow::generateInGameMapRoadFeatures()
                                 InGameMapFeatureGenerator::FeatureRoad);
     }
 }
+
 void MainWindow::writeInGameMapForest()
 {
     WorldDocument *worldDoc = currentWorldDocument();
     if (!worldDoc)
         return;
+
     QString suggestedDirectory = mSettings.value(
                 QLatin1String("InGameMap/ForestOutputDirectory"))
             .toString();
@@ -4826,6 +4560,7 @@ void MainWindow::writeInGameMapForest()
                 suggestedDirectory);
     if (outputDirectory.isEmpty())
         return;
+
     PROGRESS progress(QStringLiteral("Writing Worldmap-Forest"), this);
     QStringList writtenFiles;
     QString error;
@@ -4841,6 +4576,7 @@ void MainWindow::writeInGameMapForest()
     mSettings.setValue(
                 QLatin1String("InGameMap/ForestOutputDirectory"),
                 outputDirectory);
+
     QStringList displayedFiles;
     for (const QString &path : std::as_const(writtenFiles))
         displayedFiles += QDir::toNativeSeparators(path);
@@ -4850,11 +4586,13 @@ void MainWindow::writeInGameMapForest()
                    "game-compatible Forest image pyramid:\n\n%1")
                 .arg(displayedFiles.join(QLatin1Char('\n'))));
 }
+
 void MainWindow::writeInGameMapWorldMap()
 {
     WorldDocument *worldDoc = currentWorldDocument();
     if (!worldDoc)
         return;
+
     QString suggestedDirectory;
     const QString previousExport = worldDoc->getInGameMapXMLFileName();
     if (!previousExport.isEmpty())
@@ -4863,6 +4601,7 @@ void MainWindow::writeInGameMapWorldMap()
         suggestedDirectory = QFileInfo(worldDoc->fileName()).absolutePath();
     else
         suggestedDirectory = QDir::currentPath();
+
     const QString outputDirectory = QFileDialog::getExistingDirectory(
                 this, tr("Choose Worldmap Output Folder"),
                 suggestedDirectory);
@@ -4870,6 +4609,7 @@ void MainWindow::writeInGameMapWorldMap()
         return;
     const QString xmlFileName = QDir(outputDirectory).filePath(
                 QStringLiteral("worldmap.xml"));
+
     PROGRESS progress(QStringLiteral("Writing Worldmap"), this);
     QString error;
     if (!writeInGameMapFilePair(
@@ -4894,12 +4634,9 @@ void MainWindow::writeInGameMapWorldMap()
                      QDir::toNativeSeparators(
                          xmlFileName + QLatin1String(".bin"))));
 }
+
 void MainWindow::writeWindowSettings()
 {
-    if (!PortableSettings::shouldPersistMainWindowGeometry(this)) {
-        qInfo() << "One-shot main-window session: persistent window layout skipped";
-        return;
-    }
     mSettings.beginGroup(QLatin1String("MainWindow"));
     const auto setValueIfChanged =
             [this](const QString &key, const QVariant &value) {
@@ -4938,6 +4675,7 @@ void MainWindow::readSettings()
                                              QByteArray()).toByteArray();
     if (!state.isEmpty())
         qInfo() << "Main-window dock layout restored:" << restoreState(state);
+
     const int leftWidth = mSettings.value(QLatin1String("leftDockWidth"), 0).toInt();
     const int rightWidth = mSettings.value(QLatin1String("rightDockWidth"), 0).toInt();
     const int leftTopHeight = mSettings.value(QLatin1String("leftTopDockHeight"), 0).toInt();
@@ -4956,31 +4694,20 @@ void MainWindow::readSettings()
             !mSettings.value(streetDockSearchTabKey, false).toBool();
     if (dockStreetNamesWithSearch)
         mSettings.setValue(streetDockSearchTabKey, true);
-    const QString regionsDockSearchTabKey =
-            QLatin1String("regionsDockSearchTabApplied");
-    const bool dockRegionsWithSearch =
-            !mSettings.value(regionsDockSearchTabKey, false).toBool();
-    if (dockRegionsWithSearch)
-        mSettings.setValue(regionsDockSearchTabKey, true);
     mSettings.endGroup();
-    PortableSettings::applyOneShotMainWindowGeometry(this);
+
+    // QMainWindow may accept restoreState() before all pending layout events
+    // have run, then recompute dock widths when the shown window is maximized.
+    // Reapply explicit dimensions on the next event-loop turn.
     QTimer::singleShot(0, this, [this, leftWidth, rightWidth,
                                 leftTopHeight, leftBottomHeight,
                                 rightTopHeight, rightBottomHeight,
                                 selectObjectsByDefault,
-                                dockStreetNamesWithSearch,
-                                dockRegionsWithSearch]() {
+                                dockStreetNamesWithSearch]() {
         if (dockStreetNamesWithSearch) {
             mStreetNamesDock->setFloating(false);
             addDockWidget(Qt::LeftDockWidgetArea, mStreetNamesDock);
             tabifyDockWidget(mSearchDock, mStreetNamesDock);
-        }
-        if (dockRegionsWithSearch) {
-            mRegionsDock->setFloating(false);
-            addDockWidget(Qt::LeftDockWidgetArea, mRegionsDock);
-            tabifyDockWidget(mStreetNamesDock, mRegionsDock);
-        }
-        if (dockStreetNamesWithSearch || dockRegionsWithSearch) {
             mSearchDock->raise();
         }
         if (selectObjectsByDefault)
@@ -5043,10 +4770,11 @@ bool MainWindow::saveFile(const QString &fileName)
         ++pos;
     }
 
+    // streets.xml is project output, like objects.lua. Keep it coupled to the
+    // normal Save action so Ctrl+S never leaves street-name edits behind.
     if (mStreetNamesDock && !mStreetNamesDock->saveForProject())
         return false;
-    if (mRegionsDock && !mRegionsDock->saveForProject())
-        return false;
+
 //    setRecentFile(fileName);
     return true;
 }
@@ -5159,7 +4887,6 @@ void MainWindow::updateActions()
     ui->actionCreateWorldImage->setEnabled(hasDoc);
     ui->actionGenerateBiomeMap->setEnabled(hasDoc);
     ui->actionTerrainImageEditor->setEnabled(currentWorldDoc != nullptr);
-    ui->actionImportOpenStreetMapTerrain->setEnabled(true);
     ui->actionWorldGenPreview->setEnabled(
                 currentWorldDoc != nullptr
                 && !currentWorldDoc->fileName().isEmpty());

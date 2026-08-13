@@ -658,6 +658,8 @@ public:
 
     void setDocument(BuildingDocument *doc) { scene()->setDocument(doc); }
     void clearDocument() { scene()->clearDocument(); }
+    void fitToBuilding();
+    void centerBuilding();
 
     void setHandScrolling(bool handScrolling);
 

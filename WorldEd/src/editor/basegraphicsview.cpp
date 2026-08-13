@@ -21,6 +21,7 @@
 #include "preferences.h"
 #include "zoomable.h"
 #include "../portablesettings.h"
+
 #include "zlevelrenderer.h"
 
 #include <QApplication>
@@ -40,8 +41,11 @@
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QToolButton>
+
 using namespace Tiled;
+
 namespace {
+
 QString diagnosticMemoryText(quint64 bytes)
 {
     if (!bytes)
@@ -52,6 +56,7 @@ QString diagnosticMemoryText(quint64 bytes)
     return QObject::tr("%1 MiB").arg(
                 bytes / (1024.0 * 1024.0), 0, 'f', 1);
 }
+
 }
 
 BaseGraphicsView::BaseGraphicsView(AllowOpenGL openGL, QWidget *parent)
@@ -62,6 +67,7 @@ BaseGraphicsView::BaseGraphicsView(AllowOpenGL openGL, QWidget *parent)
     , mScrollTimer(this)
     , mScene(0)
     , mMiniMap(0)
+    , mNightPreviewButton(new QToolButton(this))
     , mPoweredPreviewButton(new QToolButton(this))
     , mSnowPreviewButton(new QToolButton(this))
     , mJumboPreviewButton(new QToolButton(this))
@@ -95,6 +101,31 @@ BaseGraphicsView::BaseGraphicsView(AllowOpenGL openGL, QWidget *parent)
 
     mMiniMap = new MiniMap(this);
 
+    mNightPreviewButton->setObjectName(
+                QStringLiteral("NightPreviewCanvasButton"));
+    mNightPreviewButton->setCheckable(true);
+    mNightPreviewButton->setAutoRaise(false);
+    mNightPreviewButton->setFixedSize(36, 32);
+    mNightPreviewButton->setText(QString::fromUtf8("\xE2\x98\x80"));
+    mNightPreviewButton->setToolTip(tr("Switch to night preview"));
+    mNightPreviewButton->setStyleSheet(QStringLiteral(
+        "QToolButton { background: rgba(245,245,245,225); color: #202020;"
+        " border: 2px solid #d88c28; border-radius: 6px;"
+        " font-size: 19px; font-weight: bold; }"
+        "QToolButton:checked { background: rgba(20,28,52,235);"
+        " color: #ffe39a; border-color: #5d86d7; }"));
+    mNightPreviewButton->raise();
+    connect(mNightPreviewButton, &QToolButton::toggled,
+            this, [this](bool enabled) {
+        mNightPreviewButton->setText(enabled
+                ? QString::fromUtf8("\xE2\x98\xBE")
+                : QString::fromUtf8("\xE2\x98\x80"));
+        mNightPreviewButton->setToolTip(enabled
+                ? tr("Switch to day preview")
+                : tr("Switch to night preview"));
+        emit nightPreviewToggled(enabled);
+    });
+
     const QString previewStyle = QStringLiteral(
         "QToolButton { background: rgba(32,36,42,225); color: #d9dde5;"
         " border: 1px solid #68717d; border-radius: 5px;"
@@ -118,9 +149,11 @@ BaseGraphicsView::BaseGraphicsView(AllowOpenGL openGL, QWidget *parent)
                        tr("Preview SnowTile mappings"));
     setupPreviewButton(mJumboPreviewButton, QStringLiteral("J"),
                        tr("Preview deterministic random Jumbo XL/XXL trees"));
+
     mPoweredPreviewButton->setChecked(false);
     mSnowPreviewButton->setChecked(false);
     mJumboPreviewButton->setChecked(false);
+
     connect(mPoweredPreviewButton, &QToolButton::toggled,
             this, [this](bool enabled) {
         QSettings().setValue(
@@ -142,9 +175,15 @@ BaseGraphicsView::BaseGraphicsView(AllowOpenGL openGL, QWidget *parent)
         emit jumboPreviewToggled(enabled);
         viewport()->update();
     });
+
+    // Environment preview modes belong to the global view-state strip at the
+    // bottom of MainWindow. Keep the view-owned controls non-visual so older
+    // view/action synchronization remains source-compatible.
+    mNightPreviewButton->hide();
     mPoweredPreviewButton->hide();
     mSnowPreviewButton->hide();
     mJumboPreviewButton->hide();
+
     mRenderDiagnosticsLabel->setObjectName(
                 QStringLiteral("RenderDiagnosticsBubble"));
     mRenderDiagnosticsLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -157,6 +196,7 @@ BaseGraphicsView::BaseGraphicsView(AllowOpenGL openGL, QWidget *parent)
     mRenderDiagnosticsLabel->setVisible(mRenderDiagnosticsEnabled);
     mRenderDiagnosticsLabel->raise();
     mDiagnosticsMemoryTimer.start();
+
 #ifndef QT_NO_OPENGL
     if (openGL == PreferenceGL) {
         Preferences *prefs = Preferences::instance();
@@ -172,10 +212,12 @@ void BaseGraphicsView::drawProjectGridBadge(QPainter *painter, int cellSize) con
 {
     if (!painter || (cellSize != 256 && cellSize != 300))
         return;
+
     const bool legacy = cellSize == 300;
     const QString text = legacy
             ? tr("PROJECT GRID  -  300 x 300  -  LEGACY")
             : tr("PROJECT GRID  -  256 x 256  -  NATIVE");
+
     painter->save();
     painter->resetTransform();
     painter->setClipping(false);
@@ -183,10 +225,12 @@ void BaseGraphicsView::drawProjectGridBadge(QPainter *painter, int cellSize) con
     painter->setCompositionMode(QPainter::CompositionMode_SourceOver);
     painter->setRenderHint(QPainter::Antialiasing, true);
     painter->setRenderHint(QPainter::TextAntialiasing, true);
+
     QFont badgeFont = font();
     badgeFont.setBold(true);
     badgeFont.setPointSizeF(qMax(8.0, badgeFont.pointSizeF()));
     painter->setFont(badgeFont);
+
     const QFontMetrics metrics(badgeFont);
     const int horizontalPadding = 11;
     const int verticalPadding = 6;
@@ -196,9 +240,14 @@ void BaseGraphicsView::drawProjectGridBadge(QPainter *painter, int cellSize) con
                 QPoint(viewport()->width() - badgeSize.width() - 12, 12),
                 badgeSize);
     mProjectGridBadgeRect = badgeRect.adjusted(-2, -2, 2, 2);
+
     QColor background = palette().color(QPalette::Window);
     background.setAlpha(235);
     const QColor accent = legacy ? QColor(220, 140, 40) : QColor(35, 155, 125);
+
+    // Rasterize text before handing it to QOpenGLWidget. Direct glyph drawing
+    // after the native VBO pass could reuse a corrupted OpenGL text cache,
+    // producing striped or unreadable badge characters.
     QImage badgeImage(badgeSize, QImage::Format_ARGB32_Premultiplied);
     badgeImage.fill(Qt::transparent);
     QPainter badgePainter(&badgeImage);
@@ -216,6 +265,7 @@ void BaseGraphicsView::drawProjectGridBadge(QPainter *painter, int cellSize) con
     painter->drawImage(badgeRect.topLeft(), badgeImage);
     painter->restore();
 }
+
 void BaseGraphicsView::adjustScale(qreal scale)
 {
     setTransform(QTransform::fromScale(scale, scale));
@@ -240,6 +290,10 @@ void BaseGraphicsView::setUseOpenGL(bool useOpenGL)
         if (!qobject_cast<QOpenGLWidget*>(viewport())) {
             QSurfaceFormat format = QSurfaceFormat::defaultFormat();
             format.setVersion(3, 3);
+            // The legacy WorldEd VBO renderer uses the compatibility
+            // profile's default vertex-array object. Forcing a CoreProfile
+            // successfully compiled the shaders but rejected every vertex
+            // attribute/draw call, leaving only object overlays visible.
             format.setProfile(QSurfaceFormat::CompatibilityProfile);
             format.setDepthBufferSize(0);
             format.setStencilBufferSize(0);
@@ -306,21 +360,25 @@ void BaseGraphicsView::setRenderDiagnosticsEnabled(bool enabled)
     }
     viewport()->update();
 }
+
 void BaseGraphicsView::paintEvent(QPaintEvent *event)
 {
     if (!mRenderDiagnosticsEnabled) {
         QGraphicsView::paintEvent(event);
         return;
     }
+
     ZLevelRenderer::resetRenderedTileCount();
     QElapsedTimer renderTimer;
     renderTimer.start();
     QGraphicsView::paintEvent(event);
+
     const qreal renderMs = qMax<qreal>(
                 0.01, renderTimer.nsecsElapsed() / 1000000.0);
     mDiagnosticsFrameMs = mDiagnosticsFrameMs <= 0.0
             ? renderMs
             : mDiagnosticsFrameMs * 0.75 + renderMs * 0.25;
+
     if (mDiagnosticsPreviousFrame.isValid()) {
         const qint64 elapsed = mDiagnosticsPreviousFrame.restart();
         if (elapsed > 0) {
@@ -332,6 +390,7 @@ void BaseGraphicsView::paintEvent(QPaintEvent *event)
     } else {
         mDiagnosticsPreviousFrame.start();
     }
+
     mDiagnosticsRenderedTiles = ZLevelRenderer::renderedTileCount();
     if (!mDiagnosticsMemoryTimer.isValid() ||
             mDiagnosticsMemoryTimer.elapsed() >= 1000) {
@@ -341,12 +400,14 @@ void BaseGraphicsView::paintEvent(QPaintEvent *event)
     }
     updateRenderDiagnosticsLabel();
 }
+
 QString BaseGraphicsView::renderDiagnosticsWorkloadText(
         quint64 renderedTiles) const
 {
     return tr("Tiles drawn %1").arg(
                 QLocale().toString(qulonglong(renderedTiles)));
 }
+
 void BaseGraphicsView::updateRenderDiagnosticsLabel()
 {
     const bool openGL = qobject_cast<QOpenGLWidget *>(viewport());
@@ -368,6 +429,7 @@ void BaseGraphicsView::updateRenderDiagnosticsLabel()
     positionRenderDiagnosticsLabel();
     mRenderDiagnosticsLabel->raise();
 }
+
 void BaseGraphicsView::positionRenderDiagnosticsLabel()
 {
     if (!mRenderDiagnosticsLabel || !viewport())
@@ -379,21 +441,39 @@ void BaseGraphicsView::positionRenderDiagnosticsLabel()
                        - mRenderDiagnosticsLabel->height() - 10);
     mRenderDiagnosticsLabel->move(x, y);
 }
+
+void BaseGraphicsView::setNightPreviewEnabled(bool enabled)
+{
+    if (mNightPreviewButton->isChecked() == enabled)
+        return;
+    const QSignalBlocker blocker(mNightPreviewButton);
+    mNightPreviewButton->setChecked(enabled);
+    mNightPreviewButton->setText(enabled
+            ? QString::fromUtf8("\xE2\x98\xBE")
+            : QString::fromUtf8("\xE2\x98\x80"));
+    mNightPreviewButton->setToolTip(enabled
+            ? tr("Switch to day preview")
+            : tr("Switch to night preview"));
+}
+
 void BaseGraphicsView::setPoweredPreviewEnabled(bool enabled)
 {
     const QSignalBlocker blocker(mPoweredPreviewButton);
     mPoweredPreviewButton->setChecked(enabled);
 }
+
 void BaseGraphicsView::setSnowPreviewEnabled(bool enabled)
 {
     const QSignalBlocker blocker(mSnowPreviewButton);
     mSnowPreviewButton->setChecked(enabled);
 }
+
 void BaseGraphicsView::setJumboPreviewEnabled(bool enabled)
 {
     const QSignalBlocker blocker(mJumboPreviewButton);
     mJumboPreviewButton->setChecked(enabled);
 }
+
 void BaseGraphicsView::autoScrollTimeout()
 {
     if(mScrollDirection & ScrollLeft) {
@@ -574,12 +654,15 @@ void BaseGraphicsView::resizeEvent(QResizeEvent *event)
     QGraphicsView::resizeEvent(event);
     mMiniMap->viewRectChanged();
     const int right = qMax(6, viewport()->width() - 14);
-    int x = right - mJumboPreviewButton->width();
+    int x = right - mNightPreviewButton->width();
+    mNightPreviewButton->move(x, 52);
+    x -= mJumboPreviewButton->width() + 4;
     mJumboPreviewButton->move(x, 54);
     x -= mSnowPreviewButton->width() + 4;
     mSnowPreviewButton->move(x, 54);
     x -= mPoweredPreviewButton->width() + 4;
     mPoweredPreviewButton->move(x, 54);
+    mNightPreviewButton->raise();
     mPoweredPreviewButton->raise();
     mSnowPreviewButton->raise();
     mJumboPreviewButton->raise();
@@ -602,6 +685,7 @@ void BaseGraphicsView::scrollContentsBy(int dx, int dy)
         badgeDirtyRegion += mProjectGridBadgeRect;
         badgeDirtyRegion += mProjectGridBadgeRect.translated(dx, dy);
     }
+
     QGraphicsView::scrollContentsBy(dx, dy);
     if (!badgeDirtyRegion.isEmpty())
         viewport()->update(badgeDirtyRegion);

@@ -17,9 +17,6 @@
 
 #include "worldreader.h"
 
-#include "../portablesettings.h"
-
-#include "InGameMap/ingamemapcell.h"
 #include "world.h"
 #include "worldcell.h"
 #include "worldconstants.h"
@@ -379,67 +376,11 @@ private:
                     readLot(cell);
                 else if (xml.name() == QLatin1String("object"))
                     readObject(cell);
-                else if (xml.name() == QLatin1String("feature"))
-                    readInGameMapFeature(cell);
                 else
                     readUnknownElement();
             }
 
         }
-    }
-
-    void readInGameMapFeature(WorldCell *cell)
-    {
-        Q_ASSERT(xml.isStartElement()
-                 && xml.name() == QLatin1String("feature"));
-
-        InGameMapFeature *feature = new InGameMapFeature(
-                    &cell->inGameMap());
-        while (xml.readNextStartElement()) {
-            if (xml.name() == QLatin1String("geometry")) {
-                feature->mGeometry.mType = xml.attributes().value(
-                            QLatin1String("type")).toString();
-                while (xml.readNextStartElement()) {
-                    if (xml.name() != QLatin1String("coordinates")) {
-                        readUnknownElement();
-                        continue;
-                    }
-                    InGameMapCoordinates coordinates;
-                    while (xml.readNextStartElement()) {
-                        if (xml.name() != QLatin1String("point")) {
-                            readUnknownElement();
-                            continue;
-                        }
-                        const QXmlStreamAttributes attributes =
-                                xml.attributes();
-                        coordinates += InGameMapPoint(
-                                    attributes.value(
-                                        QLatin1String("x")).toDouble(),
-                                    attributes.value(
-                                        QLatin1String("y")).toDouble());
-                        xml.skipCurrentElement();
-                    }
-                    feature->mGeometry.mCoordinates += coordinates;
-                }
-            } else if (xml.name() == QLatin1String("properties")) {
-                while (xml.readNextStartElement()) {
-                    if (xml.name() != QLatin1String("property")) {
-                        readUnknownElement();
-                        continue;
-                    }
-                    const QXmlStreamAttributes attributes = xml.attributes();
-                    feature->mProperties += InGameMapProperty(
-                                attributes.value(
-                                    QLatin1String("name")).toString(),
-                                attributes.value(
-                                    QLatin1String("value")).toString());
-                    xml.skipCurrentElement();
-                }
-            } else {
-                readUnknownElement();
-            }
-        }
-        cell->inGameMap().mFeatures += feature;
     }
 
     void readLot(WorldCell *cell)
@@ -694,8 +635,6 @@ private:
         Q_ASSERT(xml.isStartElement() && xml.name() == QLatin1String("GenerateLots"));
 
         GenerateLotsSettings settings;
-        settings.numberOfThreads =
-                PortableSettings::recommendedWorkerCount(16, 1);
 
         while (xml.readNextStartElement()) {
             if (xml.name() == QLatin1String("exportdir")) {
@@ -721,7 +660,7 @@ private:
                 xml.skipCurrentElement();
             } else if (xml.name() == QLatin1String("numberOfThreads")) {
                 int count = xml.attributes().value(QLatin1String("count")).toInt();
-                count = std::min(count, 16);
+                count = std::min(count, 10);
                 settings.numberOfThreads = std::max(count, 1);
                 xml.skipCurrentElement();
             } else

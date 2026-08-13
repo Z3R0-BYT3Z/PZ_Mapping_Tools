@@ -20,7 +20,6 @@
 
 #include <QApplication>
 #include <QDir>
-#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
@@ -29,21 +28,6 @@
 
 namespace {
 
-int basementResourceFileCount(const QString &root,
-                              const QStringList &patterns)
-{
-    if (!QDir(root).exists())
-        return 0;
-    int count = 0;
-    QDirIterator iterator(root, patterns, QDir::Files,
-                          QDirIterator::Subdirectories);
-    while (iterator.hasNext()) {
-        iterator.next();
-        ++count;
-    }
-    return count;
-}
-
 struct BuiltInTheme
 {
     const char *displayName;
@@ -51,6 +35,7 @@ struct BuiltInTheme
     const char *resourcePath;
     const char *baseResourcePath;
 };
+
 const BuiltInTheme builtInThemes[] = {
     { "Breeze (Dark)", "Breeze-Dark.qss", ":breeze/dark/stylesheet.qss", 0 },
     { "Breeze (Dark Blue)", "Breeze-Dark-Blue.qss", ":breeze/dark-blue/stylesheet.qss", 0 },
@@ -59,6 +44,7 @@ const BuiltInTheme builtInThemes[] = {
     { "Mapping Discord (B42)", "Mapping-Discord-B42.qss",
       ":breeze/mapping-discord/stylesheet.qss", ":breeze/dark/stylesheet.qss" }
 };
+
 QString themesDirectoryPath()
 {
     return QDir(PortableSettings::installRootPath()).filePath(QStringLiteral("themes"));
@@ -96,10 +82,12 @@ QString readStyleSheet(const QString &path)
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
         return QString();
+
     QTextStream stream(&file);
     stream.setCodec("UTF-8");
     return stream.readAll();
 }
+
 QString mappingDiscordPalette(QString styleSheet)
 {
     struct ColorReplacement
@@ -107,6 +95,7 @@ QString mappingDiscordPalette(QString styleSheet)
         const char *source;
         const char *destination;
     };
+
     const ColorReplacement replacements[] = {
         { "#eff0f1", "#eef2ef" },
         { "#31363b", "#141c17" },
@@ -123,6 +112,7 @@ QString mappingDiscordPalette(QString styleSheet)
         { "#b0b0b0", "#9da9a1" },
         { "#ffffff", "#eef2ef" }
     };
+
     for (const ColorReplacement &replacement : replacements) {
         styleSheet.replace(QLatin1String(replacement.source),
                            QLatin1String(replacement.destination),
@@ -130,11 +120,13 @@ QString mappingDiscordPalette(QString styleSheet)
     }
     return styleSheet;
 }
+
 QString builtInThemeStyleSheet(const QString &displayName)
 {
     for (const BuiltInTheme &theme : builtInThemes) {
         if (displayName != QLatin1String(theme.displayName))
             continue;
+
         QString styleSheet;
         if (theme.baseResourcePath) {
             styleSheet = readStyleSheet(QLatin1String(theme.baseResourcePath));
@@ -147,19 +139,23 @@ QString builtInThemeStyleSheet(const QString &displayName)
     }
     return QString();
 }
+
 void ensureBuiltInThemesExtracted()
 {
     const QString directoryPath = themesDirectoryPath();
     if (!QDir().mkpath(directoryPath))
         return;
+
     const QDir directory(directoryPath);
     for (const BuiltInTheme &theme : builtInThemes) {
         const QString destinationPath = directory.filePath(QLatin1String(theme.fileName));
         if (QFileInfo::exists(destinationPath))
             continue;
+
         const QString styleSheet = builtInThemeStyleSheet(QLatin1String(theme.displayName));
         if (styleSheet.isEmpty())
             continue;
+
         QSaveFile destination(destinationPath);
         if (!destination.open(QIODevice::WriteOnly))
             continue;
@@ -167,14 +163,18 @@ void ensureBuiltInThemesExtracted()
         destination.commit();
     }
 }
-}
+
+} // anonymous namespace
+
 Preferences *Preferences::mInstance = 0;
+
 Preferences *Preferences::instance()
 {
     if (!mInstance)
         mInstance = new Preferences;
     return mInstance;
 }
+
 void Preferences::deleteInstance()
 {
     delete mInstance;
@@ -241,12 +241,9 @@ Preferences::Preferences()
                 mSettings->value(
                     QLatin1String("TerrainImageMemoryLimitMiB"), 512).toInt(),
                 65536);
+    // Reopening every cell is expensive and used to crash when a saved cell
+    // could no longer be reconstructed. It remains available as an opt-in.
     mRestoreLastSession = mSettings->value(QLatin1String("RestoreLastSession"), false).toBool();
-    mAutoSaveIntervalMinutes = mSettings->value(
-                QLatin1String("AutoSaveIntervalMinutes"), 0).toInt();
-    if (!QList<int>({0, 1, 5, 10, 20, 60}).contains(
-                mAutoSaveIntervalMinutes))
-        mAutoSaveIntervalMinutes = 0;
     mRoadSimplificationHighway = qBound(0.0, mSettings->value(
             QLatin1String("RoadSimplificationHighway"), 2.0).toDouble(), 32.0);
     mRoadPointSpacingHighway = qBound(1, mSettings->value(
@@ -279,6 +276,9 @@ Preferences::Preferences()
     mLoadAllWorldThumbnails = mSettings->value(QLatin1String("LoadAllWorldThumbnails"), false).toBool();
     mShowWorldThumbnails = mSettings->value(QLatin1String("ShowWorldThumbnails"), true).toBool();
     mShowAdjacentMaps = mSettings->value(QLatin1String("ShowAdjacentMaps"), true).toBool();
+    // Invisible helper tiles can cover an otherwise healthy map with their
+    // wireframe placeholder. Keep them available from View, but do not enable
+    // them automatically for a new portable installation.
     mShowInvisibleTiles = mSettings->value(QLatin1String("ShowInvisibleTiles"), false).toBool();
     mTheme = mSettings->value(QLatin1String("Theme"), QLatin1String("Default")).toString();
     if (PortableSettings::syncThemeAcrossApplications())
@@ -290,39 +290,11 @@ Preferences::Preferences()
     mSettings->endGroup();
 
     mTilesDirectory = PortableSettings::sharedTilesPath();
-    mProjectZomboidDirectory = PortableSettings::sharedGamePath();
     mSettings->remove(QLatin1String("TilesDirectory"));
 
+    // Use the same .tiles files as TileZed.
     QSettings settings(QLatin1String("TheIndieStone"), QLatin1String("TileZed"));
     mTilePropertiesFiles = settings.value(QLatin1String("TilePropertiesFiles")).toStringList();
-    if (!mProjectZomboidDirectory.isEmpty()) {
-        const QStringList builtInTileDefs = {
-            QStringLiteral("newtiledefinitions.tiles"),
-            QStringLiteral("tiledefinitions_erosion.tiles"),
-            QStringLiteral("tiledefinitions_overlays.tiles"),
-            QStringLiteral("tiledefinitions_b42chunkcaching.tiles"),
-            QStringLiteral("tiledefinitions_noiseworks.patch.tiles"),
-            QStringLiteral("jumbo_trees_big.tiles"),
-            QStringLiteral("jumbo_trees.tiles")
-        };
-        for (const QString &fileName : builtInTileDefs) {
-            bool alreadyConfigured = false;
-            for (const QString &configured : qAsConst(mTilePropertiesFiles)) {
-                if (QFileInfo(configured).fileName().compare(
-                            fileName, Qt::CaseInsensitive) == 0) {
-                    alreadyConfigured = true;
-                    break;
-                }
-            }
-            if (alreadyConfigured)
-                continue;
-            const QFileInfo candidate(QDir(mProjectZomboidDirectory)
-                                      .filePath(QStringLiteral("media/") +
-                                                fileName));
-            if (candidate.exists() && candidate.isFile())
-                mTilePropertiesFiles.append(candidate.canonicalFilePath());
-        }
-    }
 
     mOpenFileDirectory = mSettings->value(QLatin1String("OpenFileDirectory")).toString();
     mWorldMapXMLFile = mSettings->value(QLatin1String("WorldMapXMLFile")).toString();
@@ -332,34 +304,6 @@ Preferences::Preferences()
                       << QDir::toNativeSeparators(mConfigDirectory);
     qInfo().noquote() << "Effective Tiles directory"
                       << QDir::toNativeSeparators(mTilesDirectory);
-    qInfo().noquote() << "Effective Project Zomboid directory"
-                      << (mProjectZomboidDirectory.isEmpty()
-                          ? QLatin1String("<not configured>")
-                          : QDir::toNativeSeparators(
-                                mProjectZomboidDirectory));
-    qInfo().noquote() << "Portable basement source directory"
-                      << QDir::toNativeSeparators(
-                             PortableSettings::basementSourcePath())
-                      << (QDir(PortableSettings::basementSourcePath()).exists()
-                          ? QLatin1String("[available]")
-                          : QLatin1String("[missing]"))
-                      << "TBX/TMX files:"
-                      << basementResourceFileCount(
-                             PortableSettings::basementSourcePath(),
-                             QStringList() << QStringLiteral("*.tbx")
-                                           << QStringLiteral("*.tmx"));
-    qInfo().noquote() << "Portable basement PZBY directory"
-                      << QDir::toNativeSeparators(
-                             PortableSettings::basementBinMapPath())
-                      << (QDir(PortableSettings::basementBinMapPath()).exists()
-                          ? QLatin1String("[available]")
-                          : QLatin1String("[missing]"))
-                      << "PZBY/TBX/TMX files:"
-                      << basementResourceFileCount(
-                             PortableSettings::basementBinMapPath(),
-                             QStringList() << QStringLiteral("*.pzby")
-                                           << QStringLiteral("*.tbx")
-                                           << QStringLiteral("*.tmx"));
 
     // Use the same directory as TileZed.
     mThumbnailsDirectory = settings.value(QLatin1String("Thumbnails/Directory")).toString();
@@ -517,83 +461,86 @@ void Preferences::setGridWidth(int width)
     width = qBound(1, width, 10);
     if (mGridWidth == width)
         return;
+
     mGridWidth = width;
     mSettings->setValue(QLatin1String("Interface/GridWidth"), mGridWidth);
     emit gridWidthChanged(mGridWidth);
 }
+
 void Preferences::setThumbnailWidth(int width)
 {
     width = qBound(32, width, 8192);
     if (mThumbnailWidth == width)
         return;
+
     mThumbnailWidth = width;
     mSettings->setValue(QLatin1String("Interface/ThumbnailWidth"), mThumbnailWidth);
     emit thumbnailWidthChanged(mThumbnailWidth);
 }
+
 void Preferences::setTerrainImageMemoryLimitMiB(int limitMiB)
 {
     limitMiB = qBound(128, limitMiB, 65536);
     if (mTerrainImageMemoryLimitMiB == limitMiB)
         return;
+
     mTerrainImageMemoryLimitMiB = limitMiB;
     mSettings->setValue(
                 QLatin1String("Interface/TerrainImageMemoryLimitMiB"),
                 mTerrainImageMemoryLimitMiB);
 }
+
 void Preferences::setRestoreLastSession(bool restore)
 {
     if (mRestoreLastSession == restore)
         return;
+
     mRestoreLastSession = restore;
     mSettings->setValue(QLatin1String("Interface/RestoreLastSession"), mRestoreLastSession);
 }
-void Preferences::setAutoSaveIntervalMinutes(int minutes)
-{
-    const int normalized = QList<int>({0, 1, 5, 10, 20, 60}).contains(
-                minutes) ? minutes : 0;
-    if (mAutoSaveIntervalMinutes == normalized)
-        return;
-    mAutoSaveIntervalMinutes = normalized;
-    mSettings->setValue(QLatin1String("Interface/AutoSaveIntervalMinutes"),
-                        mAutoSaveIntervalMinutes);
-    emit autoSaveIntervalChanged(mAutoSaveIntervalMinutes);
-}
+
 void Preferences::setRoadSimplificationHighway(qreal tolerance)
 {
     mRoadSimplificationHighway = qBound(0.0, double(tolerance), 32.0);
     mSettings->setValue(QLatin1String("Interface/RoadSimplificationHighway"),
                         mRoadSimplificationHighway);
 }
+
 void Preferences::setRoadPointSpacingHighway(int spacing)
 {
     mRoadPointSpacingHighway = qBound(1, spacing, 300);
     mSettings->setValue(QLatin1String("Interface/RoadPointSpacingHighway"),
                         mRoadPointSpacingHighway);
 }
+
 void Preferences::setRoadSimplificationTrail(qreal tolerance)
 {
     mRoadSimplificationTrail = qBound(0.0, double(tolerance), 32.0);
     mSettings->setValue(QLatin1String("Interface/RoadSimplificationTrail"),
                         mRoadSimplificationTrail);
 }
+
 void Preferences::setRoadPointSpacingTrail(int spacing)
 {
     mRoadPointSpacingTrail = qBound(1, spacing, 300);
     mSettings->setValue(QLatin1String("Interface/RoadPointSpacingTrail"),
                         mRoadPointSpacingTrail);
 }
+
 void Preferences::setRoadSimplificationRailway(qreal tolerance)
 {
     mRoadSimplificationRailway = qBound(0.0, double(tolerance), 32.0);
     mSettings->setValue(QLatin1String("Interface/RoadSimplificationRailway"),
                         mRoadSimplificationRailway);
 }
+
 void Preferences::setRoadPointSpacingRailway(int spacing)
 {
     mRoadPointSpacingRailway = qBound(1, spacing, 300);
     mSettings->setValue(QLatin1String("Interface/RoadPointSpacingRailway"),
                         mRoadPointSpacingRailway);
 }
+
 void Preferences::setUseOpenGL(bool useOpenGL)
 {
     if (mUseOpenGL == useOpenGL)
@@ -726,19 +673,23 @@ void Preferences::setShowBiomeMap(bool show)
 {
     if (mShowBiomeMap == show)
         return;
+
     mShowBiomeMap = show;
     mSettings->setValue(QLatin1String("Interface/ShowBiomeMap"), mShowBiomeMap);
     emit showBiomeMapChanged(mShowBiomeMap);
 }
+
 void Preferences::setBiomeMapOpacity(qreal opacity)
 {
     opacity = qBound(0.0, double(opacity), 1.0);
     if (mBiomeMapOpacity == opacity)
         return;
+
     mBiomeMapOpacity = opacity;
     mSettings->setValue(QLatin1String("Interface/BiomeMapOpacity"), mBiomeMapOpacity);
     emit biomeMapOpacityChanged(mBiomeMapOpacity);
 }
+
 void Preferences::setShowZonesInWorldView(bool show)
 {
     if (mShowZonesInWorldView == show)
@@ -841,34 +792,6 @@ void Preferences::setTilesDirectory(const QString &path)
     emit tilesDirectoryChanged();
 }
 
-QString Preferences::projectZomboidDirectory() const
-{
-    return mProjectZomboidDirectory;
-}
-void Preferences::setProjectZomboidDirectory(const QString &path)
-{
-    const QString normalized = PortableSettings::normalizedGamePath(path);
-    if (!path.trimmed().isEmpty() && normalized.isEmpty()) {
-        qWarning().noquote()
-                << "Ignoring invalid Project Zomboid installation path"
-                << QDir::toNativeSeparators(path);
-        return;
-    }
-    if (mProjectZomboidDirectory == normalized)
-        return;
-    mProjectZomboidDirectory = normalized;
-    PortableSettings::setSharedGamePath(normalized);
-    emit projectZomboidDirectoryChanged();
-}
-QString Preferences::gameMediaPath(const QString &relativePath) const
-{
-    if (mProjectZomboidDirectory.isEmpty())
-        return QString();
-    const QString media = QDir(mProjectZomboidDirectory).filePath(
-                QLatin1String("media"));
-    return relativePath.isEmpty()
-            ? media : QDir(media).filePath(relativePath);
-}
 QString Preferences::tiles2xDirectory() const
 {
     if (mTilesDirectory.isEmpty())
@@ -904,9 +827,11 @@ void Preferences::setTheme(const QString &theme)
     if (PortableSettings::syncThemeAcrossApplications())
         PortableSettings::setThemeForAllApplications(theme);
 }
+
 QStringList Preferences::availableThemes() const
 {
     ensureBuiltInThemesExtracted();
+
     QStringList themes;
     themes << QStringLiteral("Default")
            << QStringLiteral("Breeze (Dark)")
@@ -914,6 +839,7 @@ QStringList Preferences::availableThemes() const
            << QStringLiteral("QDarkStyle (Dark)")
            << QStringLiteral("QDarkStyle (Light)")
            << QStringLiteral("Mapping Discord (B42)");
+
     QStringList externalThemes;
     const QString applicationDirectory = PortableSettings::installRootPath();
     const QStringList themeDirectories = {
@@ -943,6 +869,7 @@ QStringList Preferences::availableThemes() const
 void Preferences::applyTheme() const
 {
     ensureBuiltInThemesExtracted();
+
     mSettings->setValue(QLatin1String("Interface/Theme"), mTheme);
     if (mTheme == QStringLiteral("Default")) {
         qApp->setStyleSheet(QString());
@@ -984,6 +911,7 @@ void Preferences::applyTheme() const
         qApp->setStyleSheet(QString());
         return;
     }
+
     if (!resource.isEmpty()) {
         styleSheet = readStyleSheet(resource);
         styleSheetLoaded = !styleSheet.isEmpty();

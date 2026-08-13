@@ -44,6 +44,7 @@ using namespace Tiled::Internal;
 
 #ifdef ZOMBOID
 namespace {
+
 struct BuiltInTheme
 {
     const char *displayName;
@@ -51,6 +52,7 @@ struct BuiltInTheme
     const char *resourcePath;
     const char *baseResourcePath;
 };
+
 const BuiltInTheme builtInThemes[] = {
     { "Breeze (Dark)", "Breeze-Dark.qss", ":breeze/dark/stylesheet.qss", 0 },
     { "Breeze (Dark Blue)", "Breeze-Dark-Blue.qss", ":breeze/dark-blue/stylesheet.qss", 0 },
@@ -59,10 +61,12 @@ const BuiltInTheme builtInThemes[] = {
     { "Mapping Discord (B42)", "Mapping-Discord-B42.qss",
       ":breeze/mapping-discord/stylesheet.qss", ":breeze/dark/stylesheet.qss" }
 };
+
 QString themesDirectoryPath()
 {
     return QDir(PortableSettings::installRootPath()).filePath(QStringLiteral("themes"));
 }
+
 QString builtInThemePath(const QString &displayName)
 {
     for (const BuiltInTheme &theme : builtInThemes) {
@@ -71,6 +75,7 @@ QString builtInThemePath(const QString &displayName)
     }
     return QString();
 }
+
 QString builtInThemeResource(const QString &displayName)
 {
     for (const BuiltInTheme &theme : builtInThemes) {
@@ -79,6 +84,7 @@ QString builtInThemeResource(const QString &displayName)
     }
     return QString();
 }
+
 bool isBuiltInThemeFile(const QString &fileName)
 {
     for (const BuiltInTheme &theme : builtInThemes) {
@@ -87,15 +93,18 @@ bool isBuiltInThemeFile(const QString &fileName)
     }
     return false;
 }
+
 QString readStyleSheet(const QString &path)
 {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
         return QString();
+
     QTextStream stream(&file);
     stream.setCodec("UTF-8");
     return stream.readAll();
 }
+
 QString mappingDiscordPalette(QString styleSheet)
 {
     struct ColorReplacement
@@ -103,6 +112,7 @@ QString mappingDiscordPalette(QString styleSheet)
         const char *source;
         const char *destination;
     };
+
     const ColorReplacement replacements[] = {
         { "#eff0f1", "#eef2ef" },
         { "#31363b", "#141c17" },
@@ -119,6 +129,7 @@ QString mappingDiscordPalette(QString styleSheet)
         { "#b0b0b0", "#9da9a1" },
         { "#ffffff", "#eef2ef" }
     };
+
     for (const ColorReplacement &replacement : replacements) {
         styleSheet.replace(QLatin1String(replacement.source),
                            QLatin1String(replacement.destination),
@@ -126,11 +137,13 @@ QString mappingDiscordPalette(QString styleSheet)
     }
     return styleSheet;
 }
+
 QString builtInThemeStyleSheet(const QString &displayName)
 {
     for (const BuiltInTheme &theme : builtInThemes) {
         if (displayName != QLatin1String(theme.displayName))
             continue;
+
         QString styleSheet;
         if (theme.baseResourcePath) {
             styleSheet = readStyleSheet(QLatin1String(theme.baseResourcePath));
@@ -143,19 +156,23 @@ QString builtInThemeStyleSheet(const QString &displayName)
     }
     return QString();
 }
+
 void ensureBuiltInThemesExtracted()
 {
     const QString directoryPath = themesDirectoryPath();
     if (!QDir().mkpath(directoryPath))
         return;
+
     const QDir directory(directoryPath);
     for (const BuiltInTheme &theme : builtInThemes) {
         const QString destinationPath = directory.filePath(QLatin1String(theme.fileName));
         if (QFileInfo::exists(destinationPath))
             continue;
+
         const QString styleSheet = builtInThemeStyleSheet(QLatin1String(theme.displayName));
         if (styleSheet.isEmpty())
             continue;
+
         QSaveFile destination(destinationPath);
         if (!destination.open(QIODevice::WriteOnly))
             continue;
@@ -163,8 +180,10 @@ void ensureBuiltInThemesExtracted()
         destination.commit();
     }
 }
-}
+
+} // anonymous namespace
 #endif
+
 Preferences *Preferences::mInstance = 0;
 
 Preferences *Preferences::instance()
@@ -181,6 +200,9 @@ void Preferences::deleteInstance()
 }
 
 Preferences::Preferences()
+    // BuildingEd is a separate executable but deliberately shares TileZed's
+    // functional preferences (tiles directory, theme, recent paths, etc.).
+    // BuildingEditor window/layout preferences remain in BuildingEd.ini.
     : mSettings(new QSettings(QSettings::IniFormat, QSettings::UserScope,
                               QLatin1String("TheIndieStone"),
                               QLatin1String("TileZed")))
@@ -241,15 +263,11 @@ Preferences::Preferences()
                                                QColor(Qt::darkGray).name()).toString());
     mShowAdjacentMaps = mSettings->value(QLatin1String("ShowAdjacentMaps"), true).toBool();
     mRestoreLastSession = mSettings->value(QLatin1String("RestoreLastSession"), true).toBool();
-    mAutoSaveIntervalMinutes = mSettings->value(
-                QLatin1String("AutoSaveIntervalMinutes"), 0).toInt();
-    if (!QList<int>({0, 1, 5, 10, 20, 60}).contains(
-                mAutoSaveIntervalMinutes))
-        mAutoSaveIntervalMinutes = 0;
     mHighlightRoomUnderPointer = mSettings->value(QLatin1String("HighlightRoomUnderPointer"), false).toBool();
     mTilesetBackgroundColor = QColor(mSettings->value(QLatin1String("TilesetBackgroundColor"), QColor(Qt::white).name()).toString());
     mShowCellBorder = mSettings->value(QLatin1String("ShowCelLBorder"), true).toBool();
-    mTheme = mSettings->value(QLatin1String("Theme"), QLatin1String("Default")).toString();
+    mTheme = mSettings->value(QLatin1String("Theme"),
+                              QLatin1String("Breeze (Dark)")).toString();
     if (PortableSettings::syncThemeAcrossApplications())
         mTheme = PortableSettings::sharedTheme(mTheme);
 #endif
@@ -277,7 +295,6 @@ Preferences::Preferences()
 
 #ifdef ZOMBOID
     mTilesDirectory = PortableSettings::sharedTilesPath();
-    mProjectZomboidDirectory = PortableSettings::sharedGamePath();
     mSettings->remove(QLatin1String("Tilesets/TilesDirectory"));
 
     mSettings->beginGroup(QLatin1String("MapsDirectory"));
@@ -290,29 +307,15 @@ Preferences::Preferences()
                       << QDir::toNativeSeparators(mConfigDirectory);
     qInfo().noquote() << "Effective Tiles directory"
                       << QDir::toNativeSeparators(mTilesDirectory);
-    qInfo().noquote() << "Effective Project Zomboid directory"
-                      << (mProjectZomboidDirectory.isEmpty()
-                          ? QLatin1String("<not configured>")
-                          : QDir::toNativeSeparators(
-                                mProjectZomboidDirectory));
-    qInfo().noquote() << "Portable basement source directory"
-                      << QDir::toNativeSeparators(
-                             PortableSettings::basementSourcePath())
-                      << (QDir(PortableSettings::basementSourcePath()).exists()
-                          ? QLatin1String("[available]")
-                          : QLatin1String("[missing]"));
-    qInfo().noquote() << "Portable basement PZBY directory"
-                      << QDir::toNativeSeparators(
-                             PortableSettings::basementBinMapPath())
-                      << (QDir(PortableSettings::basementBinMapPath()).exists()
-                          ? QLatin1String("[available]")
-                          : QLatin1String("[missing]"));
 
     mThumbnailsDirectory = mSettings->value(QLatin1String("Thumbnails/Directory"), QString()).toString();
 
     mWorldEdFiles = mSettings->value(QLatin1String("WorldEd/ProjectFile")).toStringList();
     mTilePropertiesFiles = mSettings->value(QLatin1String("TilePropertiesFiles")).toStringList();
 
+    // Mirror B42.20's built-in tiledef order. This matters for property patch
+    // files and also makes the erosion, overlays, cache, and real Jumbo
+    // definitions available to BuildingEd without manual preference edits.
     const QStringList builtInTileDefs = {
         QStringLiteral("newtiledefinitions.tiles"),
         QStringLiteral("tiledefinitions_erosion.tiles"),
@@ -331,13 +334,6 @@ Preferences::Preferences()
                 path = configuredPath;
                 break;
             }
-        }
-        if (path.isEmpty() && !mProjectZomboidDirectory.isEmpty()) {
-            const QFileInfo candidate(QDir(mProjectZomboidDirectory)
-                                      .filePath(QStringLiteral("media/") +
-                                                builtInName));
-            if (candidate.exists() && candidate.isFile())
-                path = candidate.canonicalFilePath();
         }
         if (path.isEmpty() && !mTilesDirectory.isEmpty()) {
             const QFileInfo candidate(QDir(mTilesDirectory).filePath(
@@ -706,34 +702,6 @@ QString Preferences::tiles2xDirectory() const
     return mTilesDirectory + QLatin1Char('/') + QLatin1String("2x");
 }
 
-QString Preferences::projectZomboidDirectory() const
-{
-    return mProjectZomboidDirectory;
-}
-void Preferences::setProjectZomboidDirectory(const QString &path)
-{
-    const QString normalized = PortableSettings::normalizedGamePath(path);
-    if (!path.trimmed().isEmpty() && normalized.isEmpty()) {
-        qWarning().noquote()
-                << "Ignoring invalid Project Zomboid installation path"
-                << QDir::toNativeSeparators(path);
-        return;
-    }
-    if (mProjectZomboidDirectory == normalized)
-        return;
-    mProjectZomboidDirectory = normalized;
-    PortableSettings::setSharedGamePath(normalized);
-    emit projectZomboidDirectoryChanged();
-}
-QString Preferences::gameMediaPath(const QString &relativePath) const
-{
-    if (mProjectZomboidDirectory.isEmpty())
-        return QString();
-    const QString media = QDir(mProjectZomboidDirectory).filePath(
-                QLatin1String("media"));
-    return relativePath.isEmpty()
-            ? media : QDir(media).filePath(relativePath);
-}
 qreal Preferences::tilesetScale() const
 {
     return mTilesetScale;
@@ -929,27 +897,20 @@ void Preferences::setTheme(const QString &theme)
     if (PortableSettings::syncThemeAcrossApplications())
         PortableSettings::setThemeForAllApplications(theme);
 }
+
 void Preferences::setRestoreLastSession(bool restore)
 {
     if (mRestoreLastSession == restore)
         return;
+
     mRestoreLastSession = restore;
     mSettings->setValue(QLatin1String("Interface/RestoreLastSession"), restore);
 }
-void Preferences::setAutoSaveIntervalMinutes(int minutes)
-{
-    const int normalized = QList<int>({0, 1, 5, 10, 20, 60}).contains(
-                minutes) ? minutes : 0;
-    if (mAutoSaveIntervalMinutes == normalized)
-        return;
-    mAutoSaveIntervalMinutes = normalized;
-    mSettings->setValue(QLatin1String("Interface/AutoSaveIntervalMinutes"),
-                        mAutoSaveIntervalMinutes);
-    emit autoSaveIntervalChanged(mAutoSaveIntervalMinutes);
-}
+
 QStringList Preferences::availableThemes() const
 {
     ensureBuiltInThemesExtracted();
+
     QStringList themes;
     themes << QStringLiteral("Default")
            << QStringLiteral("Breeze (Dark)")
@@ -957,6 +918,7 @@ QStringList Preferences::availableThemes() const
            << QStringLiteral("QDarkStyle (Dark)")
            << QStringLiteral("QDarkStyle (Light)")
            << QStringLiteral("Mapping Discord (B42)");
+
     QStringList externalThemes;
     const QString applicationDirectory = PortableSettings::installRootPath();
     const QStringList themeDirectories = {
@@ -986,6 +948,7 @@ QStringList Preferences::availableThemes() const
 void Preferences::applyTheme() const
 {
     ensureBuiltInThemesExtracted();
+
     mSettings->setValue(QLatin1String("Interface/Theme"), mTheme);
     if (mTheme == QStringLiteral("Default")) {
         qApp->setStyleSheet(QString());
@@ -1027,6 +990,7 @@ void Preferences::applyTheme() const
         qApp->setStyleSheet(QString());
         return;
     }
+
     if (!resource.isEmpty()) {
         styleSheet = readStyleSheet(resource);
         styleSheetLoaded = !styleSheet.isEmpty();

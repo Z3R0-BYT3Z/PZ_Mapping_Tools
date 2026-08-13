@@ -1,7 +1,7 @@
 #ifndef TERRAINIMAGEEDITORDIALOG_H
 #define TERRAINIMAGEEDITORDIALOG_H
+
 #include <QColor>
-#include <QByteArray>
 #include <QDialog>
 #include <QImage>
 #include <QList>
@@ -10,6 +10,7 @@
 #include <QSize>
 #include <QStringList>
 #include <QWidget>
+
 class QButtonGroup;
 class QCheckBox;
 class QCloseEvent;
@@ -21,25 +22,31 @@ class QPushButton;
 class QSpinBox;
 class QToolButton;
 class WorldDocument;
+
 struct TerrainPaletteEntry
 {
     QString label;
     QColor color;
     int bitmapIndex = 0;
 };
+
 class TerrainImageCanvas : public QWidget
 {
     Q_OBJECT
+
 public:
     enum Tool {
         BrushTool,
         FillTool
     };
+
     explicit TerrainImageCanvas(QWidget *parent = nullptr);
+
     QSize sizeHint() const override;
     const QImage &groundImage() const { return mGroundImage; }
     const QImage &vegetationImage() const { return mVegetationImage; }
     int cellSize() const { return mCellSize; }
+
     void setImages(const QImage &ground, const QImage &vegetation,
                    int cellSize);
     void setActiveLayer(int bitmapIndex);
@@ -50,18 +57,21 @@ public:
     void setCompositePreview(bool composite);
     void setVegetationOpacity(int percent);
     void replaceImages(const QImage &ground, const QImage &vegetation);
+
 signals:
     void editStarted(const QString &label);
     void editFinished();
     void imageChanged();
     void colorPicked(const QColor &color);
     void pointerMoved(const QPoint &point);
+
 protected:
     void paintEvent(QPaintEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void leaveEvent(QEvent *event) override;
+
 private:
     QPoint imagePoint(const QPoint &widgetPoint) const;
     bool containsImagePoint(const QPoint &point) const;
@@ -69,6 +79,7 @@ private:
     void floodFill(const QPoint &point);
     void rebuildVegetationOverlay(const QRect &area = QRect());
     void updateCanvasSize();
+
     QImage mGroundImage;
     QImage mVegetationImage;
     QImage mVegetationOverlay;
@@ -84,23 +95,18 @@ private:
     bool mPainting = false;
     bool mCompositePreview = true;
 };
+
 class TerrainImageEditorDialog : public QDialog
 {
     Q_OBJECT
+
 public:
     explicit TerrainImageEditorDialog(WorldDocument *worldDocument,
                                       QWidget *parent = nullptr);
-    bool importImages(const QImage &ground, const QImage &vegetation,
-                      const QPoint &cellOrigin,
-                      const QString &suggestedGroundPath,
-                      const QByteArray &sourceMetadata = QByteArray());
-    bool saveImportedImages();
-    static bool ensureWorkingImageMemoryLimit(
-            QWidget *parent, const QSize &size,
-            const QString &operation, int cellSize);
-    static int recommendedWorkingImageMemoryLimitMiB(const QSize &size);
+
 protected:
     void closeEvent(QCloseEvent *event) override;
+
 private slots:
     void browseRules();
     void reloadRules();
@@ -121,6 +127,7 @@ private slots:
     void generateLake();
     void generateRoads();
     void updatePointerStatus(const QPoint &point);
+
 private:
     QString defaultRulesPath() const;
     QString defaultGroundPath() const;
@@ -149,6 +156,7 @@ private:
     void applyGeneratedImages(const QImage &ground,
                               const QImage &vegetation,
                               const QString &label);
+
     struct HistoryState
     {
         QImage ground;
@@ -156,6 +164,7 @@ private:
         QString label;
         int revision = 0;
     };
+
     WorldDocument *mWorldDocument;
     TerrainImageCanvas *mCanvas;
     QLineEdit *mRulesPath;
@@ -188,6 +197,6 @@ private:
     int mNextRevision = 1;
     bool mHistoryEditActive = false;
     bool mDirty = false;
-    QByteArray mSourceMetadata;
 };
-#endif
+
+#endif // TERRAINIMAGEEDITORDIALOG_H

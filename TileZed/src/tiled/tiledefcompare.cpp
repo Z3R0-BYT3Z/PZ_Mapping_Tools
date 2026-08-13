@@ -55,11 +55,13 @@ template class __declspec(dllimport) QMap<QString, QString>;
 #endif
 
 namespace {
+
 enum DifferenceKind {
     ModifiedProperties = 0,
     OnlyInFile1 = 1,
     OnlyInFile2 = 2
 };
+
 struct TileDifference
 {
     QString tilesetName;
@@ -68,6 +70,7 @@ struct TileDifference
     TileDefTile *tile2 = nullptr;
     DifferenceKind kind = ModifiedProperties;
 };
+
 struct TileDefAnalysis
 {
     QStringList unique1;
@@ -75,6 +78,7 @@ struct TileDefAnalysis
     QStringList structuralDifferences;
     QList<TileDifference> tileDifferences;
 };
+
 QString fileSha256(const QString &fileName)
 {
     QFile file(fileName);
@@ -85,6 +89,7 @@ QString fileSha256(const QString &fileName)
         hash.addData(file.read(1024 * 1024));
     return QString::fromLatin1(hash.result().toHex());
 }
+
 QString propertyMapString(const QMap<QString, QString> &properties)
 {
     QStringList values;
@@ -94,6 +99,7 @@ QString propertyMapString(const QMap<QString, QString> &properties)
     }
     return values.join(QStringLiteral("; "));
 }
+
 int changedPropertyCount(TileDefTile *tile1, TileDefTile *tile2)
 {
     if (tile1 == nullptr || tile2 == nullptr)
@@ -120,6 +126,7 @@ int changedPropertyCount(TileDefTile *tile1, TileDefTile *tile2)
     }
     return changed;
 }
+
 void appendTilesetDifferences(
         TileDefAnalysis *analysis, const QString &tilesetName,
         TileDefTileset *tileset1, TileDefTileset *tileset2)
@@ -150,6 +157,7 @@ void appendTilesetDifferences(
         analysis->tileDifferences += difference;
     }
 }
+
 TileDefAnalysis analyzeTileDefs(
         TileDefFile &file1, TileDefFile &file2, PROGRESS *progress = nullptr)
 {
@@ -160,10 +168,12 @@ TileDefAnalysis analyzeTileDefs(
         names1 += tileset->mName;
     for (TileDefTileset *tileset : file2.tilesets())
         names2 += tileset->mName;
+
     analysis.unique1 = (names1 - names2).values();
     analysis.unique2 = (names2 - names1).values();
     analysis.unique1.sort(Qt::CaseInsensitive);
     analysis.unique2.sort(Qt::CaseInsensitive);
+
     QStringList allNames = (names1 | names2).values();
     allNames.sort(Qt::CaseInsensitive);
     int processed = 0;
@@ -213,6 +223,7 @@ TileDefAnalysis analyzeTileDefs(
     }
     return analysis;
 }
+
 QString htmlList(const QStringList &values)
 {
     if (values.isEmpty())
@@ -222,6 +233,7 @@ QString htmlList(const QStringList &values)
         html += QStringLiteral("<li>%1</li>").arg(value.toHtmlEscaped());
     return html + QStringLiteral("</ul>");
 }
+
 TileDefTileset *createTestTileset(
         const QString &name, int id, int tileCount)
 {
@@ -234,7 +246,9 @@ TileDefTileset *createTestTileset(
     tileset->resize(qMax(1, tileCount), 1);
     return tileset;
 }
-}
+
+} // anonymous namespace
+
 TileDefCompare::TileDefCompare(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::TileDefCompare)
@@ -243,8 +257,10 @@ TileDefCompare::TileDefCompare(QWidget *parent) :
     resize(qMax(width(), 1180), qMax(height(), 760));
     ui->packEdit1->setEditable(true);
     ui->packEdit2->setEditable(true);
+
     ui->gridLayout->removeItem(ui->horizontalLayout);
     ui->gridLayout->addLayout(ui->horizontalLayout, 5, 0);
+
     QWidget *filterWidget = new QWidget(this);
     QHBoxLayout *filterLayout = new QHBoxLayout(filterWidget);
     filterLayout->setContentsMargins(0, 0, 0, 0);
@@ -266,6 +282,7 @@ TileDefCompare::TileDefCompare(QWidget *parent) :
     mVisibleSummary = new QLabel(tr("No comparison"), filterWidget);
     filterLayout->addWidget(mVisibleSummary);
     ui->gridLayout->addWidget(filterWidget, 4, 0);
+
     ui->textBrowser->setMaximumHeight(190);
     ui->listWidget->setMinimumWidth(420);
     ui->listWidget->setSelectionMode(
@@ -287,6 +304,7 @@ TileDefCompare::TileDefCompare(QWidget *parent) :
                 tr("<i>Select a tile difference to inspect its "
                    "properties.</i>"));
     ui->horizontalLayout->insertWidget(3, mPropertyDetails, 1);
+
     ui->use1->setText(tr("Use File 1"));
     ui->use2->setText(tr("Use File 2"));
     ui->saveMerged->setText(tr("Save merged..."));
@@ -367,6 +385,7 @@ void TileDefCompare::compare()
                     tr("Choose both .tiles files before comparing."));
         return;
     }
+
     PROGRESS progress(tr("Reading File 1\n%1")
                       .arg(QDir::toNativeSeparators(path1)), this);
     TileDefFileReader reader;
@@ -391,6 +410,7 @@ void TileDefCompare::compare()
     const QString hash2 = fileSha256(path2);
     TileDefAnalysis analysis =
             analyzeTileDefs(mTileDefFile1, mTileDefFile2, &progress);
+
     ui->listWidget->clear();
     mTileMap1.clear();
     mTileMap2.clear();
@@ -514,6 +534,7 @@ void TileDefCompare::compare()
 
     }
     rebuildReportText();
+
     addRecentFile1(path1);
     addRecentFile2(path2);
     writeSettings();
@@ -754,6 +775,7 @@ QString TileDefCompare::propertiesHtml(
     }
     return html + QStringLiteral("</table>");
 }
+
 QString TileDefCompare::statusName(int kind) const
 {
     if (kind == OnlyInFile1)
@@ -762,6 +784,7 @@ QString TileDefCompare::statusName(int kind) const
         return tr("Only in File 2");
     return tr("Modified properties");
 }
+
 void TileDefCompare::updateActions()
 {
     bool canChoose = false;
@@ -778,6 +801,7 @@ void TileDefCompare::updateActions()
     mCopyReportButton->setEnabled(mCompared);
     mExportReportButton->setEnabled(mCompared);
 }
+
 void TileDefCompare::rebuildReportText()
 {
     mReportText = mReportPreamble +
@@ -811,6 +835,7 @@ void TileDefCompare::rebuildReportText()
                      properties1, properties2);
     }
 }
+
 void TileDefCompare::filterChanged()
 {
     const QString search = mSearchEdit->text().trimmed();
@@ -832,6 +857,7 @@ void TileDefCompare::filterChanged()
                 tr("%1 of %2 differences visible")
                 .arg(visible).arg(ui->listWidget->count()));
 }
+
 void TileDefCompare::copyReport()
 {
     if (!mReportText.isEmpty()) {
@@ -840,6 +866,7 @@ void TileDefCompare::copyReport()
                     tr("Comparison report copied to the clipboard."), 5000);
     }
 }
+
 void TileDefCompare::exportReport()
 {
     const QString fileName = QFileDialog::getSaveFileName(
@@ -998,6 +1025,7 @@ bool TileDefCompare::runSelfTest(
 {
     TileDefFile file1;
     TileDefFile file2;
+
     TileDefTileset *shared1 =
             createTestTileset(QStringLiteral("shared"), 1, 2);
     shared1->tileAt(0)->mProperties[
@@ -1007,12 +1035,14 @@ bool TileDefCompare::runSelfTest(
             QStringLiteral("BurntTile")] =
             QStringLiteral("burnt_1");
     file1.insertTileset(file1.tilesets().size(), shared1);
+
     TileDefTileset *shared2 =
             createTestTileset(QStringLiteral("shared"), 7, 1);
     shared2->tileAt(0)->mProperties[
             QStringLiteral("SnowTile")] =
             QStringLiteral("snow_9");
     file2.insertTileset(file2.tilesets().size(), shared2);
+
     file1.insertTileset(
                 file1.tilesets().size(),
                 createTestTileset(
@@ -1021,6 +1051,7 @@ bool TileDefCompare::runSelfTest(
                 file2.tilesets().size(),
                 createTestTileset(
                     QStringLiteral("only_file_2"), 3, 1));
+
     const TileDefAnalysis analysis =
             analyzeTileDefs(file1, file2);
     int modified = 0;
@@ -1051,11 +1082,13 @@ bool TileDefCompare::runSelfTest(
                 .arg(modified).arg(only1).arg(only2);
         return false;
     }
+
     *summary = QStringLiteral(
                 "unique tilesets, structural metadata, modified "
                 "properties, and file-only tile records verified");
     return true;
 }
+
 bool TileDefCompare::renderValidation(
         const QString &outputFile, QString *errorString)
 {
@@ -1065,6 +1098,7 @@ bool TileDefCompare::renderValidation(
                     "Could not create the comparator render directory.");
         return false;
     }
+
     TileDefFile file1;
     TileDefFile file2;
     TileDefTileset *shared1 =
@@ -1080,6 +1114,7 @@ bool TileDefCompare::renderValidation(
                 file1.tilesets().size(),
                 createTestTileset(
                     QStringLiteral("file1_only"), 2, 2));
+
     TileDefTileset *shared2 =
             createTestTileset(QStringLiteral("demo_natural"), 7, 2);
     shared2->tileAt(0)->mProperties[QStringLiteral("SnowTile")] =
@@ -1091,6 +1126,7 @@ bool TileDefCompare::renderValidation(
                 file2.tilesets().size(),
                 createTestTileset(
                     QStringLiteral("file2_only"), 3, 1));
+
     const auto syncProperties = [](TileDefFile &file) {
         for (TileDefTileset *tileset : file.tilesets()) {
             for (TileDefTile *tile : tileset->mTiles) {
@@ -1101,6 +1137,7 @@ bool TileDefCompare::renderValidation(
     };
     syncProperties(file1);
     syncProperties(file2);
+
     const QString path1 =
             temporary.filePath(QStringLiteral("baseline.tiles"));
     const QString path2 =
@@ -1111,6 +1148,7 @@ bool TileDefCompare::renderValidation(
                 .arg(file1.errorString(), file2.errorString());
         return false;
     }
+
     TileDefCompare window;
     window.ui->packEdit1->setEditText(path1);
     window.ui->packEdit2->setEditText(path2);
@@ -1127,3 +1165,4 @@ bool TileDefCompare::renderValidation(
     }
     return true;
 }
+

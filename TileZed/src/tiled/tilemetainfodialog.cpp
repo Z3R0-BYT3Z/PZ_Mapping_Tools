@@ -334,6 +334,10 @@ void TileMetaInfoDialog::addTileset()
         qInfo() << "Adding global tileset from" << info.absoluteFilePath();
         if (Tiled::Tileset *ts = TileMetaInfoMgr::instance()->loadTileset(f/*info.canonicalFilePath()*/)) {
             QString name = info.completeBaseName();
+            // The directory watcher can register a newly copied PNG while
+            // AddTilesetsDialog is still open. Replacing that live global
+            // object would invalidate pointers held by BuildingEd and the
+            // overlay tools. Treat it as an already-completed add instead.
             if (TileMetaInfoMgr::instance()->tileset(name)) {
                 qInfo() << "Tileset was already registered while the add "
                            "dialog was open:" << name;

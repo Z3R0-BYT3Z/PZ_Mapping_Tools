@@ -25,6 +25,7 @@
 #include "roofhiding.h"
 
 #include "preferences.h"
+
 #if defined(Q_OS_WIN) && (_MSC_VER >= 1600)
 // Hmmmm.  libtiled.dll defines the MapRands class as so:
 // class TILEDSHARED_EXPORT MapRands : public QVector<QVector<int> >
@@ -1786,6 +1787,8 @@ void TileDefWatcher::check()
     for (TileDefWatcherFile *watcherFile : qAsConst(mFiles)) {
         watcherFile->check(*mWatcher);
     }
+    // The game treats *.patch.tiles as property overlays on sprites loaded by
+    // earlier files; it does not create a second tileset with that name.
     for (int i = 0; i < mFiles.size(); ++i) {
         TileDefWatcherFile *patch = mFiles.at(i);
         if (!patch->mFilePath.endsWith(QLatin1String(".patch.tiles"),

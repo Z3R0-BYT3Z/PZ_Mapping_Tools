@@ -646,8 +646,6 @@ BuildingTilesDialog::BuildingTilesDialog(QWidget *parent) :
     connect(ui->categoryTilesView, &QAbstractItemView::activated,
             this, &BuildingTilesDialog::tileActivated);
 
-    connect(ui->categoryFilter, &QLineEdit::textEdited,
-            this, &BuildingTilesDialog::categoryFilterEdited);
     ui->categoryView->setZoomable(mZoomable);
     ui->categoryView->setAcceptDrops(true);
     ui->categoryView->setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -1189,7 +1187,7 @@ void BuildingTilesDialog::setCategoryList()
 }
 
 void BuildingTilesDialog::setCategoryTiles()
-{
+{ 
     bool expertMode = mExpertMode && mCategory && !mCategory->shadowImage().isNull();
 #if 1
     QList<BuildingTileEntry*> entries;
@@ -1259,6 +1257,8 @@ void BuildingTilesDialog::setTilesetList()
     {
         const QSignalBlocker blocker(ui->tilesetList);
         ui->tilesetList->clear();
+
+        // Add the list of tilesets, and resize it to fit.
         int width = 64;
         QFontMetrics fm = ui->tilesetList->fontMetrics();
         foreach (Tileset *tileset, TileMetaInfoMgr::instance()->tilesets()) {
@@ -1271,9 +1271,11 @@ void BuildingTilesDialog::setTilesetList()
         }
         int sbw = ui->tilesetList->verticalScrollBar()->sizeHint().width();
         ui->tilesetList->setFixedWidth(width + 16 + sbw);
+
         ui->filterEdit->setFixedWidth(ui->tilesetList->width());
         ui->filterEdit->setEnabled(ui->tilesetList->count() > 0);
         tilesetFilterEdited(ui->filterEdit->text());
+
         int selectedRow = -1;
         for (int row = 0; row < ui->tilesetList->count(); ++row) {
             QListWidgetItem *item = ui->tilesetList->item(row);
@@ -1289,10 +1291,12 @@ void BuildingTilesDialog::setTilesetList()
         if (selectedRow >= 0)
             ui->tilesetList->setCurrentRow(selectedRow);
     }
+
     tilesetSelectionChanged();
     qInfo() << "Building Tiles dialog tileset list refreshed:"
             << ui->tilesetList->count() << "entries";
 }
+
 bool BuildingTilesDialog::validateTilesetCatalog(QString *errorString)
 {
     TileMetaInfoMgr *manager = TileMetaInfoMgr::instance();
@@ -1460,36 +1464,6 @@ void BuildingTilesDialog::synchUI()
     ui->actionRemoveTileset->setEnabled(ui->tilesetList->currentRow() >= 0);
 }
 
-void BuildingTilesDialog::categoryFilterEdited(const QString &text)
-{
-    const bool empty = text.trimmed().isEmpty();
-    for (int row = 0; row < ui->categoryList->count(); ++row) {
-        QListWidgetItem *item = ui->categoryList->item(row);
-        item->setHidden(!empty
-                        && !item->text().contains(text, Qt::CaseInsensitive));
-    }
-    QListWidgetItem *current = ui->categoryList->currentItem();
-    if (!current || !current->isHidden()) {
-        if (current)
-            ui->categoryList->scrollToItem(current);
-        return;
-    }
-    const int currentRow = ui->categoryList->row(current);
-    for (int distance = 1; distance < ui->categoryList->count(); ++distance) {
-        const int previous = currentRow - distance;
-        if (previous >= 0 && !ui->categoryList->item(previous)->isHidden()) {
-            ui->categoryList->setCurrentRow(previous);
-            return;
-        }
-        const int next = currentRow + distance;
-        if (next < ui->categoryList->count()
-                && !ui->categoryList->item(next)->isHidden()) {
-            ui->categoryList->setCurrentRow(next);
-            return;
-        }
-    }
-    ui->categoryList->setCurrentItem(nullptr);
-}
 void BuildingTilesDialog::categoryChanged(int index)
 {
     mCategory = 0;
@@ -1983,6 +1957,7 @@ void BuildingTilesDialog::manageTilesets()
     TileMetaInfoMgr *mgr = TileMetaInfoMgr::instance();
     if (!mgr->writeTxt())
         QMessageBox::warning(this, tr("Tileset Metadata Error"), mgr->errorString());
+
     setTilesetList();
     if (!selectedName.isEmpty()) {
         const int row = mgr->indexOf(selectedName);
@@ -2310,6 +2285,7 @@ void BuildingTilesDialog::reloadFrom(const QString &directory)
                     .arg(BuildingTilesMgr::instance()->categoryCount()));
         return;
     }
+
     mUndoStack->beginMacro(tr("Import Tiles and Furniture"));
     const bool furnitureImported = reloadBuildingFurnitureTxt(directory);
     const bool tilesImported = furnitureImported

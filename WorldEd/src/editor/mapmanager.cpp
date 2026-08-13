@@ -17,7 +17,6 @@
 
 #include "mapmanager.h"
 
-#include "../portablesettings.h"
 #include "mapcomposite.h"
 #include "preferences.h"
 #include "progress.h"
@@ -100,12 +99,7 @@ MapManager::MapManager() :
     qRegisterMetaType<MapInfo*>("BuildingEditor::Building*");
     qRegisterMetaType<MapInfo*>("MapInfo*");
 
-    const int mapReaderCount =
-            PortableSettings::recommendedWorkerCount(8, 1);
-    mMapReaderThread.resize(mapReaderCount);
-    qInfo() << "Map reader workers:" << mapReaderCount
-            << "for" << qMax(1, QThread::idealThreadCount())
-            << "logical processors";
+    mMapReaderThread.resize(4);
     mMapReaderWorker.resize(mMapReaderThread.size());
     for (int i = 0; i < mMapReaderThread.size(); i++) {
         mMapReaderThread[i] = new InterruptibleThread;
@@ -793,13 +787,23 @@ void MapManager::mapLoadedByThread(Map *map, MapInfo *mapInfo)
                 continue;
             if (tileset->tileHeight() == missingTile->height()
                     && tileset->tileWidth() == missingTile->width()) {
+                // Replace the all-red image with something nicer.
                 for (int i = 0; i < tileset->tileCount(); i++)
                     tileset->tileAt(i)->setImage(missingTile);
             }
         }
     }
+    // Preserve the historical WorldEd behavior: load every declaration from
+    // each TMX/TBX header before the map is exposed to MapComposite.  Older
+    // projects commonly export every cell with the complete catalogue but in
+    // a different firstgid/order.  Restricting this to Map::usedTilesets()
+    // allows an adjacent cell to be composited against an unresolved
+    // declaration and permanently bakes the red missing-tile placeholder into
+    // its VBO.  The shared cache still prevents decoding the same PNG from disk
+    // more than once, while each map retains its own ordered declarations.
     const QList<Tileset *> declaredTilesets = map->tilesets();
     TilesetManager::instance()->addReferences(declaredTilesets);
+
     QList<Tileset *> usedTilesets = map->usedTilesets().values();
     usedTilesets.removeAll(TilesetManager::instance()->invisibleTileset());
     usedTilesets.removeAll(TilesetManager::instance()->missingTileset());

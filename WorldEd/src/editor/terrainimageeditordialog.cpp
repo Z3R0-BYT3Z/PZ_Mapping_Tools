@@ -1,10 +1,13 @@
 #include "terrainimageeditordialog.h"
+
 #include "bmpblender.h"
 #include "preferences.h"
 #include "world.h"
 #include "worlddocument.h"
 #include "../portablesettings.h"
+
 #include "map.h"
+
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QCloseEvent>
@@ -42,17 +45,24 @@
 #include <QVBoxLayout>
 #include <QVector>
 #include <QtMath>
+
 #include <cmath>
+
 using namespace Tiled;
+
 namespace {
+
 qint64 workingImageBytes(const QSize &size)
 {
+    // Ground, vegetation and the cached vegetation preview are ARGB32.
     return qint64(size.width()) * qint64(size.height()) * 12;
 }
+
 qint64 imageBytes(const QImage &image)
 {
     return qint64(image.bytesPerLine()) * qint64(image.height());
 }
+
 qint64 historyBudgetBytes()
 {
     const qint64 configuredBytes =
@@ -60,6 +70,7 @@ qint64 historyBudgetBytes()
             * 1024 * 1024;
     return qMax(qint64(64) * 1024 * 1024, configuredBytes / 4);
 }
+
 QString memorySizeText(qint64 bytes)
 {
     const qreal mib = qreal(bytes) / (1024.0 * 1024.0);
@@ -68,7 +79,9 @@ QString memorySizeText(qint64 bytes)
                 QLatin1String(" MiB");
     return QString::number(mib / 1024.0, 'f', 1) + QLatin1String(" GiB");
 }
-}
+
+} // namespace
+
 TerrainImageCanvas::TerrainImageCanvas(QWidget *parent)
     : QWidget(parent)
     , mPaintColor(90, 100, 35)
@@ -79,6 +92,7 @@ TerrainImageCanvas::TerrainImageCanvas(QWidget *parent)
     setCursor(Qt::CrossCursor);
     updateCanvasSize();
 }
+
 QSize TerrainImageCanvas::sizeHint() const
 {
     if (mGroundImage.isNull())
@@ -87,6 +101,7 @@ QSize TerrainImageCanvas::sizeHint() const
     return QSize(qMax(1, qRound(mGroundImage.width() * scale)),
                  qMax(1, qRound(mGroundImage.height() * scale)));
 }
+
 void TerrainImageCanvas::setImages(const QImage &ground,
                                    const QImage &vegetation,
                                    int cellSize)
@@ -98,56 +113,66 @@ void TerrainImageCanvas::setImages(const QImage &ground,
     updateCanvasSize();
     update();
 }
+
 void TerrainImageCanvas::setActiveLayer(int bitmapIndex)
 {
     mActiveLayer = qBound(0, bitmapIndex, 1);
     update();
 }
+
 void TerrainImageCanvas::setPaintColor(const QColor &color)
 {
     if (color.isValid())
         mPaintColor = color;
     update();
 }
+
 void TerrainImageCanvas::setBrushRadius(int radius)
 {
     mBrushRadius = qMax(0, radius);
     update();
 }
+
 void TerrainImageCanvas::setZoomPercent(int percent)
 {
     mZoomPercent = qBound(10, percent, 800);
     updateCanvasSize();
     update();
 }
+
 void TerrainImageCanvas::setTool(int tool)
 {
     mTool = tool == FillTool ? FillTool : BrushTool;
     setCursor(mTool == FillTool ? Qt::PointingHandCursor : Qt::CrossCursor);
 }
+
 void TerrainImageCanvas::setCompositePreview(bool composite)
 {
     mCompositePreview = composite;
     update();
 }
+
 void TerrainImageCanvas::setVegetationOpacity(int percent)
 {
     mVegetationOpacity = qBound(0, percent, 100);
     rebuildVegetationOverlay();
     update();
 }
+
 void TerrainImageCanvas::replaceImages(const QImage &ground,
                                        const QImage &vegetation)
 {
     setImages(ground, vegetation, mCellSize);
     emit imageChanged();
 }
+
 void TerrainImageCanvas::paintEvent(QPaintEvent *)
 {
     QPainter painter(this);
     painter.fillRect(rect(), QColor(31, 35, 39));
     if (mGroundImage.isNull())
         return;
+
     painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
     const QRect target(QPoint(0, 0), sizeHint());
     if (mCompositePreview) {
@@ -158,6 +183,7 @@ void TerrainImageCanvas::paintEvent(QPaintEvent *)
     } else {
         painter.drawImage(target, mVegetationImage);
     }
+
     const qreal scale = mZoomPercent / 100.0;
     painter.setPen(QPen(QColor(255, 255, 255, 100), 1));
     for (int x = mCellSize; x < mGroundImage.width(); x += mCellSize)
@@ -166,6 +192,7 @@ void TerrainImageCanvas::paintEvent(QPaintEvent *)
     for (int y = mCellSize; y < mGroundImage.height(); y += mCellSize)
         painter.drawLine(0, qRound(y * scale),
                          target.width(), qRound(y * scale));
+
     if (containsImagePoint(mHoverPoint)) {
         painter.setBrush(Qt::NoBrush);
         painter.setPen(QPen(Qt::white, 1));
@@ -175,6 +202,7 @@ void TerrainImageCanvas::paintEvent(QPaintEvent *)
         painter.drawEllipse(center, radius, radius);
     }
 }
+
 void TerrainImageCanvas::mousePressEvent(QMouseEvent *event)
 {
     const QPoint point = imagePoint(event->pos());
@@ -200,6 +228,7 @@ void TerrainImageCanvas::mousePressEvent(QMouseEvent *event)
     mLastPoint = point;
     paintSegment(point, point);
 }
+
 void TerrainImageCanvas::mouseMoveEvent(QMouseEvent *event)
 {
     const QPoint point = imagePoint(event->pos());
@@ -212,6 +241,7 @@ void TerrainImageCanvas::mouseMoveEvent(QMouseEvent *event)
     }
     update();
 }
+
 void TerrainImageCanvas::mouseReleaseEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton && mPainting) {
@@ -219,30 +249,35 @@ void TerrainImageCanvas::mouseReleaseEvent(QMouseEvent *event)
         emit editFinished();
     }
 }
+
 void TerrainImageCanvas::leaveEvent(QEvent *)
 {
     mHoverPoint = QPoint(-1, -1);
     emit pointerMoved(mHoverPoint);
     update();
 }
+
 QPoint TerrainImageCanvas::imagePoint(const QPoint &widgetPoint) const
 {
     const qreal scale = mZoomPercent / 100.0;
     return QPoint(qFloor(widgetPoint.x() / scale),
                   qFloor(widgetPoint.y() / scale));
 }
+
 bool TerrainImageCanvas::containsImagePoint(const QPoint &point) const
 {
     return !mGroundImage.isNull()
             && point.x() >= 0 && point.x() < mGroundImage.width()
             && point.y() >= 0 && point.y() < mGroundImage.height();
 }
+
 void TerrainImageCanvas::paintSegment(const QPoint &from, const QPoint &to)
 {
     QImage *image = mActiveLayer == 0
             ? &mGroundImage : &mVegetationImage;
     if (image->isNull())
         return;
+
     QPainter painter(image);
     painter.setRenderHint(QPainter::Antialiasing, false);
     QPen pen(mPaintColor);
@@ -262,16 +297,19 @@ void TerrainImageCanvas::paintSegment(const QPoint &from, const QPoint &to)
     emit imageChanged();
     update();
 }
+
 void TerrainImageCanvas::floodFill(const QPoint &point)
 {
     QImage *image = mActiveLayer == 0
             ? &mGroundImage : &mVegetationImage;
     if (image->isNull() || !containsImagePoint(point))
         return;
+
     const QRgb target = image->pixel(point);
     const QRgb replacement = mPaintColor.rgb();
     if ((target & 0x00ffffff) == (replacement & 0x00ffffff))
         return;
+
     QVector<QPoint> pending;
     pending.reserve(1024);
     pending += point;
@@ -281,6 +319,7 @@ void TerrainImageCanvas::floodFill(const QPoint &point)
                 ((image->pixel(seed) & 0x00ffffff) !=
                  (target & 0x00ffffff)))
             continue;
+
         int left = seed.x();
         int right = seed.x();
         while (left > 0 &&
@@ -291,10 +330,12 @@ void TerrainImageCanvas::floodFill(const QPoint &point)
                ((image->pixel(right + 1, seed.y()) & 0x00ffffff) ==
                 (target & 0x00ffffff)))
             ++right;
+
         QRgb *line = reinterpret_cast<QRgb *>(image->scanLine(seed.y()));
         for (int x = left; x <= right; ++x)
             line[x] = qRgb(mPaintColor.red(),
                            mPaintColor.green(), mPaintColor.blue());
+
         for (int yOffset : {-1, 1}) {
             const int y = seed.y() + yOffset;
             if (y < 0 || y >= image->height())
@@ -313,11 +354,13 @@ void TerrainImageCanvas::floodFill(const QPoint &point)
             }
         }
     }
+
     if (mActiveLayer == 1)
         rebuildVegetationOverlay();
     emit imageChanged();
     update();
 }
+
 void TerrainImageCanvas::rebuildVegetationOverlay(const QRect &area)
 {
     if (mVegetationImage.isNull()) {
@@ -330,6 +373,7 @@ void TerrainImageCanvas::rebuildVegetationOverlay(const QRect &area)
                                     QImage::Format_ARGB32);
         mVegetationOverlay.fill(Qt::transparent);
     }
+
     const QRect bounds = area.isEmpty()
             ? mVegetationImage.rect()
             : area.intersected(mVegetationImage.rect());
@@ -350,11 +394,13 @@ void TerrainImageCanvas::rebuildVegetationOverlay(const QRect &area)
         }
     }
 }
+
 void TerrainImageCanvas::updateCanvasSize()
 {
     resize(sizeHint());
     updateGeometry();
 }
+
 TerrainImageEditorDialog::TerrainImageEditorDialog(
         WorldDocument *worldDocument, QWidget *parent)
     : QDialog(parent)
@@ -383,6 +429,7 @@ TerrainImageEditorDialog::TerrainImageEditorDialog(
     setWindowTitle(tr("Terrain and Vegetation Image Editor"));
     setWindowFlags(windowFlags() | Qt::WindowMaximizeButtonHint);
     resize(1280, 820);
+
     World *world = mWorldDocument ? mWorldDocument->world() : nullptr;
     const int cellSize = world ? world->cellSize() : 300;
     mCellsWide->setRange(1, 256);
@@ -395,6 +442,7 @@ TerrainImageEditorDialog::TerrainImageEditorDialog(
                          : world ? qMax(1, world->height()) : 1);
     mCellsWide->setSuffix(tr(" cells"));
     mCellsHigh->setSuffix(tr(" cells"));
+
     mBrushRadius->setRange(0, 128);
     mBrushRadius->setValue(4);
     mBrushRadius->setSuffix(tr(" px"));
@@ -423,7 +471,9 @@ TerrainImageEditorDialog::TerrainImageEditorDialog(
         mOriginX->setValue(mWorldDocument->selectedCells().first()->x());
         mOriginY->setValue(mWorldDocument->selectedCells().first()->y());
     }
+
     QVBoxLayout *sideLayout = new QVBoxLayout;
+
     QGroupBox *filesGroup = new QGroupBox(tr("Files"), this);
     QGridLayout *filesLayout = new QGridLayout(filesGroup);
     QToolButton *browseRulesButton = new QToolButton(filesGroup);
@@ -445,6 +495,7 @@ TerrainImageEditorDialog::TerrainImageEditorDialog(
     pairHint->setWordWrap(true);
     filesLayout->addWidget(pairHint, 3, 0, 1, 3);
     sideLayout->addWidget(filesGroup);
+
     QGroupBox *documentGroup = new QGroupBox(tr("Image"), this);
     QFormLayout *documentLayout = new QFormLayout(documentGroup);
     documentLayout->addRow(tr("Width:"), mCellsWide);
@@ -470,6 +521,7 @@ TerrainImageEditorDialog::TerrainImageEditorDialog(
     documentButtons->addWidget(saveAsButton);
     documentLayout->addRow(documentButtons);
     sideLayout->addWidget(documentGroup);
+
     QGroupBox *paintGroup = new QGroupBox(tr("Paint"), this);
     QVBoxLayout *paintLayout = new QVBoxLayout(paintGroup);
     QHBoxLayout *historyLayout = new QHBoxLayout;
@@ -480,6 +532,7 @@ TerrainImageEditorDialog::TerrainImageEditorDialog(
     historyLayout->addWidget(mUndoButton);
     historyLayout->addWidget(mRedoButton);
     paintLayout->addLayout(historyLayout);
+
     QHBoxLayout *toolLayout = new QHBoxLayout;
     QToolButton *brushTool = new QToolButton(paintGroup);
     QToolButton *fillTool = new QToolButton(paintGroup);
@@ -499,6 +552,7 @@ TerrainImageEditorDialog::TerrainImageEditorDialog(
     toolLayout->addWidget(fillTool);
     toolLayout->addWidget(mEraserButton);
     paintLayout->addLayout(toolLayout);
+
     QRadioButton *groundLayer = new QRadioButton(tr("Ground (bitmap 0)"),
                                                  paintGroup);
     QRadioButton *vegetationLayer =
@@ -531,6 +585,7 @@ TerrainImageEditorDialog::TerrainImageEditorDialog(
     paintHint->setWordWrap(true);
     paintLayout->addWidget(paintHint);
     sideLayout->addWidget(paintGroup);
+
     QGroupBox *proceduralGroup = new QGroupBox(
                 tr("Procedural generation"), this);
     QFormLayout *proceduralLayout = new QFormLayout(proceduralGroup);
@@ -563,6 +618,7 @@ TerrainImageEditorDialog::TerrainImageEditorDialog(
     proceduralLayout->addRow(generatorHint);
     sideLayout->addWidget(proceduralGroup);
     sideLayout->addStretch();
+
     QWidget *sideWidget = new QWidget(this);
     sideWidget->setLayout(sideLayout);
     QScrollArea *controlsScroll = new QScrollArea(this);
@@ -571,20 +627,24 @@ TerrainImageEditorDialog::TerrainImageEditorDialog(
     controlsScroll->setFrameShape(QFrame::NoFrame);
     controlsScroll->setMinimumWidth(350);
     controlsScroll->setMaximumWidth(450);
+
     QScrollArea *scrollArea = new QScrollArea(this);
     scrollArea->setWidget(mCanvas);
     scrollArea->setWidgetResizable(false);
     scrollArea->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+
     QSplitter *splitter = new QSplitter(this);
     splitter->addWidget(controlsScroll);
     splitter->addWidget(scrollArea);
     splitter->setStretchFactor(1, 1);
+
     QHBoxLayout *statusLayout = new QHBoxLayout;
     statusLayout->addWidget(mImageStatus, 1);
     statusLayout->addWidget(mPointerStatus);
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
     mainLayout->addWidget(splitter, 1);
     mainLayout->addLayout(statusLayout);
+
     connect(browseRulesButton, &QToolButton::clicked,
             this, &TerrainImageEditorDialog::browseRules);
     connect(reloadRulesButton, &QPushButton::clicked,
@@ -642,73 +702,18 @@ TerrainImageEditorDialog::TerrainImageEditorDialog(
             this, &TerrainImageEditorDialog::generateLake);
     connect(roadsButton, &QPushButton::clicked,
             this, &TerrainImageEditorDialog::generateRoads);
+
     mRulesPath->setText(QDir::toNativeSeparators(defaultRulesPath()));
     mGroundPath->setText(QDir::toNativeSeparators(defaultGroundPath()));
     reloadRules();
+
     const QString initialGround = normalizedGroundPath(mGroundPath->text());
     if (!initialGround.isEmpty() && QFileInfo::exists(initialGround))
         loadImagePair(initialGround);
     else
         newImages();
 }
-bool TerrainImageEditorDialog::importImages(
-        const QImage &ground, const QImage &vegetation,
-        const QPoint &cellOrigin, const QString &suggestedGroundPath,
-        const QByteArray &sourceMetadata)
-{
-    if (ground.isNull() || vegetation.isNull()
-            || ground.size() != vegetation.size()) {
-        QMessageBox::warning(
-                    this, tr("Import Terrain Images"),
-                    tr("The imported ground and vegetation images are empty "
-                       "or have different dimensions."));
-        return false;
-    }
-    World *world = mWorldDocument ? mWorldDocument->world() : nullptr;
-    const int cellSize = world ? world->cellSize() : 300;
-    if ((ground.width() % cellSize) != 0
-            || (ground.height() % cellSize) != 0) {
-        QMessageBox::warning(
-                    this, tr("Import Terrain Images"),
-                    tr("The imported images are not exact multiples of the "
-                       "%1-square project cell size.").arg(cellSize));
-        return false;
-    }
-    if (!validateWorkingImageSize(ground.size(),
-                                  tr("Import terrain images"))) {
-        return false;
-    }
-    const int cellsWide = ground.width() / cellSize;
-    const int cellsHigh = ground.height() / cellSize;
-    if (world && (cellOrigin.x() < 0 || cellOrigin.y() < 0
-                  || cellOrigin.x() + cellsWide > world->width()
-                  || cellOrigin.y() + cellsHigh > world->height())) {
-        QMessageBox::warning(
-                    this, tr("Import Terrain Images"),
-                    tr("The imported image placement is outside the current "
-                       "project bounds."));
-        return false;
-    }
-    mCanvas->setImages(
-                ground.convertToFormat(QImage::Format_ARGB32),
-                vegetation.convertToFormat(QImage::Format_ARGB32),
-                cellSize);
-    mCellsWide->setValue(cellsWide);
-    mCellsHigh->setValue(cellsHigh);
-    mOriginX->setValue(cellOrigin.x());
-    mOriginY->setValue(cellOrigin.y());
-    mAttachToProject->setChecked(true);
-    mGroundPath->setText(QDir::toNativeSeparators(
-                             normalizedGroundPath(suggestedGroundPath)));
-    mSourceMetadata = sourceMetadata;
-    resetHistory(true);
-    updateImageStatus();
-    return true;
-}
-bool TerrainImageEditorDialog::saveImportedImages()
-{
-    return saveImages();
-}
+
 void TerrainImageEditorDialog::closeEvent(QCloseEvent *event)
 {
     if (maybeDiscardChanges())
@@ -716,6 +721,7 @@ void TerrainImageEditorDialog::closeEvent(QCloseEvent *event)
     else
         event->ignore();
 }
+
 void TerrainImageEditorDialog::browseRules()
 {
     const QString path = QFileDialog::getOpenFileName(
@@ -727,6 +733,7 @@ void TerrainImageEditorDialog::browseRules()
     mRulesPath->setText(QDir::toNativeSeparators(path));
     reloadRules();
 }
+
 void TerrainImageEditorDialog::reloadRules()
 {
     const QString path = QDir::fromNativeSeparators(
@@ -737,6 +744,7 @@ void TerrainImageEditorDialog::reloadRules()
                              .arg(QDir::toNativeSeparators(path)));
     }
 }
+
 void TerrainImageEditorDialog::newImages()
 {
     if (!maybeDiscardChanges())
@@ -747,6 +755,7 @@ void TerrainImageEditorDialog::newImages()
                      mCellsHigh->value() * cellSize);
     if (!validateWorkingImageSize(size, tr("Create images")))
         return;
+
     QImage ground(size, QImage::Format_ARGB32);
     QImage vegetation(size, QImage::Format_ARGB32);
     if (ground.isNull() || vegetation.isNull()) {
@@ -767,6 +776,7 @@ void TerrainImageEditorDialog::newImages()
     resetHistory(true);
     updateImageStatus();
 }
+
 void TerrainImageEditorDialog::openImages()
 {
     if (!maybeDiscardChanges())
@@ -779,6 +789,7 @@ void TerrainImageEditorDialog::openImages()
     if (!path.isEmpty())
         loadImagePair(normalizedGroundPath(path));
 }
+
 bool TerrainImageEditorDialog::saveImages()
 {
     QString groundPath = normalizedGroundPath(mGroundPath->text());
@@ -786,6 +797,7 @@ bool TerrainImageEditorDialog::saveImages()
         return saveImagesAs();
     if (mCanvas->groundImage().isNull())
         return false;
+
     QString attachmentError;
     if (mAttachToProject->isChecked() &&
             !validateAttachment(&attachmentError)) {
@@ -793,18 +805,16 @@ bool TerrainImageEditorDialog::saveImages()
                              attachmentError);
         return false;
     }
+
     const QFileInfo info(groundPath);
     if (!QDir().mkpath(info.absolutePath())) {
         QMessageBox::warning(this, tr("Save Images"),
                              tr("The map directory could not be created."));
         return false;
     }
+
     const QString vegetationPath = vegetationPathFor(groundPath);
-    const QString sourceMetadataPath = info.dir().filePath(
-                info.completeBaseName() + QStringLiteral(".source.json"));
-    QStringList paths = {groundPath, vegetationPath};
-    if (!mSourceMetadata.isEmpty())
-        paths += sourceMetadataPath;
+    const QStringList paths = {groundPath, vegetationPath};
     for (const QString &path : paths) {
         if (!QFileInfo::exists(path))
             continue;
@@ -812,27 +822,15 @@ bool TerrainImageEditorDialog::saveImages()
         if (!QFileInfo::exists(backup))
             QFile::copy(path, backup);
     }
+
     QString error;
-    if (!mSourceMetadata.isEmpty()) {
-        QSaveFile metadataFile(sourceMetadataPath);
-        if (!metadataFile.open(QIODevice::WriteOnly)
-                || metadataFile.write(mSourceMetadata)
-                != mSourceMetadata.size()
-                || !metadataFile.commit()) {
-            QMessageBox::warning(
-                        this, tr("Save Images"),
-                        tr("The OpenStreetMap source metadata could not be "
-                           "saved atomically:\n%1")
-                        .arg(QDir::toNativeSeparators(sourceMetadataPath)));
-            return false;
-        }
-    }
     if (!savePngAtomically(mCanvas->groundImage(), groundPath, &error) ||
             !savePngAtomically(mCanvas->vegetationImage(),
                                vegetationPath, &error)) {
         QMessageBox::warning(this, tr("Save Images"), error);
         return false;
     }
+
     if (mAttachToProject->isChecked() &&
             !attachImagesToWorld(groundPath, &error)) {
         QMessageBox::warning(
@@ -843,12 +841,14 @@ bool TerrainImageEditorDialog::saveImages()
         setDirty(false);
         return false;
     }
+
     mGroundPath->setText(QDir::toNativeSeparators(groundPath));
     mSavedRevision = mRevision;
     setDirty(false);
     updateImageStatus();
     return true;
 }
+
 bool TerrainImageEditorDialog::saveImagesAs()
 {
     const QString path = QFileDialog::getSaveFileName(
@@ -861,6 +861,7 @@ bool TerrainImageEditorDialog::saveImagesAs()
                              normalizedGroundPath(path)));
     return saveImages();
 }
+
 void TerrainImageEditorDialog::activeLayerChanged(int bitmapIndex)
 {
     mActiveLayer = qBound(0, bitmapIndex, 1);
@@ -870,6 +871,7 @@ void TerrainImageEditorDialog::activeLayerChanged(int bitmapIndex)
         mEraserButton->setChecked(false);
     populatePalette(mActiveLayer);
 }
+
 void TerrainImageEditorDialog::paletteChanged(int index)
 {
     if (index < 0)
@@ -882,6 +884,7 @@ void TerrainImageEditorDialog::paletteChanged(int index)
         mEraserButton->setChecked(false);
     mCanvas->setPaintColor(color);
 }
+
 void TerrainImageEditorDialog::pickedColor(const QColor &color)
 {
     if (mActiveLayer == 1 && color.red() == 0 &&
@@ -896,6 +899,7 @@ void TerrainImageEditorDialog::pickedColor(const QColor &color)
         }
     }
 }
+
 void TerrainImageEditorDialog::eraseVegetationToggled(bool checked)
 {
     if (checked && mActiveLayer == 1) {
@@ -907,16 +911,19 @@ void TerrainImageEditorDialog::eraseVegetationToggled(bool checked)
         mCanvas->setPaintColor(
                     mPalette->itemData(index).value<QColor>());
 }
+
 void TerrainImageEditorDialog::undoImageEdit()
 {
     if (mUndoHistory.isEmpty())
         return;
+
     HistoryState current;
     current.ground = mCanvas->groundImage();
     current.vegetation = mCanvas->vegetationImage();
     current.label = mUndoHistory.last().label;
     current.revision = mRevision;
     mRedoHistory += current;
+
     const HistoryState previous = mUndoHistory.takeLast();
     restoreHistoryState(previous.ground, previous.vegetation);
     mRevision = previous.revision;
@@ -925,10 +932,12 @@ void TerrainImageEditorDialog::undoImageEdit()
     updateHistoryActions();
     updateImageStatus();
 }
+
 void TerrainImageEditorDialog::redoImageEdit()
 {
     if (mRedoHistory.isEmpty())
         return;
+
     HistoryState current;
     current.ground = mCanvas->groundImage();
     current.vegetation = mCanvas->vegetationImage();
@@ -943,6 +952,7 @@ void TerrainImageEditorDialog::redoImageEdit()
     updateHistoryActions();
     updateImageStatus();
 }
+
 void TerrainImageEditorDialog::updateHistoryActions()
 {
     mUndoButton->setEnabled(!mUndoHistory.isEmpty());
@@ -954,6 +964,7 @@ void TerrainImageEditorDialog::updateHistoryActions()
                             ? tr("Nothing to redo")
                             : tr("Redo %1").arg(mRedoHistory.last().label));
 }
+
 void TerrainImageEditorDialog::generateTerrainPatches()
 {
     if (mCanvas->groundImage().isNull())
@@ -982,6 +993,7 @@ void TerrainImageEditorDialog::generateTerrainPatches()
     painter.end();
     applyGeneratedImages(ground, vegetation, tr("Generate terrain patches"));
 }
+
 void TerrainImageEditorDialog::generateVegetation()
 {
     if (mCanvas->vegetationImage().isNull())
@@ -1010,6 +1022,7 @@ void TerrainImageEditorDialog::generateVegetation()
     painter.end();
     applyGeneratedImages(ground, vegetation, tr("Generate vegetation cover"));
 }
+
 void TerrainImageEditorDialog::generateRiver()
 {
     if (mCanvas->groundImage().isNull())
@@ -1042,6 +1055,7 @@ void TerrainImageEditorDialog::generateRiver()
                          QPointF(current.x(), mid), current);
         }
     }
+
     const QColor water = featureColor(
                 0, {QStringLiteral("water")}, QColor(0, 138, 255));
     QPainter groundPainter(&ground);
@@ -1058,6 +1072,7 @@ void TerrainImageEditorDialog::generateRiver()
     vegetationPainter.end();
     applyGeneratedImages(ground, vegetation, tr("Generate river"));
 }
+
 void TerrainImageEditorDialog::generateLake()
 {
     if (mCanvas->groundImage().isNull())
@@ -1073,6 +1088,7 @@ void TerrainImageEditorDialog::generateLake()
                 int(random.bounded(uint(qMax(1, ground.width() * 3 / 5)))),
                 ground.height() / 5 +
                 int(random.bounded(uint(qMax(1, ground.height() * 3 / 5)))));
+
     QPainter groundPainter(&ground);
     QPainter vegetationPainter(&vegetation);
     groundPainter.setRenderHint(QPainter::Antialiasing, false);
@@ -1098,6 +1114,7 @@ void TerrainImageEditorDialog::generateLake()
     vegetationPainter.end();
     applyGeneratedImages(ground, vegetation, tr("Generate lake"));
 }
+
 void TerrainImageEditorDialog::generateRoads()
 {
     if (mCanvas->groundImage().isNull())
@@ -1111,6 +1128,7 @@ void TerrainImageEditorDialog::generateRoads()
                     QStringLiteral("asphalt")},
                 QColor(100, 100, 100));
     const int roadWidth = qMax(1, mFeatureWidth->value());
+
     QPainter groundPainter(&ground);
     QPainter vegetationPainter(&vegetation);
     groundPainter.setRenderHint(QPainter::Antialiasing, false);
@@ -1148,6 +1166,7 @@ void TerrainImageEditorDialog::generateRoads()
     vegetationPainter.end();
     applyGeneratedImages(ground, vegetation, tr("Generate road network"));
 }
+
 void TerrainImageEditorDialog::updatePointerStatus(const QPoint &point)
 {
     if (point.x() < 0 || point.y() < 0) {
@@ -1160,6 +1179,7 @@ void TerrainImageEditorDialog::updatePointerStatus(const QPoint &point)
                 .arg(point.x()).arg(point.y())
                 .arg(point.x() / cellSize).arg(point.y() / cellSize));
 }
+
 QString TerrainImageEditorDialog::defaultRulesPath() const
 {
     if (mWorldDocument && mWorldDocument->world()) {
@@ -1184,6 +1204,7 @@ QString TerrainImageEditorDialog::defaultRulesPath() const
     return QDir(QCoreApplication::applicationDirPath())
             .filePath(QLatin1String("Rules.txt"));
 }
+
 QString TerrainImageEditorDialog::defaultGroundPath() const
 {
     if (mWorldDocument && mWorldDocument->world() &&
@@ -1197,6 +1218,7 @@ QString TerrainImageEditorDialog::defaultGroundPath() const
     return QDir(root).filePath(
                 QLatin1String("map/Map.png"));
 }
+
 QString TerrainImageEditorDialog::normalizedGroundPath(
         const QString &path) const
 {
@@ -1210,6 +1232,7 @@ QString TerrainImageEditorDialog::normalizedGroundPath(
     return QDir::cleanPath(info.dir().filePath(
                                baseName + QLatin1String(".png")));
 }
+
 QString TerrainImageEditorDialog::vegetationPathFor(
         const QString &groundPath) const
 {
@@ -1217,6 +1240,7 @@ QString TerrainImageEditorDialog::vegetationPathFor(
     return info.dir().filePath(
                 info.completeBaseName() + QLatin1String("_veg.png"));
 }
+
 bool TerrainImageEditorDialog::loadRulesFile(const QString &path)
 {
     Tiled::Internal::BmpRulesFile file;
@@ -1226,6 +1250,7 @@ bool TerrainImageEditorDialog::loadRulesFile(const QString &path)
                                  file.errorString());
         return false;
     }
+
     mEntries.clear();
     QSet<QString> seen;
     for (const BmpRule *rule : file.rules()) {
@@ -1248,6 +1273,7 @@ bool TerrainImageEditorDialog::loadRulesFile(const QString &path)
             entry.label = tr("Unnamed rule");
         mEntries += entry;
     }
+
     if (mEntries.isEmpty())
         return false;
     mRulesPath->setText(QDir::toNativeSeparators(path));
@@ -1263,6 +1289,7 @@ bool TerrainImageEditorDialog::loadRulesFile(const QString &path)
     populatePalette(mActiveLayer);
     return true;
 }
+
 bool TerrainImageEditorDialog::loadImagePair(const QString &groundPath)
 {
     QImageReader groundReader(groundPath);
@@ -1272,6 +1299,7 @@ bool TerrainImageEditorDialog::loadImagePair(const QString &groundPath)
                                       tr("Open terrain images"))) {
         return false;
     }
+
     const QImage ground = groundReader.read();
     if (ground.isNull()) {
         QMessageBox::warning(this, tr("Open Images"),
@@ -1287,6 +1315,7 @@ bool TerrainImageEditorDialog::loadImagePair(const QString &groundPath)
             !validateWorkingImageSize(ground.size(),
                                       tr("Open terrain images")))
         return false;
+
     World *world = mWorldDocument ? mWorldDocument->world() : nullptr;
     const int cellSize = world ? world->cellSize() : 300;
     if ((ground.width() % cellSize) != 0 ||
@@ -1300,6 +1329,7 @@ bool TerrainImageEditorDialog::loadImagePair(const QString &groundPath)
                     .arg(ground.width()).arg(ground.height()).arg(cellSize));
         return false;
     }
+
     const QString vegetationPath = vegetationPathFor(groundPath);
     QImage vegetation;
     if (!QFileInfo::exists(vegetationPath)) {
@@ -1356,6 +1386,7 @@ bool TerrainImageEditorDialog::loadImagePair(const QString &groundPath)
                     .arg(ground.width()).arg(ground.height()));
         return false;
     }
+
     mCanvas->setImages(ground, vegetation, cellSize);
     mGroundPath->setText(QDir::toNativeSeparators(groundPath));
     mCellsWide->setValue(ground.width() / cellSize);
@@ -1376,6 +1407,7 @@ bool TerrainImageEditorDialog::loadImagePair(const QString &groundPath)
     updateImageStatus();
     return true;
 }
+
 bool TerrainImageEditorDialog::validateWorkingImageSize(
         const QSize &size, const QString &operation)
 {
@@ -1387,17 +1419,36 @@ bool TerrainImageEditorDialog::validateWorkingImageSize(
                     .arg(operation).arg(size.width()).arg(size.height()));
         return false;
     }
-    World *world = mWorldDocument ? mWorldDocument->world() : nullptr;
-    const int cellSize = world ? world->cellSize() : 300;
-    if (!ensureWorkingImageMemoryLimit(
-                this, size, operation, cellSize)) {
-        return false;
-    }
+
     const qint64 bytes = workingImageBytes(size);
     const qint64 maxWorkingImageBytes =
             qint64(Preferences::instance()->terrainImageMemoryLimitMiB())
             * 1024 * 1024;
     const qint64 warnWorkingImageBytes = maxWorkingImageBytes / 2;
+    World *world = mWorldDocument ? mWorldDocument->world() : nullptr;
+    const int cellSize = world ? world->cellSize() : 300;
+    const int approximateSquareCells = qMax(
+                1, int(std::sqrt(double(maxWorkingImageBytes) / 12.0) /
+                       double(cellSize)));
+    if (bytes > maxWorkingImageBytes) {
+        QMessageBox::critical(
+                    this, tr("Terrain Images Are Too Large"),
+                    tr("%1 would require at least %2 while editing %3 x %4 "
+                       "pixels (%5 x %6 cells).\n\n"
+                       "The configured editor limit is %7. Increase "
+                       "\"Terrain image memory limit\" in WorldEd Preferences "
+                       "if this computer has enough RAM, or split the map into "
+                       "smaller images. At the current limit, a square image "
+                       "should be about %8 x %8 cells or less.")
+                    .arg(operation, memorySizeText(bytes))
+                    .arg(size.width()).arg(size.height())
+                    .arg(size.width() / cellSize)
+                    .arg(size.height() / cellSize)
+                    .arg(memorySizeText(maxWorkingImageBytes))
+                    .arg(approximateSquareCells));
+        return false;
+    }
+
     if (bytes > warnWorkingImageBytes) {
         return QMessageBox::warning(
                     this, tr("Large Terrain Images"),
@@ -1410,78 +1461,7 @@ bool TerrainImageEditorDialog::validateWorkingImageSize(
     }
     return true;
 }
-bool TerrainImageEditorDialog::ensureWorkingImageMemoryLimit(
-        QWidget *parent, const QSize &size,
-        const QString &operation, int cellSize)
-{
-    if (!size.isValid() || size.isEmpty())
-        return false;
-    const qint64 bytes = workingImageBytes(size);
-    const qint64 bytesPerMiB = 1024LL * 1024LL;
-    const int configuredMiB =
-            Preferences::instance()->terrainImageMemoryLimitMiB();
-    const qint64 configuredBytes = qint64(configuredMiB) * bytesPerMiB;
-    if (bytes <= configuredBytes)
-        return true;
-    const int suggestedMiB = recommendedWorkingImageMemoryLimitMiB(size);
-    if (suggestedMiB <= 0) {
-        QMessageBox::critical(
-                    parent, tr("Terrain Images Exceed the Maximum Limit"),
-                    tr("%1 would require at least %2 while editing %3 x %4 "
-                       "pixels (%5 x %6 cells).\n\n"
-                       "WorldEd can configure at most 64 GiB for terrain "
-                       "images. This request cannot be increased safely. "
-                       "Reduce the project dimensions or split the map into "
-                       "smaller images.")
-                    .arg(operation, memorySizeText(bytes))
-                    .arg(size.width()).arg(size.height())
-                    .arg(size.width() / qMax(1, cellSize))
-                    .arg(size.height() / qMax(1, cellSize)));
-        return false;
-    }
-    QMessageBox prompt(
-                QMessageBox::Warning,
-                tr("Increase Terrain Image Memory Limit?"),
-                tr("%1 is estimated to require at least %2 for the ground "
-                   "image, vegetation image, and composite preview. The "
-                   "current terrain-image limit is %3.\n\n"
-                   "WorldEd can increase the limit to %4 and continue. The "
-                   "suggested value includes editing headroom and will be "
-                   "saved in Preferences. Undo history and the OSM handoff "
-                   "can use additional RAM. Continue only if this computer "
-                   "has enough free memory.")
-                .arg(operation, memorySizeText(bytes))
-                .arg(memorySizeText(configuredBytes))
-                .arg(memorySizeText(qint64(suggestedMiB) * bytesPerMiB)),
-                QMessageBox::NoButton, parent);
-    QPushButton *increaseButton = prompt.addButton(
-                tr("Increase to %1 and Continue")
-                .arg(memorySizeText(qint64(suggestedMiB) * bytesPerMiB)),
-                QMessageBox::AcceptRole);
-    QPushButton *cancelButton = prompt.addButton(
-                QMessageBox::Cancel);
-    prompt.setDefaultButton(cancelButton);
-    prompt.setEscapeButton(cancelButton);
-    prompt.exec();
-    if (prompt.clickedButton() != increaseButton)
-        return false;
-    Preferences::instance()->setTerrainImageMemoryLimitMiB(suggestedMiB);
-    return true;
-}
-int TerrainImageEditorDialog::recommendedWorkingImageMemoryLimitMiB(
-        const QSize &size)
-{
-    if (!size.isValid() || size.isEmpty())
-        return 0;
-    const qint64 bytesPerMiB = 1024LL * 1024LL;
-    const qint64 requiredMiB =
-            (workingImageBytes(size) + bytesPerMiB - 1) / bytesPerMiB;
-    const qint64 maximumMiB = 65536;
-    if (requiredMiB > maximumMiB)
-        return 0;
-    return int(qMin(maximumMiB,
-                    ((requiredMiB * 2 + 127) / 128) * 128));
-}
+
 bool TerrainImageEditorDialog::maybeDiscardChanges()
 {
     if (!mDirty)
@@ -1498,6 +1478,7 @@ bool TerrainImageEditorDialog::maybeDiscardChanges()
         return saveImages();
     return true;
 }
+
 bool TerrainImageEditorDialog::savePngAtomically(
         const QImage &image, const QString &path, QString *error) const
 {
@@ -1522,6 +1503,7 @@ bool TerrainImageEditorDialog::savePngAtomically(
     }
     return true;
 }
+
 bool TerrainImageEditorDialog::validateAttachment(QString *error) const
 {
     World *world = mWorldDocument ? mWorldDocument->world() : nullptr;
@@ -1535,6 +1517,7 @@ bool TerrainImageEditorDialog::validateAttachment(QString *error) const
             *error = tr("No terrain image is loaded.");
         return false;
     }
+
     const int width = mCanvas->groundImage().width() /
             mCanvas->cellSize();
     const int height = mCanvas->groundImage().height() /
@@ -1553,11 +1536,13 @@ bool TerrainImageEditorDialog::validateAttachment(QString *error) const
     }
     return true;
 }
+
 bool TerrainImageEditorDialog::attachImagesToWorld(
         const QString &groundPath, QString *error)
 {
     if (!validateAttachment(error))
         return false;
+
     World *world = mWorldDocument->world();
     const QString absolutePath =
             QDir::cleanPath(QFileInfo(groundPath).absoluteFilePath());
@@ -1574,6 +1559,7 @@ bool TerrainImageEditorDialog::attachImagesToWorld(
             break;
         }
     }
+
     const int width = mCanvas->groundImage().width() /
             mCanvas->cellSize();
     const int height = mCanvas->groundImage().height() /
@@ -1587,6 +1573,7 @@ bool TerrainImageEditorDialog::attachImagesToWorld(
             existing->size() != QSize(width, height) ||
             existingAbsolutePath.compare(
                 absolutePath, Qt::CaseInsensitive) != 0;
+
     BMPToTMXSettings settings = world->getBMPToTMXSettings();
     const QString rawRulesPath = QDir::fromNativeSeparators(
                 mRulesPath->text().trimmed());
@@ -1597,10 +1584,12 @@ bool TerrainImageEditorDialog::attachImagesToWorld(
             !rulesPath.isEmpty() &&
             QDir::cleanPath(settings.rulesFile).compare(
                 rulesPath, Qt::CaseInsensitive) != 0;
+
     if (!bmpChanged && !settingsChanged) {
         mWorldDocument->setSelectedBMPs({existing});
         return true;
     }
+
     QUndoStack *undoStack = mWorldDocument->undoStack();
     undoStack->beginMacro(tr("Attach Terrain Image"));
     WorldBMP *attached = existing;
@@ -1622,6 +1611,7 @@ bool TerrainImageEditorDialog::attachImagesToWorld(
         mWorldDocument->setSelectedBMPs({attached});
     return true;
 }
+
 void TerrainImageEditorDialog::beginImageEdit(const QString &label)
 {
     if (mHistoryEditActive || mCanvas->groundImage().isNull())
@@ -1632,6 +1622,7 @@ void TerrainImageEditorDialog::beginImageEdit(const QString &label)
     mPendingHistory.revision = mRevision;
     mHistoryEditActive = true;
 }
+
 void TerrainImageEditorDialog::endImageEdit()
 {
     if (!mHistoryEditActive)
@@ -1642,6 +1633,7 @@ void TerrainImageEditorDialog::endImageEdit()
         mPendingHistory = HistoryState();
         return;
     }
+
     mUndoHistory += mPendingHistory;
     mRedoHistory.clear();
     trimHistoryToBudget();
@@ -1651,6 +1643,7 @@ void TerrainImageEditorDialog::endImageEdit()
     updateHistoryActions();
     updateImageStatus();
 }
+
 void TerrainImageEditorDialog::trimHistoryToBudget()
 {
     qint64 bytes = 0;
@@ -1658,6 +1651,7 @@ void TerrainImageEditorDialog::trimHistoryToBudget()
         bytes += imageBytes(state.ground) + imageBytes(state.vegetation);
     for (const HistoryState &state : mRedoHistory)
         bytes += imageBytes(state.ground) + imageBytes(state.vegetation);
+
     const qint64 budget = historyBudgetBytes();
     while (!mUndoHistory.isEmpty()
            && (mUndoHistory.size() > 8 || bytes > budget)) {
@@ -1674,6 +1668,7 @@ void TerrainImageEditorDialog::trimHistoryToBudget()
         mRedoHistory.removeFirst();
     }
 }
+
 void TerrainImageEditorDialog::resetHistory(bool dirty)
 {
     mUndoHistory.clear();
@@ -1686,11 +1681,13 @@ void TerrainImageEditorDialog::resetHistory(bool dirty)
     setDirty(dirty);
     updateHistoryActions();
 }
+
 void TerrainImageEditorDialog::restoreHistoryState(
         const QImage &ground, const QImage &vegetation)
 {
     mCanvas->setImages(ground, vegetation, mCanvas->cellSize());
 }
+
 void TerrainImageEditorDialog::populatePalette(int bitmapIndex)
 {
     const QColor selected = mLayerColors[bitmapIndex];
@@ -1716,6 +1713,7 @@ void TerrainImageEditorDialog::populatePalette(int bitmapIndex)
     mPalette->blockSignals(false);
     paletteChanged(selectedIndex);
 }
+
 void TerrainImageEditorDialog::setDirty(bool dirty)
 {
     mDirty = dirty;
@@ -1724,6 +1722,7 @@ void TerrainImageEditorDialog::setDirty(bool dirty)
         title += QLatin1String(" *");
     setWindowTitle(title);
 }
+
 void TerrainImageEditorDialog::updateImageStatus()
 {
     if (mCanvas->groundImage().isNull()) {
@@ -1740,6 +1739,7 @@ void TerrainImageEditorDialog::updateImageStatus()
                 .arg(memorySizeText(workingImageBytes(size)))
                 .arg(mDirty ? tr(" - modified") : QString()));
 }
+
 QColor TerrainImageEditorDialog::featureColor(
         int bitmapIndex, const QStringList &keywords,
         const QColor &fallback) const
@@ -1757,6 +1757,7 @@ QColor TerrainImageEditorDialog::featureColor(
     }
     return fallback;
 }
+
 void TerrainImageEditorDialog::applyGeneratedImages(
         const QImage &ground, const QImage &vegetation,
         const QString &label)

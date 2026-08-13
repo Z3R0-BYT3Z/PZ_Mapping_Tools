@@ -41,7 +41,6 @@ class PropertiesDock;
 class RoadsDock;
 class SearchDock;
 class StreetNamesDock;
-class RegionsDock;
 class UndoDock;
 class World;
 class WorldDocument;
@@ -121,8 +120,6 @@ public slots:
     void WriteRoomTones();
 
     void updateWindowTitle();
-    void updateDocumentAutoSaveTimer();
-    void autoSaveCurrentDocument();
 
     void generateLotsAll8x8();
     void generateLotsSelected8x8();
@@ -203,7 +200,6 @@ public slots:
 
     void generateBiomeMap();
     void terrainImageEditor();
-    void importOpenStreetMapTerrain();
     void worldGenPreview();
     void worldGenPrefabEditor();
     void tilesetCleanup();
@@ -263,7 +259,6 @@ private:
     PropertiesDock *mPropertiesDock;
     SearchDock* mSearchDock;
     StreetNamesDock *mStreetNamesDock;
-    RegionsDock *mRegionsDock;
     InGameMapDock* mInGameMapDock;
 #ifdef ROAD_UI
     RoadsDock *mRoadsDock;
@@ -279,6 +274,8 @@ private:
     KeyboardShortcutWindow *mKeyboardShortcutWindow = nullptr;
     QAction *mUndoAction = nullptr;
     QAction *mRedoAction = nullptr;
+    QAction *mNightPreviewAction = nullptr;
+    QToolButton *mNightPreviewButton = nullptr;
     QToolButton *mPoweredPreviewButton = nullptr;
     QToolButton *mSnowPreviewButton = nullptr;
     QToolButton *mJumboPreviewButton = nullptr;

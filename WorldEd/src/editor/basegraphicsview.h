@@ -104,6 +104,7 @@ public:
     virtual QRectF sceneRectForMiniMap() const;
 
     void ensureRectVisible(const QRectF &rect, int xmargin = 50, int ymargin = 50);
+    void setNightPreviewEnabled(bool enabled);
     void setPoweredPreviewEnabled(bool enabled);
     void setSnowPreviewEnabled(bool enabled);
     void setJumboPreviewEnabled(bool enabled);
@@ -111,6 +112,7 @@ public:
 
 signals:
     void statusBarCoordinatesChanged(int x, int y);
+    void nightPreviewToggled(bool enabled);
     void poweredPreviewToggled(bool enabled);
     void snowPreviewToggled(bool enabled);
     void jumboPreviewToggled(bool enabled);
@@ -156,6 +158,7 @@ protected:
     int mScrollMagnitude;
     BaseGraphicsScene *mScene;
     MiniMap *mMiniMap;
+    QToolButton *mNightPreviewButton;
     QToolButton *mPoweredPreviewButton;
     QToolButton *mSnowPreviewButton;
     QToolButton *mJumboPreviewButton;

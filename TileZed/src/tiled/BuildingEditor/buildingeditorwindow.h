@@ -35,6 +35,7 @@ class QSplitter;
 class QStackedWidget;
 class QUndoGroup;
 class QGraphicsView;
+class QShowEvent;
 
 namespace Ui {
 class BuildingEditorWindow;
@@ -46,7 +47,6 @@ class Tile;
 class Tileset;
 namespace Internal {
 class TileDefFile;
-class TileSelectionScope;
 class Zoomable;
 }
 }
@@ -181,6 +181,7 @@ public:
     ~BuildingEditorWindow();
 
     void closeEvent(QCloseEvent *event);
+    void showEvent(QShowEvent *event) override;
 
     bool openFile(const QString &fileName);
     bool openAutoSave(const QString &fileName);
@@ -231,8 +232,6 @@ public:
 
     Ui::BuildingEditorWindow *actionIface() { return ui; }
     QToolBar *createCommonToolBar();
-    void setTileSelectionScope(Tiled::Internal::TileSelectionScope *scope)
-    { mTileSelectionScope = scope; }
 
     void documentTabCloseRequested(int index);
 
@@ -292,6 +291,8 @@ private slots:
 
     void selectAll();
     void selectNone();
+    void fitBuildingToView();
+    void centerBuildingInView();
 
     void preferences();
 
@@ -362,7 +363,7 @@ private:
     QAction *mRedoAction;
     QAction *mRunLuaScriptAction = nullptr;
     QAction *mLuaConsoleAction = nullptr;
-    Tiled::Internal::TileSelectionScope *mTileSelectionScope = nullptr;
+    QAction *mNightPreviewAction = nullptr;
     QSettings &mSettings;
     QString mError;
     QString mLuaScriptFile;

@@ -28,21 +28,14 @@
 #include "utils.h"
 #include "../firstlaunchdialog.h"
 #include "../portablesettings.h"
-#include "../sharedmainwindowgeometrywidget.h"
 
 #include <QColorDialog>
 #include <QCheckBox>
 #include <QFileDialog>
 #include <QDialogButtonBox>
-#include <QFormLayout>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPushButton>
-#include <QGroupBox>
-#include <QHBoxLayout>
-#include <QLabel>
-#include <QLineEdit>
-#include <QVBoxLayout>
 #include <QStyledItemDelegate>
 
 #ifndef QT_NO_OPENGL
@@ -112,9 +105,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) :
     QDialog(parent),
     mUi(new Ui::PreferencesDialog),
     mLanguages(LanguageManager::instance()->availableLanguages()),
-    mSyncThemeCheckBox(nullptr),
-    mProjectZomboidDirectory(nullptr),
-    mAutoSaveCombo(new QComboBox(this))
+    mSyncThemeCheckBox(nullptr)
 {
     mUi->setupUi(this);
     connect(mUi->sharedPathsButton, &QAbstractButton::clicked,
@@ -164,32 +155,6 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) :
 
 #ifdef ZOMBOID
     mUi->tabWidget->setCurrentIndex(0);
-    QGroupBox *gamePathBox = new QGroupBox(
-                tr("Project Zomboid Installation"), mUi->tab_4);
-    QVBoxLayout *gamePathLayout = new QVBoxLayout(gamePathBox);
-    QLabel *gamePathDescription = new QLabel(tr(
-            "Shared read-only game root used to find TileDefs, texture packs, "
-            "WorldGen biomes and prefabs, and procedural loot. Extracted "
-            "mapping PNG Tiles remain configured separately. Basement "
-            "sources and PZBY files use the portable pzby_tbx directory "
-            "beside bin."), gamePathBox);
-    gamePathDescription->setWordWrap(true);
-    gamePathLayout->addWidget(gamePathDescription);
-    QHBoxLayout *gamePathRow = new QHBoxLayout;
-    mProjectZomboidDirectory = new QLineEdit(gamePathBox);
-    mProjectZomboidDirectory->setReadOnly(true);
-    gamePathRow->addWidget(mProjectZomboidDirectory, 1);
-    QPushButton *browseGamePath = new QPushButton(tr("Browse..."), gamePathBox);
-    QPushButton *clearGamePath = new QPushButton(tr("Clear"), gamePathBox);
-    gamePathRow->addWidget(browseGamePath);
-    gamePathRow->addWidget(clearGamePath);
-    gamePathLayout->addLayout(gamePathRow);
-    mUi->verticalLayout_7->insertWidget(1, gamePathBox);
-    connect(browseGamePath, &QAbstractButton::clicked,
-            this, &PreferencesDialog::browseProjectZomboidDirectory);
-    connect(clearGamePath, &QAbstractButton::clicked, this, [this]() {
-        mProjectZomboidDirectory->clear();
-    });
     QPushButton *resetLayoutButton = mUi->buttonBox->addButton(
                 tr("Reset Interface Layout"),
                 QDialogButtonBox::ActionRole);
@@ -246,26 +211,6 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) :
         PortableSettings::setSyncThemeAcrossApplications(
                     enabled, mUi->themeCombo->currentText());
     });
-    mUi->tabWidget->addTab(
-                new SharedMainWindowGeometryWidget(parent, mUi->tabWidget),
-                tr("Window Setup"));
-    QWidget *savingTab = new QWidget(mUi->tabWidget);
-    QVBoxLayout *savingLayout = new QVBoxLayout(savingTab);
-    QGroupBox *autoSaveGroup = new QGroupBox(tr("Automatic Save"), savingTab);
-    QFormLayout *autoSaveLayout = new QFormLayout(autoSaveGroup);
-    mAutoSaveCombo->addItem(tr("Disabled"), 0);
-    for (int minutes : {1, 5, 10, 20, 60})
-        mAutoSaveCombo->addItem(tr("Every %1 minute(s)").arg(minutes),
-                                minutes);
-    autoSaveLayout->addRow(tr("Save modified maps:"), mAutoSaveCombo);
-    QLabel *autoSaveDescription = new QLabel(tr(
-            "Only an existing TMX with a file path is saved. New untitled "
-            "maps still require Save As."), autoSaveGroup);
-    autoSaveDescription->setWordWrap(true);
-    autoSaveLayout->addRow(autoSaveDescription);
-    savingLayout->addWidget(autoSaveGroup);
-    savingLayout->addStretch();
-    mUi->tabWidget->addTab(savingTab, tr("Saving"));
 #endif // ZOMBOID
 
     connect(mUi->objectTypesTable->selectionModel(),
@@ -463,28 +408,6 @@ void PreferencesDialog::browseThumbnailDirectory()
     mUi->thumbnailEdit->setText(QDir::toNativeSeparators(f));
 }
 
-void PreferencesDialog::browseProjectZomboidDirectory()
-{
-    const QString directory = QFileDialog::getExistingDirectory(
-                this, tr("Project Zomboid Installation"),
-                mProjectZomboidDirectory->text());
-    if (directory.isEmpty())
-        return;
-    const QString normalized =
-            PortableSettings::normalizedGamePath(directory);
-    if (normalized.isEmpty()) {
-        QMessageBox::warning(
-                    this, tr("Invalid Project Zomboid Installation"),
-                    tr("Choose the Project Zomboid installation root or its "
-                       "media directory. The selected location must contain "
-                       "recognizable game data such as Lua, TileDefs, or "
-                       "texture packs."));
-        return;
-    }
-    mProjectZomboidDirectory->setText(
-                QDir::toNativeSeparators(normalized));
-}
-
 void PreferencesDialog::browseWorlded()
 {
     QString f = QFileDialog::getOpenFileName(this, tr("Choose WorldEd Project"),
@@ -520,8 +443,7 @@ void PreferencesDialog::lowerPZW()
 void PreferencesDialog::addPropertiesFile()
 {
     QString f = QFileDialog::getOpenFileName(this, tr("Choose .tiles File"),
-                                             Preferences::instance()
-                                             ->gameMediaPath(),
+                                             QString(),
                                              tr("Binary property files (*.tiles);;Text property files (*.tiles.txt)"));
     if (f.isEmpty())
         return;
@@ -608,8 +530,6 @@ void PreferencesDialog::fromPreferences()
 #ifdef ZOMBOID
     mUi->bgColor->setColor(prefs->backgroundColor());
     mUi->configDirectory->setText(QDir::toNativeSeparators(prefs->configPath()));
-    mProjectZomboidDirectory->setText(QDir::toNativeSeparators(
-                                         prefs->projectZomboidDirectory()));
     mUi->thumbnailEdit->setText(QDir::toNativeSeparators(prefs->thumbnailsDirectory()));
 
     foreach (QString fileName, prefs->worldedFiles())
@@ -619,9 +539,6 @@ void PreferencesDialog::fromPreferences()
 
     mUi->showAdjacent->setChecked(prefs->showAdjacentMaps());
     mUi->restoreLastSession->setChecked(prefs->restoreLastSession());
-    const int autoSaveIndex = mAutoSaveCombo->findData(
-                prefs->autoSaveIntervalMinutes());
-    mAutoSaveCombo->setCurrentIndex(autoSaveIndex >= 0 ? autoSaveIndex : 0);
 
     for (const QString &fileName : prefs->tilePropertiesFiles())
         mUi->tilePropertiesListWidget->addItem(QDir::toNativeSeparators(fileName));
@@ -640,11 +557,7 @@ void PreferencesDialog::toPreferences()
     prefs->setAutomappingDrawing(mUi->autoMapWhileDrawing->isChecked());
 #ifdef ZOMBOID
     prefs->setThumbnailsDirectory(mUi->thumbnailEdit->text().trimmed());
-    prefs->setProjectZomboidDirectory(
-                mProjectZomboidDirectory->text().trimmed());
     prefs->setRestoreLastSession(mUi->restoreLastSession->isChecked());
-    prefs->setAutoSaveIntervalMinutes(
-                mAutoSaveCombo->currentData().toInt());
     QStringList fileNames;
     for (int i = 0; i < mUi->listPZW->count(); i++)
         fileNames += mUi->listPZW->item(i)->text();

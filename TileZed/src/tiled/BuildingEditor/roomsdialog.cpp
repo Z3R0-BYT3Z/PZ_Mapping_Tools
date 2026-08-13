@@ -184,6 +184,11 @@ void RoomsDialog::readRoomNamesDotTxt(QList<RoomName> &rooms)
     const QString applicationFile =
             QDir(preferences->appConfigPath()).filePath(fileName);
     const QString userFile = preferences->configPath(fileName);
+
+    // Read the shipped catalogue first, then let an optional external
+    // catalogue replace entries with the same internal name.  The portable
+    // layout normally points both paths at the same file, so never parse that
+    // file twice.
     readRoomNamesDotTxt(applicationFile, rooms);
     if (QDir::cleanPath(QFileInfo(applicationFile).absoluteFilePath())
             .compare(QDir::cleanPath(QFileInfo(userFile).absoluteFilePath()),
@@ -212,6 +217,7 @@ void RoomsDialog::readRoomNamesDotTxt(const QString &fileName, QList<RoomName> &
                        << "in" << fileName;
             continue;
         }
+
         RoomName roomName;
         roomName.internalName = block.value("internal").trimmed();
         roomName.label = block.value("label").trimmed();
@@ -221,6 +227,7 @@ void RoomsDialog::readRoomNamesDotTxt(const QString &fileName, QList<RoomName> &
                        << "(both internal and label are required)";
             continue;
         }
+
         const QString colorText = block.value("color").trimmed();
         if (!colorText.isEmpty())
             roomName.color = QColor(colorText);
@@ -242,6 +249,7 @@ void RoomsDialog::readRoomNamesDotTxt(const QString &fileName, QList<RoomName> &
                        << "- using deterministic fallback"
                        << roomName.color.name();
         }
+
         for (int index = rooms.size() - 1; index >= 0; --index) {
             if (rooms.at(index).internalName.compare(
                         roomName.internalName,

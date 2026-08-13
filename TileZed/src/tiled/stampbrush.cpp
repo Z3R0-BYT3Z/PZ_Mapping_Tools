@@ -194,6 +194,10 @@ void StampBrush::tilePositionChanged(const QPoint &)
     case Paint:
 #ifdef ZOMBOID
         foreach (const QPoint &p, calculateLine(x, y, mStampX, mStampY)) {
+            // beginPaint() already painted the previous brush position. The
+            // Bresenham line includes both endpoints, so painting it again
+            // would create a redundant undo command and two redraw signals
+            // for every mouse-move event.
             if (p == QPoint(x, y))
                 continue;
             // Must updatePosition() at each point along the line,
@@ -554,6 +558,9 @@ void StampBrush::doPaint(bool mergeable, int whereX, int whereY)
 
 #ifdef ZOMBOID
     if (mBrushBehavior == BrushBehavior::Erase) {
+        // An erase operation only needs an empty source with the dimensions
+        // of the active stamp. Cloning and then clearing the complete target
+        // layer here made every erased tile copy a whole 300x300 layer.
         TileLayer *stampCopy = new TileLayer(QString(), 0, 0,
                                              stamp->width(),
                                              stamp->height());

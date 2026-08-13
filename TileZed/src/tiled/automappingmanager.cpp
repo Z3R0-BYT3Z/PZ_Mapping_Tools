@@ -42,25 +42,31 @@ using namespace Tiled;
 using namespace Tiled::Internal;
 
 namespace {
+
 const char kPreferredRulesFile[] = "automapping-rules.txt";
 const char kLegacyRulesFile[] = "rules.txt";
+
 struct RuleListResolution
 {
     QString manifestPath;
     QString worldEdRulesPath;
     bool legacyManifest = false;
 };
+
 QString normalizedFilePath(const QFileInfo &info)
 {
     const QString canonical = info.canonicalFilePath();
     return canonical.isEmpty() ? info.absoluteFilePath() : canonical;
 }
+
 bool isWorldEdRulesLine(const QString &line);
+
 bool fileLooksLikeWorldEdRules(const QString &filePath)
 {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly))
         return false;
+
     QTextStream stream(&file);
     while (!stream.atEnd()) {
         const QString trimmed = stream.readLine().trimmed();
@@ -80,6 +86,7 @@ bool fileLooksLikeWorldEdRules(const QString &filePath)
     }
     return false;
 }
+
 bool isWorldEdRulesLine(const QString &line)
 {
     const QString trimmed = line.trimmed();
@@ -88,6 +95,7 @@ bool isWorldEdRulesLine(const QString &line)
             || trimmed.startsWith(QLatin1String("//"))) {
         return false;
     }
+
     const QString lower = trimmed.toLower();
     if (lower.startsWith(QLatin1String("version"))
             && lower.contains(QLatin1Char('='))) {
@@ -108,6 +116,7 @@ bool isWorldEdRulesLine(const QString &line)
             || lower.startsWith(QLatin1String("color ="))
             || lower.startsWith(QLatin1String("when ="));
 }
+
 bool looksLikeWorldEdRules(const QStringList &lines)
 {
     for (const QString &line : lines) {
@@ -117,6 +126,9 @@ bool looksLikeWorldEdRules(const QStringList &lines)
                 || trimmed.startsWith(QLatin1String("//"))) {
             continue;
         }
+
+        // A valid Automapper entry remains authoritative even when a
+        // directory in its path happens to contain words such as "rules".
         if (trimmed.endsWith(QLatin1String(".tmx"),
                              Qt::CaseInsensitive)
                 || trimmed.endsWith(QLatin1String(".txt"),
@@ -128,6 +140,7 @@ bool looksLikeWorldEdRules(const QStringList &lines)
     }
     return false;
 }
+
 RuleListResolution resolveRuleList(const QString &directoryPath)
 {
     const QDir directory(directoryPath);
@@ -135,11 +148,13 @@ RuleListResolution resolveRuleList(const QString &directoryPath)
                 directory.filePath(QLatin1String(kPreferredRulesFile)));
     const QFileInfo legacy(
                 directory.filePath(QLatin1String(kLegacyRulesFile)));
+
     RuleListResolution resolution;
     if (preferred.exists()) {
         resolution.manifestPath = normalizedFilePath(preferred);
         return resolution;
     }
+
     if (legacy.exists()) {
         const QString legacyPath = normalizedFilePath(legacy);
         if (fileLooksLikeWorldEdRules(legacyPath)) {
@@ -151,16 +166,20 @@ RuleListResolution resolveRuleList(const QString &directoryPath)
         resolution.legacyManifest = true;
         return resolution;
     }
+
     resolution.manifestPath = preferred.absoluteFilePath();
     return resolution;
 }
+
 bool writeFixture(const QString &path, const QByteArray &contents)
 {
     QFile file(path);
     return file.open(QIODevice::WriteOnly)
             && file.write(contents) == contents.size();
 }
-}
+
+} // anonymous namespace
+
 AutomappingManager *AutomappingManager::mInstance = 0;
 
 AutomappingManager::AutomappingManager(QObject *parent)
@@ -214,6 +233,7 @@ void AutomappingManager::autoMapObjects(const QList<MapObject*> &objects)
     if (mApplying || !Preferences::instance()->automappingDrawing()
             || !mMapDocument)
         return;
+
     QRegion region;
     ObjectGroup *group = nullptr;
     bool mixedGroups = false;
@@ -226,11 +246,13 @@ void AutomappingManager::autoMapObjects(const QList<MapObject*> &objects)
         else if (group != object->objectGroup())
             mixedGroups = true;
     }
+
     Map *map = mMapDocument->map();
     if (region.isEmpty())
         region = QRect(0, 0, map->width(), map->height());
     autoMapInternal(region, mixedGroups ? nullptr : group);
 }
+
 void AutomappingManager::autoMapInternal(QRegion where, Layer *touchedLayer)
 {
     mError.clear();
@@ -302,18 +324,22 @@ QString AutomappingManager::rulesFilePath() const
 {
     if (!mMapDocument || mMapDocument->fileName().isEmpty())
         return QString();
+
     return resolveRuleList(
                 QFileInfo(mMapDocument->fileName()).path())
             .manifestPath;
 }
+
 QString AutomappingManager::worldEdRulesFilePath() const
 {
     if (!mMapDocument || mMapDocument->fileName().isEmpty())
         return QString();
+
     return resolveRuleList(
                 QFileInfo(mMapDocument->fileName()).path())
             .worldEdRulesPath;
 }
+
 bool AutomappingManager::loadRules()
 {
     mLoadAttempted = true;
@@ -324,6 +350,7 @@ bool AutomappingManager::loadRules()
         emit rulesChanged();
         return false;
     }
+
     const QString worldEdPath = worldEdRulesFilePath();
     if (!worldEdPath.isEmpty() && !QFileInfo::exists(filePath)) {
         qInfo().noquote()
@@ -342,11 +369,13 @@ bool AutomappingManager::loadRules()
         emit rulesChanged();
         return false;
     }
+
     const bool ok = loadFile(filePath);
     mLoaded = ok;
     emit rulesChanged();
     return ok;
 }
+
 bool AutomappingManager::reloadRules()
 {
     mError.clear();
@@ -354,12 +383,14 @@ bool AutomappingManager::reloadRules()
     cleanUp();
     mLoaded = false;
     mLoadAttempted = false;
+
     if (!mMapDocument) {
         mError = tr("No map document found!") + QLatin1Char('\n');
         emit rulesChanged();
         emit errorsOccurred();
         return false;
     }
+
     const bool ok = loadRules();
     if (!mWarning.isEmpty())
         emit warningsOccurred();
@@ -367,6 +398,7 @@ bool AutomappingManager::reloadRules()
         emit errorsOccurred();
     return ok;
 }
+
 bool AutomappingManager::loadFile(const QString &filePath)
 {
     bool ret = true;
@@ -375,6 +407,7 @@ bool AutomappingManager::loadFile(const QString &filePath)
             ? rulesInfo.absoluteFilePath() : rulesInfo.canonicalFilePath();
     const QString absPath = QFileInfo(normalizedPath).path();
     QFile rulesFile(normalizedPath);
+
     if (normalizedPath.endsWith(QLatin1String(".txt"), Qt::CaseInsensitive)) {
         if (mVisitedRuleLists.contains(normalizedPath)) {
             mWarning += tr("Rules list already included; skipping recursive include:\n%1")
@@ -399,6 +432,7 @@ bool AutomappingManager::loadFile(const QString &filePath)
     QStringList lines;
     while (!in.atEnd())
         lines += in.readLine();
+
     if (looksLikeWorldEdRules(lines)) {
         mError += tr(
                     "Automapper did not load this file:\n%1\n\n"
@@ -426,6 +460,7 @@ bool AutomappingManager::loadFile(const QString &filePath)
         const QFileInfo ruleInfo(rulePath);
         rulePath = ruleInfo.canonicalFilePath().isEmpty()
                 ? ruleInfo.absoluteFilePath() : ruleInfo.canonicalFilePath();
+
         if (!QFileInfo(rulePath).exists()) {
             mError += tr("File not found:\n%1").arg(rulePath) + QLatin1Char('\n');
             ret = false;
@@ -438,6 +473,7 @@ bool AutomappingManager::loadFile(const QString &filePath)
                 continue;
             }
             mLoadedRuleFiles.insert(rulePath);
+
             TmxMapReader mapReader;
 
             Map *rules = mapReader.read(rulePath);
@@ -456,9 +492,10 @@ bool AutomappingManager::loadFile(const QString &filePath)
             autoMapper = new AutoMapper(mMapDocument, rules, rulePath);
 
             mWarning += autoMapper->warningString();
-            const QString error = autoMapper->errorString();
+            const QString error = autoMapper->errorString(); 
             if (error.isEmpty()) {
                 mAutoMappers.append(autoMapper);
+
                 AutomappingRuleInfo info;
                 info.filePath = rulePath;
                 info.inputLayers = autoMapper->inputLayerNames();
@@ -523,6 +560,7 @@ void AutomappingManager::cleanUp()
     mLoadedRuleFiles.clear();
     mLoadAttempted = false;
 }
+
 bool AutomappingManager::runRuleListSelfTest(
         QString *summary, QString *errorString)
 {
@@ -532,6 +570,7 @@ bool AutomappingManager::runRuleListSelfTest(
                     "Could not create Automapper rule-list fixtures.");
         return false;
     }
+
     QDir root(temporary.path());
     if (!root.mkpath(QStringLiteral("worlded"))
             || !root.mkpath(QStringLiteral("legacy"))
@@ -540,6 +579,7 @@ bool AutomappingManager::runRuleListSelfTest(
                     "Could not create Automapper fixture directories.");
         return false;
     }
+
     const QString worldedDir = root.filePath(
                 QStringLiteral("worlded"));
     const QString legacyDir = root.filePath(
@@ -553,6 +593,7 @@ bool AutomappingManager::runRuleListSelfTest(
     const QByteArray manifestContents(
                 "# Automapper rules\nrules/roads.tmx\n"
                 "rules/vegetation.txt\n");
+
     if (!writeFixture(QDir(worldedDir).filePath(
                           QLatin1String(kLegacyRulesFile)),
                       worldEdContents)
@@ -569,6 +610,7 @@ bool AutomappingManager::runRuleListSelfTest(
                     "Could not write Automapper rule-list fixtures.");
         return false;
     }
+
     const RuleListResolution worlded =
             resolveRuleList(worldedDir);
     const RuleListResolution legacy =
@@ -598,6 +640,7 @@ bool AutomappingManager::runRuleListSelfTest(
                     "Preferred automapping-rules.txt did not win.");
         return false;
     }
+
     *summary = QStringLiteral(
                 "WorldEd Rules.txt detection, preferred "
                 "automapping-rules.txt selection, and legacy "

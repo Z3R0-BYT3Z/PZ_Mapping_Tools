@@ -50,6 +50,7 @@ class BmpSelectionItem;
 class TileSelectionItem;
 class ZGridItem;
 #endif
+class NightPreviewItem;
 
 /**
  * A graphics scene that represents the contents of a map.
@@ -118,6 +119,8 @@ public:
      */
     void setSelectedTool(AbstractTool *tool);
 
+    void setNightPreviewEnabled(bool enabled);
+    bool isNightPreviewEnabled() const { return mNightPreviewEnabled; }
 
 #ifdef ZOMBOID
     void setHandScrolling(bool handScrolling);
@@ -146,6 +149,7 @@ public slots:
     void setHighlightCurrentLayer(bool highlightCurrentLayer);
 
 protected:
+    virtual void rebuildNightPreview();
 
     /**
      * QGraphicsScene::drawForeground override that draws the tile grid.
@@ -242,6 +246,8 @@ private:
     QPointF mLastMousePos;
     QVector<QGraphicsItem*> mLayerItems;
     QGraphicsRectItem *mDarkRectangle;
+    NightPreviewItem *mNightPreviewItem;
+    bool mNightPreviewEnabled;
 #ifdef ZOMBOID
     ZGridItem *mGridItem;
     TileSelectionItem *mTileSelectionItem;

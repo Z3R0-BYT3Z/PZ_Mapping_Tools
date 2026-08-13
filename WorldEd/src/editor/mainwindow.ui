@@ -369,51 +369,23 @@
     <property name="title">
      <string>Tools</string>
     </property>
-    <widget class="QMenu" name="menuProjectUtilities">
+    <widget class="QMenu" name="menuAlias_Fixup">
      <property name="title">
-      <string>Project Utilities</string>
+      <string>Tiles From -&gt; To</string>
      </property>
-     <addaction name="actionLotPackViewer"/>
-     <addaction name="actionLootInspector"/>
-     <addaction name="separator"/>
-     <addaction name="actionCheckForHoles"/>
+     <addaction name="actionFromToAll"/>
+     <addaction name="actionFromToSelected"/>
     </widget>
-    <widget class="QMenu" name="menuTerrainEnvironment">
-     <property name="title">
-      <string>Terrain &amp;&amp; Environment</string>
-     </property>
-     <addaction name="actionImportOpenStreetMapTerrain"/>
-     <addaction name="separator"/>
-     <addaction name="actionTerrainImageEditor"/>
-    </widget>
-    <widget class="QMenu" name="menuConversionExport">
-     <property name="title">
-      <string>Conversion &amp;&amp; Export</string>
-     </property>
-     <widget class="QMenu" name="menuAlias_Fixup">
-      <property name="title">
-       <string>Tiles From -&gt; To</string>
-      </property>
-      <addaction name="actionFromToAll"/>
-      <addaction name="actionFromToSelected"/>
-     </widget>
-     <addaction name="menuAlias_Fixup"/>
-     <addaction name="separator"/>
-     <addaction name="actionBuildingsToPNG"/>
-     <addaction name="actionZonesToPNG"/>
-     <addaction name="actionGenerateBiomeMap"/>
-    </widget>
-    <widget class="QMenu" name="menuWorldGenTools">
-     <property name="title">
-      <string>WorldGen</string>
-     </property>
-     <addaction name="actionWorldGenPreview"/>
-     <addaction name="actionWorldGenPrefabEditor"/>
-    </widget>
-    <addaction name="menuProjectUtilities"/>
-    <addaction name="menuTerrainEnvironment"/>
-    <addaction name="menuConversionExport"/>
-    <addaction name="menuWorldGenTools"/>
+    <addaction name="actionLotPackViewer"/>
+    <addaction name="menuAlias_Fixup"/>
+    <addaction name="actionBuildingsToPNG"/>
+    <addaction name="actionLootInspector"/>
+    <addaction name="actionZonesToPNG"/>
+    <addaction name="separator"/>
+    <addaction name="actionTerrainImageEditor"/>
+    <addaction name="actionGenerateBiomeMap"/>
+    <addaction name="actionWorldGenPreview"/>
+    <addaction name="actionWorldGenPrefabEditor"/>
    </widget>
    <widget class="QMenu" name="menuInGameMap">
     <property name="title">
@@ -905,14 +877,6 @@
     <string>Paint Rules.txt colors into multi-cell Map.png and Map_veg.png files</string>
    </property>
   </action>
-  <action name="actionImportOpenStreetMapTerrain">
-   <property name="text">
-    <string>Create or Import OpenStreetMap Terrain...</string>
-   </property>
-   <property name="toolTip">
-    <string>Find a place, preview its cell grid, create a project, or import OpenStreetMap terrain into the current project</string>
-   </property>
-  </action>
   <action name="actionWorldGenPreview">
    <property name="enabled">
     <bool>false</bool>
@@ -1213,7 +1177,7 @@
   </action>
   <action name="actionCheckForHoles">
    <property name="text">
-    <string>Hole Detection and Repair...</string>
+    <string>Hole Detection...</string>
    </property>
   </action>
  </widget>

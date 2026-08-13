@@ -1,4 +1,9 @@
+/*
+ * Project Zomboid WorldEd - streets.xml editor
+ */
+
 #include "streetnamesdock.h"
+
 #include "basegraphicsscene.h"
 #include "basegraphicsview.h"
 #include "celldocument.h"
@@ -10,6 +15,7 @@
 #include "worlddocument.h"
 #include "worldscene.h"
 #include "zoomable.h"
+
 #include <QAbstractSpinBox>
 #include <QApplication>
 #include <QCheckBox>
@@ -47,15 +53,20 @@
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
 #include <QtMath>
+
 #include <algorithm>
 #include <limits>
+
 namespace {
+
 const int StreetIndexRole = Qt::UserRole + 42;
 const int StreetSortRole = Qt::UserRole + 43;
+
 class StreetTreeWidgetItem : public QTreeWidgetItem
 {
 public:
     using QTreeWidgetItem::QTreeWidgetItem;
+
     bool operator <(const QTreeWidgetItem &other) const override
     {
         const int column = treeWidget() ? treeWidget()->sortColumn() : 0;
@@ -66,6 +77,7 @@ public:
                                            other.text(column)) < 0;
     }
 };
+
 qreal pointSegmentDistanceSquared(const QPointF &point,
                                   const QPointF &a,
                                   const QPointF &b,
@@ -83,6 +95,7 @@ qreal pointSegmentDistanceSquared(const QPointF &point,
     const QPointF delta = point - candidate;
     return QPointF::dotProduct(delta, delta);
 }
+
 class StreetNamesSnapshotCommand : public QUndoCommand
 {
 public:
@@ -100,16 +113,19 @@ public:
         , mAfterSelection(afterSelection)
     {
     }
+
     void undo() override
     {
         if (mDock)
             mDock->applySnapshot(mBefore, mBeforeSelection);
     }
+
     void redo() override
     {
         if (mDock)
             mDock->applySnapshot(mAfter, mAfterSelection);
     }
+
 private:
     QPointer<StreetNamesDock> mDock;
     QVector<StreetNameRecord> mBefore;
@@ -117,7 +133,9 @@ private:
     int mBeforeSelection;
     int mAfterSelection;
 };
-}
+
+} // namespace
+
 StreetNamesDock::StreetNamesDock(QWidget *parent)
     : QDockWidget(parent)
     , mFileNameEdit(new QLineEdit(this))
@@ -146,13 +164,16 @@ StreetNamesDock::StreetNamesDock(QWidget *parent)
     setFeatures(QDockWidget::DockWidgetClosable |
                 QDockWidget::DockWidgetMovable |
                 QDockWidget::DockWidgetFloatable);
+
     QWidget *contents = new QWidget(this);
     QVBoxLayout *mainLayout = new QVBoxLayout(contents);
+
     QHBoxLayout *fileLayout = new QHBoxLayout;
     mFileNameEdit->setClearButtonEnabled(true);
     fileLayout->addWidget(mFileNameEdit, 1);
     fileLayout->addWidget(mBrowseButton);
     mainLayout->addLayout(fileLayout);
+
     QHBoxLayout *fileButtons = new QHBoxLayout;
     fileButtons->addWidget(mLoadButton);
     fileButtons->addWidget(mSaveButton);
@@ -160,6 +181,7 @@ StreetNamesDock::StreetNamesDock(QWidget *parent)
     fileButtons->addWidget(mUndoButton);
     fileButtons->addWidget(mRedoButton);
     mainLayout->addLayout(fileButtons);
+
     QHBoxLayout *displayLayout = new QHBoxLayout;
     mShowStreetsCheckBox->setChecked(
                 QSettings().value(QStringLiteral("StreetNames/Visible"),
@@ -173,8 +195,10 @@ StreetNamesDock::StreetNamesDock(QWidget *parent)
     displayLayout->addWidget(new QLabel(tr("Line thickness:"), this));
     displayLayout->addWidget(mVisualWidthSpinBox);
     mainLayout->addLayout(displayLayout);
+
     mStreetFilterEdit->setClearButtonEnabled(true);
     mainLayout->addWidget(mStreetFilterEdit);
+
     mStreetList->setColumnCount(3);
     mStreetList->setRootIsDecorated(false);
     mStreetList->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -185,11 +209,13 @@ StreetNamesDock::StreetNamesDock(QWidget *parent)
     mStreetList->setSortingEnabled(true);
     mStreetList->sortByColumn(0, Qt::AscendingOrder);
     mainLayout->addWidget(mStreetList, 1);
+
     QFormLayout *propertiesLayout = new QFormLayout;
     mWidthSpinBox->setRange(1, 100);
     propertiesLayout->addRow(tr("Name:"), mStreetNameEdit);
     propertiesLayout->addRow(tr("Width:"), mWidthSpinBox);
     mainLayout->addLayout(propertiesLayout);
+
     QHBoxLayout *streetButtons = new QHBoxLayout;
     streetButtons->addWidget(mCreateButton);
     streetButtons->addWidget(mEditButton);
@@ -199,10 +225,13 @@ StreetNamesDock::StreetNamesDock(QWidget *parent)
     streetButtons->addWidget(mRemovePointButton);
     streetButtons->addStretch(1);
     mainLayout->addLayout(streetButtons);
+
     mStatusLabel->setWordWrap(true);
     mainLayout->addWidget(mStatusLabel);
+
     setWidget(contents);
     retranslateUi();
+
     const QList<QPushButton *> compactButtons = {
         mCreateButton, mEditButton, mRemoveButton, mReverseButton,
         mSplitButton, mRemovePointButton
@@ -223,6 +252,7 @@ StreetNamesDock::StreetNamesDock(QWidget *parent)
                               QStyle::SP_TitleBarUnshadeButton));
     mRemovePointButton->setIcon(style()->standardIcon(
                                     QStyle::SP_DialogDiscardButton));
+
     connect(mBrowseButton, &QPushButton::clicked,
             this, &StreetNamesDock::browseForFile);
     connect(mLoadButton, &QPushButton::clicked,
@@ -261,12 +291,15 @@ StreetNamesDock::StreetNamesDock(QWidget *parent)
             this, &StreetNamesDock::updateUi);
     connect(mUndoStack, &QUndoStack::cleanChanged,
             this, &StreetNamesDock::updateUi);
+
     updateUi();
 }
+
 StreetNamesDock::~StreetNamesDock()
 {
     detachScene();
 }
+
 bool StreetNamesDock::validateStreetFile(
         const QString &fileName, int *streetCount, QString *error) const
 {
@@ -277,12 +310,14 @@ bool StreetNamesDock::validateStreetFile(
         *streetCount = parsed.size();
     return true;
 }
+
 void StreetNamesDock::changeEvent(QEvent *event)
 {
     QDockWidget::changeEvent(event);
     if (event->type() == QEvent::LanguageChange)
         retranslateUi();
 }
+
 void StreetNamesDock::retranslateUi()
 {
     setWindowTitle(tr("Street Names"));
@@ -317,6 +352,7 @@ void StreetNamesDock::retranslateUi()
     mStreetList->setHeaderLabels(
                 QStringList() << tr("Street") << tr("Width") << tr("Points"));
 }
+
 void StreetNamesDock::setDocument(Document *document)
 {
     WorldDocument *worldDocument = document
@@ -324,14 +360,18 @@ void StreetNamesDock::setDocument(Document *document)
             : nullptr;
     if (!worldDocument && document && document->asCellDocument())
         worldDocument = document->asCellDocument()->worldDocument();
+
     BaseGraphicsScene *scene = document && document->view()
             ? document->view()->scene()
             : nullptr;
+
     if (scene != mScene)
         detachScene();
+
     if (worldDocument != mWorldDocument) {
         if (!maybeSaveCurrentFile())
             return;
+
         if (mWorldDocument)
             mWorldDocument->disconnect(this);
         mWorldDocument = worldDocument;
@@ -339,6 +379,7 @@ void StreetNamesDock::setDocument(Document *document)
         mSelectedStreet = -1;
         mSelectedPoint = -1;
         mUndoStack->clear();
+
         if (mWorldDocument) {
             mFileNameEdit->setText(defaultFileName());
             if (QFileInfo::exists(mFileNameEdit->text()))
@@ -354,32 +395,40 @@ void StreetNamesDock::setDocument(Document *document)
             rebuildList();
         }
     }
+
     mDocument = document;
     if (scene)
         attachScene(scene);
     else if (mScene)
         detachScene();
+
     updateUi();
 }
+
 void StreetNamesDock::clearDocument()
 {
     setDocument(nullptr);
 }
+
 QString StreetNamesDock::defaultFileName() const
 {
     if (!mWorldDocument)
         return QString();
+
     const QString exportDirectory =
             mWorldDocument->world()->getGenerateLotsSettings().exportDir;
     if (!exportDirectory.trimmed().isEmpty())
         return QDir(exportDirectory).absoluteFilePath(QStringLiteral("streets.xml"));
+
     return QDir(QFileInfo(mWorldDocument->fileName()).absolutePath())
             .absoluteFilePath(QStringLiteral("streets.xml"));
 }
+
 bool StreetNamesDock::maybeSaveCurrentFile()
 {
     if (!mWorldDocument || mUndoStack->isClean())
         return true;
+
     const QMessageBox::StandardButton answer = QMessageBox::question(
                 this, tr("Unsaved Street Names"),
                 tr("The current streets.xml has unsaved changes. Save them now?"),
@@ -391,27 +440,32 @@ bool StreetNamesDock::maybeSaveCurrentFile()
     }
     return true;
 }
+
 void StreetNamesDock::browseForFile()
 {
     QString initial = mFileNameEdit->text();
     if (initial.isEmpty())
         initial = defaultFileName();
+
     const QString fileName = QFileDialog::getSaveFileName(
                 this, tr("Select streets.xml"), initial,
                 tr("Project Zomboid street names (streets.xml);;XML files (*.xml)"));
     if (!fileName.isEmpty())
         mFileNameEdit->setText(QDir::toNativeSeparators(fileName));
 }
+
 void StreetNamesDock::loadFile()
 {
     if (!mWorldDocument)
         return;
+
     const QString fileName = mFileNameEdit->text().trimmed();
     if (fileName.isEmpty()) {
         browseForFile();
         if (mFileNameEdit->text().trimmed().isEmpty())
             return;
     }
+
     if (!mUndoStack->isClean()) {
         const QMessageBox::StandardButton answer = QMessageBox::question(
                     this, tr("Reload Street Names"),
@@ -420,12 +474,14 @@ void StreetNamesDock::loadFile()
         if (answer != QMessageBox::Yes)
             return;
     }
+
     QVector<StreetNameRecord> loaded;
     QString error;
     if (!readFile(mFileNameEdit->text().trimmed(), &loaded, &error)) {
         QMessageBox::critical(this, tr("Unable to Load streets.xml"), error);
         return;
     }
+
     mStreets = loaded;
     mSelectedStreet = mStreets.isEmpty() ? -1 : 0;
     mSelectedPoint = -1;
@@ -435,39 +491,51 @@ void StreetNamesDock::loadFile()
     rebuildGraphics();
     updateUi();
 }
+
 void StreetNamesDock::saveFile()
 {
     saveCurrentFile(true);
 }
+
 bool StreetNamesDock::saveForProject()
 {
     if (!mWorldDocument)
         return true;
+
     QString fileName = mFileNameEdit->text().trimmed();
     if (fileName.isEmpty()) {
         fileName = defaultFileName();
         mFileNameEdit->setText(QDir::toNativeSeparators(fileName));
     }
+
+    // Do not create an unrelated empty streets.xml for every project. Once
+    // street data exists, was edited, or the file already exists, Ctrl+S owns
+    // saving it together with the project.
     if (mStreets.isEmpty() && mUndoStack->isClean() &&
             !QFileInfo::exists(fileName)) {
         return true;
     }
+
     return saveCurrentFile(false);
 }
+
 bool StreetNamesDock::saveCurrentFile(bool chooseFileWhenMissing)
 {
     if (!mWorldDocument)
         return true;
+
     if (mFileNameEdit->text().trimmed().isEmpty() && chooseFileWhenMissing)
         browseForFile();
     const QString fileName = mFileNameEdit->text().trimmed();
     if (fileName.isEmpty())
         return false;
+
     QString error;
     if (!validate(&error)) {
         QMessageBox::warning(this, tr("Invalid Street Names"), error);
         return false;
     }
+
     const QFileInfo info(fileName);
     if (!QDir().mkpath(info.absolutePath())) {
         QMessageBox::critical(
@@ -476,15 +544,18 @@ bool StreetNamesDock::saveCurrentFile(bool chooseFileWhenMissing)
                     .arg(QDir::toNativeSeparators(info.absolutePath())));
         return false;
     }
+
     if (!writeFile(fileName, &error)) {
         QMessageBox::critical(this, tr("Unable to Save streets.xml"), error);
         return false;
     }
+
     mFileNameEdit->setText(QDir::toNativeSeparators(info.absoluteFilePath()));
     mUndoStack->setClean();
     updateUi();
     return true;
 }
+
 bool StreetNamesDock::readFile(const QString &fileName,
                                QVector<StreetNameRecord> *streets,
                                QString *error) const
@@ -496,6 +567,7 @@ bool StreetNamesDock::readFile(const QString &fileName,
                     .arg(QDir::toNativeSeparators(fileName), file.errorString());
         return false;
     }
+
     QXmlStreamReader xml(&file);
     if (!xml.readNextStartElement() || xml.name() != QStringLiteral("streets")) {
         if (error)
@@ -507,6 +579,7 @@ bool StreetNamesDock::readFile(const QString &fileName,
             *error = tr("Missing or unsupported streets.xml version (expected 1).");
         return false;
     }
+
     QVector<StreetNameRecord> parsed;
     while (xml.readNextStartElement()) {
         if (xml.name() != QStringLiteral("street")) {
@@ -514,6 +587,7 @@ bool StreetNamesDock::readFile(const QString &fileName,
                            .arg(xml.name().toString()));
             break;
         }
+
         StreetNameRecord street;
         street.name = xml.attributes().value(QStringLiteral("name")).toString();
         bool widthOk = false;
@@ -521,11 +595,13 @@ bool StreetNamesDock::readFile(const QString &fileName,
                 .toInt(&widthOk);
         if (!widthOk)
             street.width = 5;
+
         while (xml.readNextStartElement()) {
             if (xml.name() != QStringLiteral("points")) {
                 xml.skipCurrentElement();
                 continue;
             }
+
             while (xml.readNextStartElement()) {
                 if (xml.name().compare(QStringLiteral("point"),
                                        Qt::CaseInsensitive) != 0) {
@@ -546,12 +622,14 @@ bool StreetNamesDock::readFile(const QString &fileName,
                 xml.skipCurrentElement();
             }
         }
+
         if (street.name.trimmed().isEmpty() || street.points.isEmpty()) {
             xml.raiseError(tr("A street has an empty name or points list."));
             break;
         }
         parsed.append(street);
     }
+
     if (xml.hasError()) {
         if (error)
             *error = tr("%1\n\nLine %2, column %3.")
@@ -560,10 +638,12 @@ bool StreetNamesDock::readFile(const QString &fileName,
                     .arg(xml.columnNumber());
         return false;
     }
+
     if (streets)
         *streets = parsed;
     return true;
 }
+
 bool StreetNamesDock::writeFile(const QString &fileName, QString *error) const
 {
     QSaveFile file(fileName);
@@ -573,6 +653,7 @@ bool StreetNamesDock::writeFile(const QString &fileName, QString *error) const
                     .arg(QDir::toNativeSeparators(fileName), file.errorString());
         return false;
     }
+
     QXmlStreamWriter xml(&file);
     xml.setAutoFormatting(true);
     xml.writeStartDocument();
@@ -595,6 +676,7 @@ bool StreetNamesDock::writeFile(const QString &fileName, QString *error) const
     }
     xml.writeEndElement();
     xml.writeEndDocument();
+
     if (!file.commit()) {
         if (error)
             *error = tr("Could not replace:\n%1\n\n%2")
@@ -603,6 +685,7 @@ bool StreetNamesDock::writeFile(const QString &fileName, QString *error) const
     }
     return true;
 }
+
 bool StreetNamesDock::validate(QString *error) const
 {
     for (int i = 0; i < mStreets.size(); ++i) {
@@ -642,6 +725,7 @@ bool StreetNamesDock::validate(QString *error) const
     }
     return true;
 }
+
 void StreetNamesDock::attachScene(BaseGraphicsScene *scene)
 {
     if (mScene == scene)
@@ -656,6 +740,8 @@ void StreetNamesDock::attachScene(BaseGraphicsScene *scene)
                     this, [this]() { rebuildGraphics(); });
         }
         connect(mScene, &QObject::destroyed, this, [this]() {
+            // QGraphicsScene owns and destroys the overlay items. Do not try
+            // to delete their stale addresses when another world is opened.
             mPointItems.clear();
             mLabelItems.clear();
             mPathItems.clear();
@@ -667,6 +753,7 @@ void StreetNamesDock::attachScene(BaseGraphicsScene *scene)
         rebuildGraphics();
     }
 }
+
 void StreetNamesDock::detachScene()
 {
     if (!mScene)
@@ -683,6 +770,7 @@ void StreetNamesDock::detachScene()
     mDragging = false;
     mMode = InteractionMode::Select;
 }
+
 void StreetNamesDock::clearGraphics()
 {
     if (mScene) {
@@ -705,11 +793,13 @@ void StreetNamesDock::clearGraphics()
     mLabelItems.clear();
     mPathItems.clear();
 }
+
 void StreetNamesDock::rebuildGraphics()
 {
     clearGraphics();
     if (!mScene || !mShowStreetsCheckBox->isChecked())
         return;
+
     const qreal overlayZ = mScene->isCellScene()
             ? CellScene::ZVALUE_ROADITEM_SELECTED + 10
             : WorldScene::ZVALUE_SELECTIONITEM + 10;
@@ -730,6 +820,7 @@ void StreetNamesDock::rebuildGraphics()
                     (cellScene->cell()->y() + origin.y()) * cellSize,
                     cellSize, cellSize).adjusted(-32, -32, 32, 32);
     }
+
     for (int i = 0; i < mStreets.size(); ++i) {
         const StreetNameRecord &street = mStreets.at(i);
         if (!visibleCellWorldBounds.isNull() &&
@@ -744,10 +835,12 @@ void StreetNamesDock::rebuildGraphics()
             for (int p = 1; p < street.points.size(); ++p)
                 path.lineTo(worldToScene(street.points.at(p)));
         }
+
         const qreal logicalScale =
                 qBound<qreal>(0.75, qSqrt(street.width / 5.0), 2.25);
         const qreal lineWidth = configuredWidth * logicalScale +
                 (selected ? 2.0 : 0.0);
+
         QGraphicsPathItem *casingItem = new QGraphicsPathItem(path);
         QPen casingPen(selected
                        ? QColor(210, 235, 255, 250)
@@ -761,6 +854,7 @@ void StreetNamesDock::rebuildGraphics()
         casingItem->setZValue(overlayZ);
         mScene->addItem(casingItem);
         mPathItems.append(casingItem);
+
         QGraphicsPathItem *pathItem = new QGraphicsPathItem(path);
         QPen pen(selected
                  ? QColor(25, 105, 210, 250)
@@ -775,6 +869,7 @@ void StreetNamesDock::rebuildGraphics()
         pathItem->setData(StreetIndexRole, i);
         mScene->addItem(pathItem);
         mPathItems.append(pathItem);
+
         const bool showLabel = selected || mScene->isCellScene() ||
                 viewScale >= 0.28;
         if (street.points.size() >= 2 && showLabel) {
@@ -792,6 +887,7 @@ void StreetNamesDock::rebuildGraphics()
             const QPointF labelOffset(-textRect.width() / 2.0,
                                       -textRect.height() / 2.0);
             const QPointF sceneLabelPoint = worldToScene(labelPoint);
+
             if (!selected && activeView) {
                 const QPointF screenPoint =
                         activeView->mapFromScene(sceneLabelPoint);
@@ -813,6 +909,7 @@ void StreetNamesDock::rebuildGraphics()
                 }
                 occupiedLabelRects.append(screenRect);
             }
+
             QPainterPath bubblePath;
             bubblePath.addRoundedRect(
                         textRect.translated(labelOffset)
@@ -835,6 +932,7 @@ void StreetNamesDock::rebuildGraphics()
             bubble->setZValue(overlayZ + 2);
             mScene->addItem(bubble);
             mPathItems.append(bubble);
+
             label->setBrush(selected ? Qt::white : QColor(25, 24, 22));
             label->setTransform(
                         QTransform::fromTranslate(labelOffset.x(),
@@ -846,6 +944,7 @@ void StreetNamesDock::rebuildGraphics()
             mLabelItems.append(label);
         }
     }
+
     if ((mMode == InteractionMode::Edit ||
          mMode == InteractionMode::Create) &&
             mSelectedStreet >= 0 && mSelectedStreet < mStreets.size()) {
@@ -868,6 +967,7 @@ void StreetNamesDock::rebuildGraphics()
         }
     }
 }
+
 void StreetNamesDock::rebuildList()
 {
     mUpdatingUi = true;
@@ -896,6 +996,7 @@ void StreetNamesDock::rebuildList()
     mUpdatingUi = false;
     updateUi();
 }
+
 void StreetNamesDock::applyStreetFilter()
 {
     const QString filter = mStreetFilterEdit->text().trimmed();
@@ -906,10 +1007,12 @@ void StreetNamesDock::applyStreetFilter()
                                                 Qt::CaseInsensitive));
     }
 }
+
 void StreetNamesDock::streetFilterChanged(const QString &)
 {
     applyStreetFilter();
 }
+
 void StreetNamesDock::selectStreet(int index)
 {
     if (index < 0 || index >= mStreets.size())
@@ -919,6 +1022,7 @@ void StreetNamesDock::selectStreet(int index)
     rebuildList();
     rebuildGraphics();
 }
+
 void StreetNamesDock::streetSelectionChanged()
 {
     if (mUpdatingUi)
@@ -926,11 +1030,13 @@ void StreetNamesDock::streetSelectionChanged()
     QTreeWidgetItem *item = mStreetList->currentItem();
     selectStreet(item ? item->data(0, StreetIndexRole).toInt() : -1);
 }
+
 void StreetNamesDock::beginSnapshot()
 {
     mSnapshotBefore = mStreets;
     mSnapshotSelection = mSelectedStreet;
 }
+
 void StreetNamesDock::commitSnapshot(const QString &text)
 {
     if (mSnapshotBefore == mStreets) {
@@ -942,12 +1048,14 @@ void StreetNamesDock::commitSnapshot(const QString &text)
                          mStreets, mSelectedStreet, text));
     mSnapshotBefore.clear();
 }
+
 void StreetNamesDock::cancelSnapshot()
 {
     if (!mSnapshotBefore.isEmpty() || !mStreets.isEmpty())
         applySnapshot(mSnapshotBefore, mSnapshotSelection);
     mSnapshotBefore.clear();
 }
+
 void StreetNamesDock::applySnapshot(
         const QVector<StreetNameRecord> &streets, int selectedStreet)
 {
@@ -960,6 +1068,7 @@ void StreetNamesDock::applySnapshot(
     rebuildGraphics();
     updateUi();
 }
+
 void StreetNamesDock::createStreet()
 {
     if (!mScene || !mWorldDocument || !mShowStreetsCheckBox->isChecked())
@@ -968,6 +1077,7 @@ void StreetNamesDock::createStreet()
         finishCreating(true);
         return;
     }
+
     beginSnapshot();
     StreetNameRecord street;
     street.name = tr("Street");
@@ -980,6 +1090,7 @@ void StreetNamesDock::createStreet()
     rebuildGraphics();
     updateUi();
 }
+
 void StreetNamesDock::editStreet()
 {
     if (mMode == InteractionMode::Edit) {
@@ -993,6 +1104,7 @@ void StreetNamesDock::editStreet()
     rebuildGraphics();
     updateUi();
 }
+
 void StreetNamesDock::showStreetsChanged(bool visible)
 {
     QSettings().setValue(QStringLiteral("StreetNames/Visible"), visible);
@@ -1007,15 +1119,18 @@ void StreetNamesDock::showStreetsChanged(bool visible)
     rebuildGraphics();
     updateUi();
 }
+
 void StreetNamesDock::visualWidthChanged(int width)
 {
     QSettings().setValue(QStringLiteral("StreetNames/LineWidth"), width);
     rebuildGraphics();
 }
+
 void StreetNamesDock::finishCreating(bool accept)
 {
     if (mMode != InteractionMode::Create)
         return;
+
     if (accept && mSelectedStreet >= 0 &&
             mSelectedStreet < mStreets.size() &&
             mStreets.at(mSelectedStreet).points.size() >= 2) {
@@ -1028,6 +1143,7 @@ void StreetNamesDock::finishCreating(bool accept)
     rebuildGraphics();
     updateUi();
 }
+
 void StreetNamesDock::removeStreet()
 {
     if (mSelectedStreet < 0 || mSelectedStreet >= mStreets.size())
@@ -1039,6 +1155,7 @@ void StreetNamesDock::removeStreet()
     mSelectedPoint = -1;
     commitSnapshot(tr("Remove street"));
 }
+
 void StreetNamesDock::reverseStreet()
 {
     if (mSelectedStreet < 0 || mSelectedStreet >= mStreets.size())
@@ -1048,6 +1165,7 @@ void StreetNamesDock::reverseStreet()
     std::reverse(street.points.begin(), street.points.end());
     commitSnapshot(tr("Reverse street"));
 }
+
 void StreetNamesDock::splitStreetAtSelectedPoint()
 {
     if (mSelectedStreet < 0 || mSelectedStreet >= mStreets.size() ||
@@ -1056,6 +1174,7 @@ void StreetNamesDock::splitStreetAtSelectedPoint()
     const StreetNameRecord source = mStreets.at(mSelectedStreet);
     if (mSelectedPoint >= source.points.size() - 1)
         return;
+
     beginSnapshot();
     StreetNameRecord second = source;
     second.points = source.points.mid(mSelectedPoint);
@@ -1066,6 +1185,7 @@ void StreetNamesDock::splitStreetAtSelectedPoint()
     mSelectedPoint = 0;
     commitSnapshot(tr("Split street"));
 }
+
 void StreetNamesDock::removeSelectedPoint()
 {
     if (mSelectedStreet < 0 || mSelectedStreet >= mStreets.size() ||
@@ -1079,6 +1199,7 @@ void StreetNamesDock::removeSelectedPoint()
     mSelectedPoint = -1;
     commitSnapshot(tr("Remove street point"));
 }
+
 void StreetNamesDock::streetNameEditingFinished()
 {
     if (mUpdatingUi || mSelectedStreet < 0 ||
@@ -1091,6 +1212,7 @@ void StreetNamesDock::streetNameEditingFinished()
     mStreets[mSelectedStreet].name = name;
     commitSnapshot(tr("Rename street"));
 }
+
 void StreetNamesDock::streetWidthEditingFinished()
 {
     if (mUpdatingUi || mSelectedStreet < 0 ||
@@ -1103,6 +1225,7 @@ void StreetNamesDock::streetWidthEditingFinished()
     mStreets[mSelectedStreet].width = width;
     commitSnapshot(tr("Change street width"));
 }
+
 QPointF StreetNamesDock::sceneToWorld(const QPointF &scenePoint) const
 {
     if (!mScene || !mWorldDocument)
@@ -1110,11 +1233,13 @@ QPointF StreetNamesDock::sceneToWorld(const QPointF &scenePoint) const
     const int cellSize = mWorldDocument->world()->cellSize();
     const QPoint origin =
             mWorldDocument->world()->getGenerateLotsSettings().worldOrigin;
+
     if (WorldScene *worldScene = mScene->asWorldScene()) {
         const QPointF localCells = worldScene->pixelToCellCoords(scenePoint);
         return QPointF((localCells.x() + origin.x()) * cellSize,
                        (localCells.y() + origin.y()) * cellSize);
     }
+
     if (CellScene *cellScene = mScene->asCellScene()) {
         const QPointF localTiles =
                 cellScene->renderer()->pixelToTileCoords(scenePoint);
@@ -1123,8 +1248,10 @@ QPointF StreetNamesDock::sceneToWorld(const QPointF &scenePoint) const
         return localTiles + cellOffset +
                 QPointF(origin.x() * cellSize, origin.y() * cellSize);
     }
+
     return QPointF();
 }
+
 QPointF StreetNamesDock::worldToScene(const QPointF &worldPoint) const
 {
     if (!mScene || !mWorldDocument)
@@ -1132,11 +1259,13 @@ QPointF StreetNamesDock::worldToScene(const QPointF &worldPoint) const
     const int cellSize = mWorldDocument->world()->cellSize();
     const QPoint origin =
             mWorldDocument->world()->getGenerateLotsSettings().worldOrigin;
+
     if (WorldScene *worldScene = mScene->asWorldScene()) {
         return worldScene->cellToPixelCoords(
                     worldPoint.x() / cellSize - origin.x(),
                     worldPoint.y() / cellSize - origin.y());
     }
+
     if (CellScene *cellScene = mScene->asCellScene()) {
         const QPointF internalWorld =
                 worldPoint - QPointF(origin.x() * cellSize,
@@ -1146,18 +1275,22 @@ QPointF StreetNamesDock::worldToScene(const QPointF &worldPoint) const
                                         cellScene->cell()->y() * cellSize);
         return cellScene->renderer()->tileToPixelCoords(localTiles);
     }
+
     return QPointF();
 }
+
 QPointF StreetNamesDock::snappedWorldPoint(const QPointF &scenePoint) const
 {
     const QPointF world = sceneToWorld(scenePoint);
     return QPointF(qRound(world.x() * 2.0) / 2.0,
                    qRound(world.y() * 2.0) / 2.0);
 }
+
 int StreetNamesDock::pickStreet(const QPointF &scenePoint) const
 {
     if (!mScene || !mDocument || !mDocument->view())
         return -1;
+
     const BaseGraphicsView *view = mDocument->view();
     const QPointF mouse = view->mapFromScene(scenePoint);
     const qreal maximumDistance =
@@ -1181,11 +1314,13 @@ int StreetNamesDock::pickStreet(const QPointF &scenePoint) const
     }
     return bestStreet;
 }
+
 int StreetNamesDock::pickPoint(const QPointF &scenePoint) const
 {
     if (!mScene || !mDocument || !mDocument->view() ||
             mSelectedStreet < 0 || mSelectedStreet >= mStreets.size())
         return -1;
+
     const BaseGraphicsView *view = mDocument->view();
     const QPoint mouse = view->mapFromScene(scenePoint);
     const StreetNameRecord &street = mStreets.at(mSelectedStreet);
@@ -1198,12 +1333,14 @@ int StreetNamesDock::pickPoint(const QPointF &scenePoint) const
     }
     return -1;
 }
+
 bool StreetNamesDock::closestPointOnSelectedStreet(
         const QPointF &scenePoint, int *segment, QPointF *worldPoint) const
 {
     if (!mDocument || !mDocument->view() ||
             mSelectedStreet < 0 || mSelectedStreet >= mStreets.size())
         return false;
+
     const BaseGraphicsView *view = mDocument->view();
     const QPointF mouse = view->mapFromScene(scenePoint);
     const StreetNameRecord &street = mStreets.at(mSelectedStreet);
@@ -1243,13 +1380,16 @@ bool StreetNamesDock::closestPointOnSelectedStreet(
                               qRound(bestPoint.y() * 2.0) / 2.0);
     return true;
 }
+
 bool StreetNamesDock::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched != mScene || !mScene)
         return QDockWidget::eventFilter(watched, event);
+
     if (!mShowStreetsCheckBox->isChecked()) {
         return QDockWidget::eventFilter(watched, event);
     }
+
     if (event->type() == QEvent::GraphicsSceneMousePress) {
         QGraphicsSceneMouseEvent *mouseEvent =
                 static_cast<QGraphicsSceneMouseEvent *>(event);
@@ -1264,6 +1404,7 @@ bool StreetNamesDock::eventFilter(QObject *watched, QEvent *event)
                 mouseEvent->accept();
                 return true;
             }
+            // Empty navigation clicks remain entirely available to WorldEd.
             mConsumedNavigationPress = false;
             return QDockWidget::eventFilter(watched, event);
         } else if (mMode == InteractionMode::Create) {
@@ -1303,6 +1444,8 @@ bool StreetNamesDock::eventFilter(QObject *watched, QEvent *event)
                 mouseEvent->accept();
                 return true;
             }
+            // Geometry-edit mode is exclusive: an empty click must not alter
+            // WorldEd's cell/object selection underneath the overlay.
             mouseEvent->accept();
             return true;
         }
@@ -1392,8 +1535,10 @@ bool StreetNamesDock::eventFilter(QObject *watched, QEvent *event)
             return true;
         }
     }
+
     return QDockWidget::eventFilter(watched, event);
 }
+
 void StreetNamesDock::updateUi()
 {
     const bool hasDocument = !mWorldDocument.isNull();
@@ -1404,6 +1549,7 @@ void StreetNamesDock::updateUi()
             mStreets.at(mSelectedStreet).points.size() > 2;
     const bool hasSplittablePoint = hasStreet && mSelectedPoint > 0 &&
             mSelectedPoint < mStreets.at(mSelectedStreet).points.size() - 1;
+
     mBrowseButton->setEnabled(hasDocument);
     mLoadButton->setEnabled(hasDocument);
     mSaveButton->setEnabled(hasDocument);
@@ -1412,6 +1558,7 @@ void StreetNamesDock::updateUi()
     const bool streetsVisible = mShowStreetsCheckBox->isChecked();
     const bool geometryMode = mMode == InteractionMode::Edit;
     const bool navigationMode = mMode == InteractionMode::Select;
+
     mCreateButton->setEnabled(hasScene && streetsVisible &&
                               mMode != InteractionMode::Edit);
     mEditButton->setEnabled(hasScene && streetsVisible && !mStreets.isEmpty() &&
@@ -1428,6 +1575,7 @@ void StreetNamesDock::updateUi()
     mWidthSpinBox->setEnabled(hasStreet &&
                               mMode != InteractionMode::Create);
     mVisualWidthSpinBox->setEnabled(streetsVisible);
+
     mUpdatingUi = true;
     if (hasStreet) {
         mStreetNameEdit->setText(mStreets.at(mSelectedStreet).name);
@@ -1437,6 +1585,7 @@ void StreetNamesDock::updateUi()
         mWidthSpinBox->setValue(5);
     }
     mUpdatingUi = false;
+
     if (mMode == InteractionMode::Create) {
         setWindowTitle(tr("Street Names — CREATE MODE"));
         mCreateButton->setToolTip(tr("Finish creating street"));

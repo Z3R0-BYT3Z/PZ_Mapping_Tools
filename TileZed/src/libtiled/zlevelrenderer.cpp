@@ -50,6 +50,7 @@ quint64 &frameRenderedTileCount()
     static thread_local quint64 count = 0;
     return count;
 }
+
 struct JUMBO
 {
     QString tilesetName;
@@ -75,14 +76,17 @@ void ZLevelRenderer::resetRenderedTileCount()
 {
     frameRenderedTileCount() = 0;
 }
+
 void ZLevelRenderer::addRenderedTileCount(quint64 count)
 {
     frameRenderedTileCount() += count;
 }
+
 quint64 ZLevelRenderer::renderedTileCount()
 {
     return frameRenderedTileCount();
 }
+
 QSize ZLevelRenderer::mapSize() const
 {
     // Map width and height contribute equally in both directions
@@ -809,10 +813,14 @@ void ZLevelRenderer::drawJumboTreeTile_Trunk(Tile *tile, QPainter *painter, cons
 {
     if (!tile || !tile->tileset())
         return;
+
     Tileset *tileset = tile->tileset();
     const int columns = tileset->columnCount();
+    // Embedded declarations can temporarily have no image geometry while
+    // their shared catalogue image is being resolved.
     if (columns <= 0)
         return;
+
     int row_trunk = 0;
     int row = tile->id() / columns;
     if (row < 2) {
@@ -842,10 +850,12 @@ void ZLevelRenderer::drawJumboTreeTile_Leaves(Tile *tile, QPainter *painter, con
 {
     if (!tile || !tile->tileset())
         return;
+
     Tileset *tileset = tile->tileset();
     const int columns = tileset->columnCount();
     if (columns <= 0)
         return;
+
     int row_summer = 3;
     int row = tile->id() / columns;
     if (row >= 2) {

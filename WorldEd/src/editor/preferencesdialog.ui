@@ -93,50 +93,6 @@
         </widget>
        </item>
        <item row="2" column="0">
-        <widget class="QGroupBox" name="projectZomboidBox">
-         <property name="title">
-          <string>Project Zomboid Installation</string>
-         </property>
-         <layout class="QVBoxLayout" name="projectZomboidLayout">
-          <item>
-           <widget class="QLabel" name="projectZomboidDescription">
-            <property name="text">
-             <string>Shared read-only game root used to find TileDefs, texture packs, WorldGen biomes and prefabs, and procedural loot. Extracted mapping PNG Tiles remain configured separately above. Basement sources and PZBY files use the portable pzby_tbx directory beside bin.</string>
-            </property>
-            <property name="wordWrap">
-             <bool>true</bool>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <layout class="QHBoxLayout" name="projectZomboidPathLayout">
-            <item>
-             <widget class="QLineEdit" name="projectZomboidDirectory">
-              <property name="readOnly">
-               <bool>true</bool>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QToolButton" name="browseProjectZomboidDirectory">
-              <property name="text">
-               <string>...</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="clearProjectZomboidDirectory">
-              <property name="text">
-               <string>Clear</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-         </layout>
-        </widget>
-       </item>
-       <item row="3" column="0">
         <widget class="QGroupBox" name="groupBox_3">
          <property name="title">
           <string>Interface</string>
@@ -391,7 +347,7 @@ Don't check this if you are low on disk space or system memory.</string>
          </layout>
         </widget>
        </item>
-       <item row="4" column="0">
+       <item row="3" column="0">
         <spacer name="verticalSpacer">
          <property name="orientation">
           <enum>Qt::Vertical</enum>

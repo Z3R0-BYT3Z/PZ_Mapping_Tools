@@ -52,6 +52,7 @@ quint64 &frameRenderedTileCount()
     static thread_local quint64 count = 0;
     return count;
 }
+
 struct JUMBO
 {
     QString tilesetName;
@@ -77,14 +78,17 @@ void ZLevelRenderer::resetRenderedTileCount()
 {
     frameRenderedTileCount() = 0;
 }
+
 void ZLevelRenderer::addRenderedTileCount(quint64 count)
 {
     frameRenderedTileCount() += count;
 }
+
 quint64 ZLevelRenderer::renderedTileCount()
 {
     return frameRenderedTileCount();
 }
+
 QSize ZLevelRenderer::mapSize() const
 {
     // Map width and height contribute equally in both directions
@@ -233,12 +237,14 @@ void ZLevelRenderer::drawGrid(QPainter *painter, const QRectF &rect, QColor grid
 static Tile *g_invisible_tile = nullptr;
 static Tile *g_missing_tile = nullptr;
 static QMutex g_placeholderTileMutex;
+
 static Tile *placeholderTile(bool invisible)
 {
     QMutexLocker locker(&g_placeholderTileMutex);
     Tile *&tile = invisible ? g_invisible_tile : g_missing_tile;
     if (tile)
         return tile;
+
     Tileset *tileset = new Tileset(
                 invisible ? QLatin1String("INVISIBLE")
                           : QLatin1String("MISSING"),
@@ -250,17 +256,28 @@ static Tile *placeholderTile(bool invisible)
         tile = tileset->tileAt(0);
     return tile;
 }
+
 static QPoint previewImageOrigin(const Tile *tile)
 {
     if (!tile || !tile->tileset())
         return QPoint();
     return tile->tileset()->tileOffset() + tile->offset();
 }
+
 static QTransform alignedPreviewOverlayTransform(
         const QTransform &sourceTransform,
         const Tile *sourceTile,
         const Tile *overlayTile)
 {
+    // Tile::setImage() crops transparent borders. A powered *_on sprite
+    // commonly has a wider glow than its normal counterpart, so both tiles
+    // have different cropped-image origins even though their pixels share
+    // the same 128x256 source-cell coordinates.
+    //
+    // Convert the overlay's local image coordinates back into the complete
+    // source-cell coordinate system, then apply the exact source matrix. This
+    // preserves flips/scaling while keeping every powered pixel on the object
+    // it belongs to.
     const QPoint delta = previewImageOrigin(overlayTile) -
                          previewImageOrigin(sourceTile);
     const qreal dx = sourceTransform.dx() +
@@ -273,6 +290,7 @@ static QTransform alignedPreviewOverlayTransform(
                       sourceTransform.m21(), sourceTransform.m22(),
                       dx, dy);
 }
+
 bool ZLevelRenderer::validatePreviewOverlayAlignment(QString *error)
 {
     Tileset sourceTileset(QStringLiteral("preview_source"), 64, 128);
@@ -291,6 +309,7 @@ bool ZLevelRenderer::validatePreviewOverlayAlignment(QString *error)
     overlayPainter.end();
     Tile sourceTile(sourceImage, 0, &sourceTileset);
     Tile overlayTile(overlayImage, 0, &overlayTileset);
+
     const QPoint sharedCellPixel(64, 32);
     const QPointF sourceLocal =
             sharedCellPixel - previewImageOrigin(&sourceTile);
@@ -932,10 +951,16 @@ void ZLevelRenderer::drawJumboTreeTile_Trunk(Tile *tile, QPainter *painter, cons
 {
     if (!tile || !tile->tileset())
         return;
+
     Tileset *tileset = tile->tileset();
     const int columns = tileset->columnCount();
+    // Embedded TMX/TBX declarations may temporarily have no image geometry
+    // while the shared catalogue image is still being resolved.  Such a
+    // declaration is still drawable as a missing tile, but it cannot be
+    // split into the legacy Jumbo tree rows.
     if (columns <= 0)
         return;
+
     int row_trunk = 0;
     int row = tile->id() / columns;
     if (row < 2) {
@@ -965,10 +990,12 @@ void ZLevelRenderer::drawJumboTreeTile_Leaves(Tile *tile, QPainter *painter, con
 {
     if (!tile || !tile->tileset())
         return;
+
     Tileset *tileset = tile->tileset();
     const int columns = tileset->columnCount();
     if (columns <= 0)
         return;
+
     int row_summer = 3;
     int row = tile->id() / columns;
     if (row >= 2) {

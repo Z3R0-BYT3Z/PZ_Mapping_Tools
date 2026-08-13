@@ -23,7 +23,6 @@
 #include "worldcell.h"
 #include "worldgeometry.h"
 
-#include <QAtomicInteger>
 #include <QTimer>
 
 #define CELL_SIZE_256 256
@@ -63,7 +62,6 @@ public:
     DelayedMapLoader mLoader;
     MapComposite* mMapComposite = nullptr;
     QList<MapComposite*> mCellMaps;
-    bool mLoggedPendingSubMaps = false;
     QString mError;
 };
 
@@ -100,7 +98,6 @@ public:
     void resolveProperties(PropertyHolder *ph, PropertyList &result);
     QString missingTilesetsString(Tiled::Map *map);
     void checkHolesOnLevelZero();
-    int fillHolesInGeneratedLot();
 
 public slots:
     void addJob();
@@ -109,13 +106,8 @@ public slots:
 private:
     Q_DISABLE_COPY(LotFilesWorker256)
 
-    Status status() const
-    { return Status(mStatus.loadAcquire()); }
-    void setStatus(Status status)
-    { mStatus.storeRelease(int(status)); }
-
     LotFilesManager256 *mManager;
-    QAtomicInteger<int> mStatus = int(Status::Idle);
+    Status mStatus = Status::Idle;
     WorldDocument *mWorldDoc;
     CombinedCellMaps *mCombinedCellMaps;
     WorldCell *mCell;
@@ -134,8 +126,6 @@ private:
     QList<LotFile::Building*> buildingList;
     QList<LotFile::Building*> mRemovedBuildingList; // building whose north-west corner isn't in the 256x256 cell
     LotFile::Stats mStats;
-    int mInputRoomRectCount = 0;
-    int mRemovedBuildingCount = 0;
     QVector<QPoint> mHoleInFloor;
     QString mError;
 
@@ -155,12 +145,6 @@ public:
         GenerateSelected
     };
 
-    enum HoleFillMode {
-        ReportHoles,
-        FillHolesWithNearestTile,
-        FillHolesWithSpecificTile
-    };
-
     struct GenerateCellFailure
     {
         WorldCell* cell;
@@ -174,8 +158,6 @@ public:
     };
 
     bool generateWorld(WorldDocument *worldDoc, GenerateMode mode);
-    void setHoleFillMode(HoleFillMode mode,
-                         const QString &tileName = QString());
     bool generateCell(WorldCell* cell);
     bool generateCell(LotFilesWorker256 *worker, WorldCell *cell, int cell256X, int cell256Y);
 
@@ -185,9 +167,6 @@ public:
     void writeZombieIntensity(QDataStream &out, int cell256X, int cell256Y);
 
     static bool validateNative256Geometry(QString *error);
-    static bool validateReferencedRoomDefs(const QString &tmxPath,
-                                           QString *summary,
-                                           QString *error);
 
     QString errorString() const { return mError; }
 
@@ -239,9 +218,6 @@ private:
     QTimer mTimer;
     QString mError;
     bool mCancel = false;
-    HoleFillMode mHoleFillMode = ReportHoles;
-    QString mHoleFillTileName;
-    QAtomicInteger<int> mAutoFilledHoleCount = 0;
 
     friend class LotFilesWorker256;
 };

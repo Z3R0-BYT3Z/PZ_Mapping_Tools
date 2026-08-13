@@ -17,7 +17,6 @@
 
 #include "worldscene.h"
 
-#include "../portablesettings.h"
 #include "basegraphicsview.h"
 #include "biomemapitem.h"
 #include "bmptotmx.h"
@@ -27,6 +26,7 @@
 #include "mainwindow.h"
 #include "mapimagemanager.h"
 #include "mapmanager.h"
+#include "nightpreviewitem.h"
 #include "preferences.h"
 #include "progress.h"
 #include "scenetools.h"
@@ -77,6 +77,7 @@ WorldScene::WorldScene(WorldDocument *worldDoc, QObject *parent)
     , mZombieSpawnImageItem(nullptr)
     , mBiomeMapItem(nullptr)
     , mBMPToolActive(false)
+    , mNightPreviewItem(new NightPreviewItem)
 
 {
     setBackgroundBrush(Qt::darkGray);
@@ -138,6 +139,10 @@ WorldScene::WorldScene(WorldDocument *worldDoc, QObject *parent)
 
     mGridItem->updateBoundingRect();
     setSceneRect(mGridItem->boundingRect());
+    mNightPreviewItem->setBounds(sceneRect());
+    mNightPreviewItem->setZValue(50000);
+    mNightPreviewItem->setVisible(false);
+    addItem(mNightPreviewItem);
     mCoordItem->updateBoundingRect();
 
     Preferences *prefs = Preferences::instance();
@@ -255,6 +260,7 @@ WorldScene::WorldScene(WorldDocument *worldDoc, QObject *parent)
     mBiomeMapItem->setVisible(prefs->showBiomeMap());
     mBiomeMapItem->setOpacity(prefs->biomeMapOpacity());
     addItem(mBiomeMapItem);
+
     connect(MapManager::instance(), &MapManager::mapFileCreated,
             this, &WorldScene::mapFileCreated);
 
@@ -458,6 +464,7 @@ void WorldScene::worldResized(const QSize &oldSize)
     mCellItems = items;
     mGridItem->updateBoundingRect();
     setSceneRect(mGridItem->boundingRect());
+    mNightPreviewItem->setBounds(sceneRect());
     mCoordItem->updateBoundingRect();
     mSelectionItem->updateBoundingRect();
     foreach (WorldBMPItem *item, mBMPItems)
@@ -625,6 +632,14 @@ void WorldScene::setShowGrid(bool show)
     mGridItem->setVisible(show);
 }
 
+void WorldScene::setNightPreviewEnabled(bool enabled)
+{
+    mNightPreviewItem->setBounds(sceneRect());
+    mNightPreviewItem->setLights(QVector<NightPreviewLight>());
+    mNightPreviewItem->setLitRooms(QVector<QPolygonF>());
+    mNightPreviewItem->setVisible(enabled);
+}
+
 void WorldScene::setShowCoordinates(bool show)
 {
     mCoordItem->setVisible(show);
@@ -682,6 +697,7 @@ void WorldScene::setShowBiomeMap(bool show)
     if (mBiomeMapItem)
         mBiomeMapItem->setVisible(show);
 }
+
 void WorldScene::biomeMapOpacityChanged(qreal opacity)
 {
     if (!mBiomeMapItem)
@@ -689,6 +705,7 @@ void WorldScene::biomeMapOpacityChanged(qreal opacity)
     mBiomeMapItem->setOpacity(opacity);
     mBiomeMapItem->update();
 }
+
 void WorldScene::setShowZonesInWorldView(bool show)
 {
     Q_UNUSED(show)
@@ -852,6 +869,7 @@ void WorldScene::mapImageChanged(MapImage *mapImage)
 void WorldScene::loadAllWorldThumbnailsChanged(bool thumbs)
 {
     thumbs = thumbs && Preferences::instance()->showWorldThumbnails();
+
     foreach (OtherWorld *otherWorld, mOtherWorlds) {
         otherWorld->mPendingThumbnails.clear();
         foreach (OtherWorldCellItem *item, otherWorld->mCellItems) {
@@ -880,14 +898,17 @@ void WorldScene::showWorldThumbnailsChanged(bool show)
     mPendingThumbnails.clear();
     for (OtherWorld *otherWorld : std::as_const(mOtherWorlds))
         otherWorld->mPendingThumbnails.clear();
+
     if (!show) {
         update();
         return;
     }
+
     if (Preferences::instance()->loadAllWorldThumbnails()) {
         loadAllWorldThumbnailsChanged(true);
         return;
     }
+
     QSet<ThumbnailCell> visibleCells;
     ThumbnailSettingsMgr::instance().visibleCells(
                 worldDocument()->fileName(), visibleCells);
@@ -896,6 +917,7 @@ void WorldScene::showWorldThumbnailsChanged(bool show)
         if (visibleCells.contains(ThumbnailCell(pos.x(), pos.y())))
             mPendingThumbnails += item;
     }
+
     for (OtherWorld *otherWorld : std::as_const(mOtherWorlds)) {
         ThumbnailSettingsMgr::instance().visibleCells(
                     otherWorld->mFileName, visibleCells);
@@ -905,13 +927,16 @@ void WorldScene::showWorldThumbnailsChanged(bool show)
                 otherWorld->mPendingThumbnails += item;
         }
     }
+
     handlePendingThumbnails();
     update();
 }
+
 void WorldScene::handlePendingThumbnails()
 {
     int availableSlots =
-            PortableSettings::recommendedWorkerCount(8, 1);
+            qBound(1, QThread::idealThreadCount() - 1, 4);
+
     for (int i = 0;
          i < mPendingThumbnails.size() && availableSlots > 0;) {
         WorldCellItem *item = mPendingThumbnails.at(i);
@@ -939,8 +964,10 @@ void WorldScene::handlePendingThumbnails()
             }
         }
     }
+
     updateThumbnailProgress();
 }
+
 int WorldScene::pendingThumbnailCount() const
 {
     int count = mPendingThumbnails.size();
@@ -948,6 +975,7 @@ int WorldScene::pendingThumbnailCount() const
         count += otherWorld->mPendingThumbnails.size();
     return count;
 }
+
 void WorldScene::startThumbnailProgress()
 {
     mThumbnailLoadTotal = pendingThumbnailCount();
@@ -955,8 +983,10 @@ void WorldScene::startThumbnailProgress()
         handlePendingThumbnails();
         return;
     }
+
     if (mLoadThumbnailsDialog)
         mLoadThumbnailsDialog->close();
+
     mLoadThumbnailsDialog =
             new LoadThumbnailsDialog(this, MainWindow::instance());
     mLoadThumbnailsDialog->setAttribute(Qt::WA_DeleteOnClose);
@@ -964,10 +994,12 @@ void WorldScene::startThumbnailProgress()
     mLoadThumbnailsDialog->show();
     handlePendingThumbnails();
 }
+
 void WorldScene::updateThumbnailProgress()
 {
     if (!mLoadThumbnailsDialog)
         return;
+
     const int pending = pendingThumbnailCount();
     const int completed = qMax(0, mThumbnailLoadTotal - pending);
     mLoadThumbnailsDialog->setPrompt(
@@ -1044,6 +1076,7 @@ void WorldScene::mouseDoubleClickEvent(QGraphicsSceneMouseEvent *event)
 void WorldScene::dragEnterEvent(QGraphicsSceneDragDropEvent *event)
 {
     mDragBMPError.clear();
+
     if (!world()) {
         event->ignore();
         return;
@@ -1062,6 +1095,7 @@ void WorldScene::dragEnterEvent(QGraphicsSceneDragDropEvent *event)
                 mainImagePath = info.absoluteDir().filePath(
                             baseName + QLatin1Char('.') + info.suffix());
             }
+
             QSize size = BMPToTMX::instance()->validateImages(
                         mainImagePath, world()->cellSize());
             if (size.isEmpty()) {
@@ -1122,6 +1156,7 @@ void WorldScene::dragEnterEvent(QGraphicsSceneDragDropEvent *event)
         event->accept();
         return;
     }
+
     event->ignore();
 }
 
@@ -1169,6 +1204,7 @@ void WorldScene::dropEvent(QGraphicsSceneDragDropEvent *event)
         event->accept();
         return;
     }
+
     if (mDragMapImageItem) {
         if (WorldCell *cell = world()->cellAt(mDragMapImageItem->dropPos()))
             mWorldDoc->setCellMapName(cell, mDragMapImageItem->mapFilePath());
@@ -1197,6 +1233,7 @@ void WorldScene::dropEvent(QGraphicsSceneDragDropEvent *event)
         event->accept();
         return;
     }
+
     event->ignore();
 }
 
@@ -1251,15 +1288,18 @@ void BaseCellItem::paint(QPainter *painter,
     Q_UNUSED(option)
 
     paintThumbnails(painter);
+
 #ifndef QT_NO_DEBUG
     painter->drawRect(mBoundingRect);
 #endif
 }
+
 void BaseCellItem::paintThumbnails(QPainter *painter)
 {
     if (Preferences::instance()->showWorldThumbnails()) {
         if (mLotImagesRenderOrder.size() != mLotImages.size())
             sortLotImages();
+
         int firstAboveGroundIndex = mLotImagesRenderOrder.size();
         for (int i = 0; i < mLotImagesRenderOrder.size(); ++i) {
             const LotImage &lotImage =
@@ -1276,6 +1316,7 @@ void BaseCellItem::paintThumbnails(QPainter *painter)
                     QPointF(0, 0), lotImage.mMapImage->image().size());
             painter->drawImage(target, lotImage.mMapImage->image(), source);
         }
+
         if (mMapImage && mMapImage->isLoaded()) {
             QRectF target = mMapImageBounds.translated(mDrawOffset);
             QRectF source = QRect(QPoint(0, 0), mMapImage->image().size());
@@ -1365,6 +1406,7 @@ void BaseCellItem::sortLotImages()
         return mLotImages.at(a).level < mLotImages.at(b).level;
     });
 }
+
 void BaseCellItem::updateBoundingRect()
 {
     QRectF bounds = mScene->boundingRect(cellPos());
@@ -2282,15 +2324,22 @@ void ZombieSpawnImageItem::paint(QPainter *painter, const QStyleOptionGraphicsIt
 
     if (mPreviewImage.isNull())
         return;
+
+    // Keep the editable image in its native orthogonal grid and project it
+    // only while painting.  Pre-rasterizing the image as a small diamond and
+    // then stretching its bounding rectangle caused a pronounced staircase
+    // and subtly changed the heatmap outline.
     const QRectF sourceRect(QPointF(0, 0), mPreviewImage.size());
     QPolygonF sourceQuad;
     sourceQuad << sourceRect.topLeft()
                << sourceRect.topRight()
                << sourceRect.bottomRight()
                << sourceRect.bottomLeft();
+
     QTransform imageToScene;
     if (!QTransform::quadToQuad(sourceQuad, polygon(), imageToScene))
         return;
+
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing, true);
     painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
@@ -2303,6 +2352,7 @@ QRectF ZombieSpawnImageItem::imageBounds() const
 {
     if (mSourceImage.isNull())
         return QRectF();
+
     return QRectF(0, 0,
                   mSourceImage.width() / qreal(mSamplesPerCell),
                   mSourceImage.height() / qreal(mSamplesPerCell));
@@ -2326,31 +2376,37 @@ void ZombieSpawnImageItem::setPreviewB42x40(bool enabled)
 {
     if (mPreviewB42x40 == enabled)
         return;
+
     mPreviewB42x40 = enabled;
     rebuildPreview();
     update();
 }
+
 QPoint ZombieSpawnImageItem::imagePointAt(const QPointF &scenePos) const
 {
     const QPointF cellPos = mScene->pixelToCellCoords(scenePos);
     return QPoint(qFloor(cellPos.x() * mSamplesPerCell),
                   qFloor(cellPos.y() * mSamplesPerCell));
 }
+
 bool ZombieSpawnImageItem::containsImagePoint(const QPoint &point) const
 {
     return !mSourceImage.isNull()
             && point.x() >= 0 && point.x() < mSourceImage.width()
             && point.y() >= 0 && point.y() < mSourceImage.height();
 }
+
 bool ZombieSpawnImageItem::canEdit() const
 {
     const QString path = configuredFilePath();
     return isValid() || (!path.isEmpty() && !QFileInfo::exists(path));
 }
+
 bool ZombieSpawnImageItem::ensureEditable(QString *error)
 {
     if (!mSourceImage.isNull())
         return true;
+
     mFilePath = configuredFilePath();
     if (mFilePath.isEmpty()) {
         if (error) {
@@ -2367,6 +2423,7 @@ bool ZombieSpawnImageItem::ensureEditable(QString *error)
         }
         return false;
     }
+
     const QSize expected(mScene->world()->width() * mSamplesPerCell,
                          mScene->world()->height() * mSamplesPerCell);
     if (expected.isEmpty()) {
@@ -2374,14 +2431,17 @@ bool ZombieSpawnImageItem::ensureEditable(QString *error)
             *error = QObject::tr("The current world has no editable Heatmap area.");
         return false;
     }
+
     mSourceImage = QImage(expected, QImage::Format_ARGB32);
     mSourceImage.fill(qRgba(0, 0, 0, 255));
+
     GenerateLotsSettings settings =
             mScene->world()->getGenerateLotsSettings();
     if (settings.zombieSpawnMap.isEmpty()) {
         settings.zombieSpawnMap = mFilePath;
         mScene->worldDocument()->changeGenerateLotsSettings(settings);
     }
+
     rebuildPreview();
     synchWithImage();
     update();
@@ -2389,11 +2449,13 @@ bool ZombieSpawnImageItem::ensureEditable(QString *error)
             << expected;
     return true;
 }
+
 bool ZombieSpawnImageItem::reloadFromSettings(QString *error)
 {
     const QString newPath = configuredFilePath();
     if (newPath == mFilePath && !mSourceImage.isNull())
         return true;
+
     mFilePath = newPath;
     const bool exists = QFileInfo::exists(mFilePath);
     QImage image(mFilePath);
@@ -2411,6 +2473,7 @@ bool ZombieSpawnImageItem::reloadFromSettings(QString *error)
         }
         return true;
     }
+
     mSourceImage = image.convertToFormat(QImage::Format_ARGB32);
     const QSize expected(mScene->world()->width() * mSamplesPerCell,
                          mScene->world()->height() * mSamplesPerCell);
@@ -2424,16 +2487,19 @@ bool ZombieSpawnImageItem::reloadFromSettings(QString *error)
         qWarning() << "Zombie Heatmap does not cover the complete world;"
                    << "use Expand to world to zero-pad it.";
     }
+
     rebuildPreview();
     synchWithImage();
     update();
     return true;
 }
+
 void ZombieSpawnImageItem::paintStroke(const QPoint &from, const QPoint &to,
                                        int radius, int intensity)
 {
     if (mSourceImage.isNull())
         return;
+
     const int value = qBound(0, intensity, 255);
     QPainter painter(&mSourceImage);
     painter.setCompositionMode(QPainter::CompositionMode_Source);
@@ -2444,9 +2510,11 @@ void ZombieSpawnImageItem::paintStroke(const QPoint &from, const QPoint &to,
     painter.setPen(pen);
     painter.drawLine(from, to);
     painter.end();
+
     rebuildPreview();
     update();
 }
+
 bool ZombieSpawnImageItem::replaceSourceImage(const QImage &image,
                                               bool saveToDisk,
                                               QString *error)
@@ -2456,6 +2524,7 @@ bool ZombieSpawnImageItem::replaceSourceImage(const QImage &image,
             *error = QObject::tr("The Zombie Heatmap image is empty.");
         return false;
     }
+
     const QImage previous = mSourceImage;
     mSourceImage = image.convertToFormat(QImage::Format_ARGB32);
     rebuildPreview();
@@ -2463,12 +2532,14 @@ bool ZombieSpawnImageItem::replaceSourceImage(const QImage &image,
     update();
     if (!saveToDisk || save(error))
         return true;
+
     mSourceImage = previous;
     rebuildPreview();
     synchWithImage();
     update();
     return false;
 }
+
 bool ZombieSpawnImageItem::save(QString *error)
 {
     if (mSourceImage.isNull() || mFilePath.isEmpty()) {
@@ -2476,6 +2547,7 @@ bool ZombieSpawnImageItem::save(QString *error)
             *error = QObject::tr("No Zombie Heatmap image is loaded.");
         return false;
     }
+
     const QFileInfo targetInfo(mFilePath);
     if (!QDir().mkpath(targetInfo.absolutePath())) {
         if (error) {
@@ -2485,6 +2557,7 @@ bool ZombieSpawnImageItem::save(QString *error)
         }
         return false;
     }
+
     const QString backupPath = mFilePath + QLatin1String(".before-paint.bak");
     if (!QFileInfo::exists(backupPath) && QFileInfo::exists(mFilePath)) {
         if (!QFile::copy(mFilePath, backupPath)) {
@@ -2493,12 +2566,14 @@ bool ZombieSpawnImageItem::save(QString *error)
             qInfo() << "Zombie Heatmap backup created:" << backupPath;
         }
     }
+
     QSaveFile file(mFilePath);
     if (!file.open(QIODevice::WriteOnly)) {
         if (error)
             *error = file.errorString();
         return false;
     }
+
     QImageWriter writer(&file, "png");
     writer.setCompression(6);
     if (!writer.write(mSourceImage)) {
@@ -2512,23 +2587,27 @@ bool ZombieSpawnImageItem::save(QString *error)
             *error = file.errorString();
         return false;
     }
+
     qInfo() << "Zombie Heatmap saved:" << mFilePath
             << mSourceImage.size()
             << "samples/cell" << mSamplesPerCell
             << "preview" << (mPreviewB42x40 ? "B42 x40" : "raw");
     return true;
 }
+
 bool ZombieSpawnImageItem::expandToWorld(QString *error)
 {
     const bool existed = !mSourceImage.isNull();
     if (!ensureEditable(error))
         return false;
+
     const QSize expected(mScene->world()->width() * mSamplesPerCell,
                          mScene->world()->height() * mSamplesPerCell);
     if (mSourceImage.width() >= expected.width()
             && mSourceImage.height() >= expected.height()) {
         return existed || save(error);
     }
+
     QImage expanded(qMax(expected.width(), mSourceImage.width()),
                     qMax(expected.height(), mSourceImage.height()),
                     QImage::Format_ARGB32);
@@ -2538,6 +2617,7 @@ bool ZombieSpawnImageItem::expandToWorld(QString *error)
     painter.end();
     return replaceSourceImage(expanded, true, error);
 }
+
 QString ZombieSpawnImageItem::configuredFilePath() const
 {
     const QString configured =
@@ -2552,17 +2632,20 @@ QString ZombieSpawnImageItem::configuredFilePath() const
         }
         return QDir::current().absoluteFilePath(configured);
     }
+
     if (mScene->worldDocument()->fileName().isEmpty())
         return QString();
     return QDir(QFileInfo(mScene->worldDocument()->fileName()).absolutePath())
             .filePath(QLatin1String("Map_ZombieSpawnMap.png"));
 }
+
 void ZombieSpawnImageItem::rebuildPreview()
 {
     if (mSourceImage.isNull()) {
         mPreviewImage = QImage();
         return;
     }
+
     QImage visual(mSourceImage.size(), QImage::Format_ARGB32);
     for (int y = 0; y < mSourceImage.height(); ++y) {
         const QRgb *source = reinterpret_cast<const QRgb *>(mSourceImage.constScanLine(y));
@@ -2573,8 +2656,12 @@ void ZombieSpawnImageItem::rebuildPreview()
             target[x] = qRgba(shown, 0, 0, 255);
         }
     }
+
+    // Projection is intentionally deferred to paint().  This avoids losing
+    // contour detail in an intermediate, low-resolution isometric raster.
     mPreviewImage = visual;
 }
+
 /////
 
 OtherWorld::~OtherWorld()

@@ -20,14 +20,18 @@ EditModeStatusBar::EditModeStatusBar(const QString &prefix, QObject *parent) :
 
     statusBarLayout = new QHBoxLayout();
     statusBarLayout->setObjectName(prefix + QLatin1String("statusBarLayout"));
+    statusBarLayout->setContentsMargins(8, 3, 8, 3);
+    statusBarLayout->setSpacing(6);
 
     coordLabel = new QLabel();
     coordLabel->setObjectName(prefix + QLatin1String("coordLabel"));
+    coordLabel->setProperty("studioStatus", true);
     coordLabel->setAlignment(Qt::AlignCenter);
     statusBarLayout->addWidget(coordLabel);
 
     statusLabel = new QLabel();
     statusLabel->setObjectName(prefix + QLatin1String("statusLabel"));
+    statusLabel->setProperty("studioStatus", true);
     statusBarLayout->addWidget(statusLabel);
 
     spacer = new QSpacerItem(40, 20, QSizePolicy::Expanding, QSizePolicy::Minimum);
@@ -35,6 +39,7 @@ EditModeStatusBar::EditModeStatusBar(const QString &prefix, QObject *parent) :
 
     editorScaleComboBox = new QComboBox();
     editorScaleComboBox->setObjectName(prefix + QLatin1String("editorScaleComboBox"));
+    editorScaleComboBox->setProperty("studioStatus", true);
     statusBarLayout->addWidget(editorScaleComboBox);
 
     connect(BuildingDocumentMgr::instance(), &BuildingDocumentMgr::currentDocumentChanged,
