@@ -274,6 +274,19 @@ must supply those separately.
 
 ## Verify a build
 
+Before manual testing or publishing a Windows archive, run the checked-in
+release verifier from a Visual Studio Developer Command Prompt:
+
+```bat
+tools\release\Verify-PZToolsRelease.cmd "C:\path\to\the\extracted\PZTools-release" -WriteManifest
+```
+
+The verifier checks the portable directory structure, all three executables,
+required catalogues, native DLL imports, Qt's Windows platform plugin, and the
+known shared `zlib1.dll` runtime. It writes a plain-text report and can create
+`SHA256SUMS.txt`. A release with any reported failure must not be published.
+See [`tools/release/README.md`](tools/release/README.md) for details.
+
 For every platform:
 
 1. Record the exact source commit or tag.
