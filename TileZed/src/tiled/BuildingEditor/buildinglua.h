@@ -1,8 +1,6 @@
 #ifndef BUILDINGLUA_H
 #define BUILDINGLUA_H
-
 #include "properties.h"
-
 #include <QList>
 #include <QMap>
 #include <QPoint>
@@ -11,36 +9,23 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
-
 extern "C" {
 struct lua_State;
 }
-
 namespace BuildingEditor {
-
 class BuildingDocument;
 class BuildingFloor;
 class BuildingObject;
 class FloorTileGrid;
 class Room;
-
-/**
- * Runs one Lua script against a detached view of a BuildingEd document.
- *
- * Mutations are recorded in shadow data and are applied to the real document
- * only after the script completes successfully.  applyChanges() creates one
- * undo macro for the complete script.
- */
 class BuildingLuaScript
 {
 public:
     explicit BuildingLuaScript(BuildingDocument *document);
     ~BuildingLuaScript();
-
     bool run(const QString &fileName, QString *error = nullptr);
     bool applyChanges(const QString &undoText = QString());
     QStringList requestedActions() const { return mRequestedActions; }
-
 private:
     struct FloorState {
         BuildingFloor *floor = nullptr;
@@ -49,7 +34,6 @@ private:
         QMap<QString, FloorTileGrid *> userTiles;
         QMap<QString, QRegion> changedUserTiles;
     };
-
     FloorState *floorState(int level);
     const FloorState *floorState(int level) const;
     int roomIndex(Room *room) const;
@@ -58,11 +42,9 @@ private:
     QString objectType(BuildingObject *object) const;
     FloorTileGrid *userTiles(FloorState *state, const QString &layerName,
                              bool create);
-
     void registerApi(lua_State *state);
     static BuildingLuaScript *fromLua(lua_State *state);
     static int argumentBase(lua_State *state);
-
     static int luaWidth(lua_State *state);
     static int luaHeight(lua_State *state);
     static int luaFloorCount(lua_State *state);
@@ -107,7 +89,6 @@ private:
     static int luaClearTileSelection(lua_State *state);
     static int luaAvailableActions(lua_State *state);
     static int luaInvoke(lua_State *state);
-
     BuildingDocument *mDocument;
     QList<FloorState *> mFloors;
     Tiled::Properties mProperties;
@@ -121,7 +102,5 @@ private:
     bool mTileSelectionChanged;
     QStringList mRequestedActions;
 };
-
-} // namespace BuildingEditor
-
-#endif // BUILDINGLUA_H
+}
+#endif

@@ -23,6 +23,7 @@
 #include <QModelIndex>
 
 class QComboBox;
+class QLineEdit;
 class QListWidget;
 class QMenu;
 class QSettings;
@@ -69,6 +70,8 @@ signals:
 private slots:
     void currentDocumentChanged(BuildingEditor::BuildingDocument *doc);
     void catalogLoaded();
+
+    void categoryFilterEdited(const QString &text);
 
     void categoryScaleChanged(qreal scale);
     void categoryViewMousePressed();
@@ -136,6 +139,7 @@ private:
     {
         QSplitter *categorySplitter;
         QListWidget *categoryList;
+        QLineEdit *categoryFilter;
         QStackedWidget *categoryStack;
         BuildingTileEntryView *tilesetView;
         FurnitureView *furnitureView;

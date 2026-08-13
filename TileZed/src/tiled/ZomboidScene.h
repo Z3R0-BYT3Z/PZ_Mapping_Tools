@@ -136,7 +136,6 @@ public:
     Q_DECLARE_FLAGS(PendingFlags, Pending)
 
 protected:
-    void rebuildNightPreview() override;
 
     // QGraphicsScene
     void mouseMoveEvent(QGraphicsSceneMouseEvent *mouseEvent);
@@ -156,7 +155,6 @@ protected:
 
     QRegion getBuildingRegion(const QPoint &tilePos, QRegion &roomRgn);
     void setHighlightRoomPosition(const QPoint &tilePos);
-    void scheduleNightPreviewRebuild();
 
 private:
     QMap<MapObject*,MapComposite*> mMapObjectToLot;
@@ -176,7 +174,6 @@ private:
     QPoint mHighlightRoomPosition;
     MapBuildings *mMapBuildings;
     bool mMapBuildingsInvalid;
-    QTimer *mNightPreviewTimer;
 };
 
 } // namespace Internal

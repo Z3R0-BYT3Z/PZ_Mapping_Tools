@@ -42,6 +42,7 @@
 #include <QDebug>
 #include <QEventLoop>
 #include <QHBoxLayout>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
 #include <QSettings>
@@ -70,9 +71,24 @@ CategoryDock::CategoryDock(QWidget *parent) :
     setObjectName(QLatin1String("CategoryDock"));
     setWindowTitle(tr("Tiles and Furniture"));
 
+    ui->categoryFilter = new QLineEdit(this);
+    ui->categoryFilter->setObjectName(
+                QLatin1String("CategoryDock.categoryFilter"));
+    ui->categoryFilter->setPlaceholderText(tr("Filter categories"));
+    ui->categoryFilter->setClearButtonEnabled(true);
     ui->categoryList = new QListWidget;
     ui->categoryList->setObjectName(QLatin1String("CategoryDock.categoryList"));
 
+    QVBoxLayout *categoryLayout = new QVBoxLayout;
+    categoryLayout->setObjectName(
+                QLatin1String("CategoryDock.categoryLayout"));
+    categoryLayout->setContentsMargins(0, 0, 0, 0);
+    categoryLayout->addWidget(ui->categoryFilter);
+    categoryLayout->addWidget(ui->categoryList);
+    QWidget *categoryContainer = new QWidget(this);
+    categoryContainer->setSizePolicy(QSizePolicy::Minimum,
+                                     QSizePolicy::Preferred);
+    categoryContainer->setLayout(categoryLayout);
     ui->tilesetView = new BuildingTileEntryView;
     ui->tilesetView->setObjectName(QLatin1String("CategoryDock.tilesetView"));
 
@@ -91,7 +107,7 @@ CategoryDock::CategoryDock(QWidget *parent) :
     ui->categorySplitter->setObjectName(QLatin1String("CategoryDock.splitter"));
     ui->categorySplitter->setOrientation(Qt::Vertical);
     ui->categorySplitter->setChildrenCollapsible(false);
-    ui->categorySplitter->addWidget(ui->categoryList);
+    ui->categorySplitter->addWidget(categoryContainer);
     ui->categorySplitter->addWidget(ui->categoryStack);
     ui->categorySplitter->setSizes(QList<int>() << 128 << 256);
 
@@ -115,6 +131,8 @@ CategoryDock::CategoryDock(QWidget *parent) :
 
     BuildingPreferences *prefs = BuildingPreferences::instance();
 
+    connect(ui->categoryFilter, &QLineEdit::textEdited,
+            this, &CategoryDock::categoryFilterEdited);
     mCategoryZoomable->connectToComboBox(ui->scaleComboBox);
     connect(mCategoryZoomable, &Tiled::Internal::Zoomable::scaleChanged,
             prefs, &BuildingPreferences::setTileScale);
@@ -216,7 +234,6 @@ void CategoryDock::catalogLoaded()
     }
     if (row < 0 && BuildingTilesMgr::instance()->categoryCount() > 0)
         row = mRowOfFirstCategory;
-
     ui->categoryList->setCurrentRow(row);
     qInfo() << "BuildingEd object-mode catalog refreshed:"
             << BuildingTilesMgr::instance()->categoryCount()
@@ -249,6 +266,36 @@ void CategoryDock::currentDocumentChanged(BuildingDocument *doc)
         categorySelectionChanged();
 }
 
+void CategoryDock::categoryFilterEdited(const QString &text)
+{
+    const bool empty = text.trimmed().isEmpty();
+    for (int row = 0; row < ui->categoryList->count(); ++row) {
+        QListWidgetItem *item = ui->categoryList->item(row);
+        item->setHidden(!empty
+                        && !item->text().contains(text, Qt::CaseInsensitive));
+    }
+    QListWidgetItem *current = ui->categoryList->currentItem();
+    if (!current || !current->isHidden()) {
+        if (current)
+            ui->categoryList->scrollToItem(current);
+        return;
+    }
+    const int currentRow = ui->categoryList->row(current);
+    for (int distance = 1; distance < ui->categoryList->count(); ++distance) {
+        const int previous = currentRow - distance;
+        if (previous >= 0 && !ui->categoryList->item(previous)->isHidden()) {
+            ui->categoryList->setCurrentRow(previous);
+            return;
+        }
+        const int next = currentRow + distance;
+        if (next < ui->categoryList->count()
+                && !ui->categoryList->item(next)->isHidden()) {
+            ui->categoryList->setCurrentRow(next);
+            return;
+        }
+    }
+    ui->categoryList->setCurrentItem(nullptr);
+}
 Building *CategoryDock::currentBuilding() const
 {
     return mCurrentDocument ? mCurrentDocument->building() : 0;
@@ -1156,8 +1203,6 @@ bool CategoryDock::validateAllTileCategories()
     bool valid = true;
     const int count = BuildingTilesMgr::instance()->categoryCount();
     const int furnitureCount = FurnitureGroups::instance()->groupCount();
-    // HorizontalLineDelegate inserts one separator after "Used" and another
-    // after the tile categories.
     const int expectedRows = 4 + count + furnitureCount;
     if (ui->categoryList->count() != expectedRows) {
         qWarning() << "BuildingEd object-mode catalog row mismatch:"
@@ -1166,7 +1211,6 @@ bool CategoryDock::validateAllTileCategories()
         valid = false;
     }
     qInfo() << "Validating all BuildingEd tile categories:" << count;
-
     for (int index = 0; index < count; ++index) {
         BuildingTileCategory *category =
                 BuildingTilesMgr::instance()->category(index);
@@ -1174,7 +1218,6 @@ bool CategoryDock::validateAllTileCategories()
         if (mCategory != category)
             categorySelectionChanged();
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-
         const int expected = category->entryCount()
                 + (category->canAssignNone() ? 1 : 0);
         const int displayed = ui->tilesetView->entryCount();
@@ -1192,7 +1235,6 @@ bool CategoryDock::validateAllTileCategories()
                         : QStringLiteral("FAILED"));
         valid = valid && categoryValid;
     }
-
     for (int index = 0; index < furnitureCount; ++index) {
         FurnitureGroup *group = FurnitureGroups::instance()->group(index);
         ui->categoryList->setCurrentRow(
@@ -1216,12 +1258,10 @@ bool CategoryDock::validateAllTileCategories()
         }
         valid = valid && groupValid;
     }
-
     qInfo() << "BuildingEd tile-category validation"
             << (valid ? "completed successfully" : "failed");
     return valid;
 }
-
 void CategoryDock::scrollToNow(int which, const QModelIndex &index)
 {
     if (which == 0)

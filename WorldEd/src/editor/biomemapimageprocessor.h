@@ -1,12 +1,10 @@
 #ifndef BIOMEMAPIMAGEPROCESSOR_H
 #define BIOMEMAPIMAGEPROCESSOR_H
-
 #include <QColor>
 #include <QImage>
 #include <QList>
 #include <QSet>
 #include <QString>
-
 class BiomeMapImageProcessor
 {
 public:
@@ -20,7 +18,6 @@ public:
         QString zone;
         bool enabledByDefault;
     };
-
     struct Analysis
     {
         QSet<int> biomeValues;
@@ -31,7 +28,6 @@ public:
         QSet<int> valuesRequiringOverride;
         int mixedZoneChunks = 0;
     };
-
     static QImage process(const QImage &biomeLayer,
                           const QImage &zoneLayer);
     static QImage createBiomeLayer(const QImage &mainImage,
@@ -45,10 +41,8 @@ public:
                             const QImage &zoneLayer,
                             int chunkSize = 8);
     static bool validateConfiguration(QString *errorString);
-
 private:
     static const QSet<int> &knownValues();
     static const QSet<int> &overrideValues();
 };
-
-#endif // BIOMEMAPIMAGEPROCESSOR_H
+#endif

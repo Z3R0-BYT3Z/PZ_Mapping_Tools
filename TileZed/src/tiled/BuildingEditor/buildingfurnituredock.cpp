@@ -32,7 +32,6 @@
 
 #include "tile.h"
 #include "tileset.h"
-
 #include <QAction>
 #include <QComboBox>
 #include <QDebug>
@@ -140,7 +139,6 @@ bool BuildingFurnitureDock::validateFurnitureCatalog(QString *errorString)
                 .arg(mGroupList->count()).arg(expectedGroups);
         return false;
     }
-
     int furnitureDefinitions = 0;
     int tileReferences = 0;
     QStringList invalidReferences;
@@ -157,9 +155,6 @@ bool BuildingFurnitureDock::validateFurnitureCatalog(QString *errorString)
                     Tiled::Tileset *tileset =
                             Tiled::Internal::TileMetaInfoMgr::instance()
                             ->tileset(buildingTile->mTilesetName);
-                    // Tilesets.txt dimensions may lag behind newer PNGs.
-                    // Validate an index only after that image has been loaded
-                    // and its real dimensions are known.
                     if (!tileset || buildingTile->mIndex < 0
                             || (tileset->isLoaded()
                                 && buildingTile->mIndex
@@ -180,15 +175,11 @@ bool BuildingFurnitureDock::validateFurnitureCatalog(QString *errorString)
                    .arg(invalidReferences.count())
                    .arg(invalidReferences.first());
     }
-
     mGroupList->setCurrentRow(0);
     if (!mCurrentGroup || mFurnitureView->model()->rowCount() <= 0) {
         *errorString = tr("The first furniture group has no visible entries.");
         return false;
     }
-
-    // Rendering the first non-empty orientation verifies that the preloaded
-    // catalog can supply usable furniture images.
     for (FurnitureTiles *furniture : mCurrentGroup->mTiles) {
         for (FurnitureTile *orientation : furniture->tiles()) {
             if (!orientation || orientation->isEmpty())
@@ -214,11 +205,9 @@ bool BuildingFurnitureDock::validateFurnitureCatalog(QString *errorString)
             return true;
         }
     }
-
     *errorString = tr("The first furniture group contains no tile images.");
     return false;
 }
-
 void BuildingFurnitureDock::changeEvent(QEvent *e)
 {
     QDockWidget::changeEvent(e);
@@ -242,7 +231,6 @@ void BuildingFurnitureDock::setGroupsList()
     mGroupList->clear();
     foreach (FurnitureGroup *group, FurnitureGroups::instance()->groups())
         mGroupList->addItem(group->mLabel);
-
     int row = FurnitureGroups::instance()->indexOf(previousGroup);
     if (row < 0 && mGroupList->count() > 0)
         row = 0;

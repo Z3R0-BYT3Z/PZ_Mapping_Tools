@@ -133,7 +133,6 @@ void MapBuildings::calculate(MapComposite *mc)
                 continue;
 
             if ((r->floor < 0) != (comp->floor < 0)) {
-                // Don't merge below-ground buildings with above-ground buildings.
                 continue;
             }
             if (r->inSameBuilding(comp)) {

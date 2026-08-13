@@ -24,6 +24,7 @@ class WorldDocument;
 
 class QListWidgetItem;
 class QCheckBox;
+class QComboBox;
 class QDoubleSpinBox;
 class QSpinBox;
 
@@ -39,6 +40,7 @@ public:
 
 private slots:
     void browseTilesDirectory();
+    void browseProjectZomboidDirectory();
     void themeChanged(int index);
     void gridColorChanged(const QColor &gridColor);
 
@@ -48,6 +50,7 @@ private:
     Ui::PreferencesDialog *ui;
     WorldDocument *mWorldDoc;
     QString mTilesDirectory;
+    QString mProjectZomboidDirectory;
     QColor mGridColor;
     QDoubleSpinBox *mRoadSimplificationHighway;
     QSpinBox *mRoadPointSpacingHighway;
@@ -56,6 +59,7 @@ private:
     QDoubleSpinBox *mRoadSimplificationRailway;
     QSpinBox *mRoadPointSpacingRailway;
     QCheckBox *mSyncThemeCheckBox;
+    QComboBox *mAutoSaveCombo;
 };
 
 #endif // PREFERENCESDIALOG_H

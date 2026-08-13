@@ -197,12 +197,9 @@ public:
     InGameMapProperties mProperties;
 };
 
-// Normalizes geometry to the integer/short representation used by the game
-// and rejects shapes that WorldMapRenderer cannot triangulate safely.
 bool sanitizeInGameMapGeometryForExport(const InGameMapGeometry &source,
                                         InGameMapGeometry &result,
                                         QStringList &diagnostics);
-
 class InGameMapFeatures : public QList<InGameMapFeature*>
 {
 public:

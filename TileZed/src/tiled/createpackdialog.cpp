@@ -182,7 +182,10 @@ void CreatePackDialog::removeDirectory()
 
 void CreatePackDialog::addTileDef()
 {
-    QString path = QFileDialog::getOpenFileName(this, tr("Choose .tiles file"), QString(), QStringLiteral("*.tiles"));
+    QString path = QFileDialog::getOpenFileName(
+                this, tr("Choose .tiles file"),
+                Tiled::Internal::Preferences::instance()->gameMediaPath(),
+                QStringLiteral("*.tiles"));
     if (path.isEmpty())
         return;
 

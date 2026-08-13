@@ -108,7 +108,8 @@ BuildingDocument::BuildingDocument(Building *building, const QString &fileName) 
 
 BuildingDocument::~BuildingDocument()
 {
-    delete mClipboardTiles;
+    for (const ClipboardTileLayer &layer : qAsConst(mClipboardTileLayers))
+        delete layer.tiles;
 }
 
 QString BuildingDocument::displayName() const
@@ -226,9 +227,28 @@ void BuildingDocument::setSelectedObjects(const QSet<BuildingObject *> &selectio
 void BuildingDocument::setClipboardTiles(FloorTileGrid *tiles, const QRegion &rgn)
 {
     Q_ASSERT(tiles->bounds().contains(rgn.boundingRect()));
-    delete mClipboardTiles;
-    mClipboardTiles = tiles;
+    ClipboardTileLayer layer;
+    layer.level = currentLevel();
+    layer.layerName = currentLayer();
+    layer.tiles = tiles;
+    setClipboardTileLayers(QList<ClipboardTileLayer>() << layer,
+                           rgn, currentLevel());
+    mClipboardPreservesPlanes = false;
+}
+
+void BuildingDocument::setClipboardTileLayers(
+        const QList<ClipboardTileLayer> &layers,
+        const QRegion &rgn,
+        int anchorLevel)
+{
+    for (const ClipboardTileLayer &old : qAsConst(mClipboardTileLayers))
+        delete old.tiles;
+    mClipboardTileLayers = layers;
+    mClipboardTiles = mClipboardTileLayers.isEmpty()
+            ? nullptr : mClipboardTileLayers.first().tiles;
     mClipboardTilesRgn = rgn;
+    mClipboardAnchorLevel = anchorLevel;
+    mClipboardPreservesPlanes = true;
     emit clipboardTilesChanged();
 }
 

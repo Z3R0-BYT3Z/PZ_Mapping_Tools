@@ -192,24 +192,19 @@ LuaScript *LuaScript::fromLua(lua_State *state)
     return static_cast<LuaScript *>(
                 lua_touserdata(state, lua_upvalueindex(1)));
 }
-
 void LuaScript::registerApplicationApi()
 {
     lua_newtable(L);
     lua_pushinteger(L, 1);
     lua_setfield(L, -2, "apiVersion");
-
     lua_pushlightuserdata(L, this);
     lua_pushcclosure(L, luaAvailableActions, 1);
     lua_setfield(L, -2, "availableActions");
-
     lua_pushlightuserdata(L, this);
     lua_pushcclosure(L, luaInvoke, 1);
     lua_setfield(L, -2, "invoke");
-
     lua_setglobal(L, "app");
 }
-
 int LuaScript::luaAvailableActions(lua_State *state)
 {
     static const char *const actions[] = {
@@ -224,7 +219,6 @@ int LuaScript::luaAvailableActions(lua_State *state)
     }
     return 1;
 }
-
 int LuaScript::luaInvoke(lua_State *state)
 {
     LuaScript *self = fromLua(state);
@@ -246,7 +240,6 @@ int LuaScript::luaInvoke(lua_State *state)
     self->mRequestedActions.append(action);
     return 0;
 }
-
 extern "C" {
 
 // see luaconf.h
@@ -271,7 +264,6 @@ int traceback(lua_State *L) {
   }
   return 1;
 }
-
 static void cancellationHook(lua_State *L, lua_Debug *)
 {
     qApp->processEvents(QEventLoop::AllEvents);
@@ -288,7 +280,6 @@ bool LuaScript::dofile(const QString &f, QString &output)
 
     PROGRESS progress(qApp->tr("Running Lua script: %1")
                       .arg(QFileInfo(f).fileName()), LuaConsole::instance(), true);
-
     QElapsedTimer elapsed;
     elapsed.start();
 
@@ -449,7 +440,6 @@ const char *LuaTileLayer::tileNameAt(int x, int y)
                    .arg(tile->tileset()->name())
                    .arg(tile->id()));
 }
-
 bool LuaTileLayer::setTileByName(int x, int y, const char *tileName)
 {
     if (!mMap)
@@ -461,7 +451,6 @@ bool LuaTileLayer::setTileByName(int x, int y, const char *tileName)
     setTile(x, y, tile);
     return true;
 }
-
 bool LuaTileLayer::clearTileByName(int x, int y, const char *tileName)
 {
     const QString expected = QString::fromUtf8(tileName ? tileName : "");
@@ -470,7 +459,6 @@ bool LuaTileLayer::clearTileByName(int x, int y, const char *tileName)
     clearTile(x, y);
     return true;
 }
-
 bool LuaTileLayer::replaceTileByNameAt(int x, int y,
                                       const char *oldTileName,
                                       const char *newTileName)
@@ -481,7 +469,6 @@ bool LuaTileLayer::replaceTileByNameAt(int x, int y,
         return false;
     return setTileByName(x, y, newTileName);
 }
-
 void LuaTileLayer::clearTile(int x, int y)
 {
     setTile(x, y, 0);
@@ -684,7 +671,6 @@ int LuaMap::maxLevel()
         result = qMax(result, layer->level());
     return result;
 }
-
 int LuaMap::minLevel()
 {
     int result = 0;
@@ -726,14 +712,12 @@ LuaTileLayer *LuaMap::tileLayerAt(int level, const char *name)
     const QString prefixed = QStringLiteral("%1_%2").arg(level).arg(baseName);
     return tileLayer(prefixed.toUtf8().constData());
 }
-
 LuaObjectGroup *LuaMap::objectLayer(const char *name)
 {
     if (LuaLayer *layer = this->layer(name))
         return layer->asObjectGroup();
     return nullptr;
 }
-
 LuaTileLayer *LuaMap::newTileLayer(const char *name)
 {
     LuaTileLayer *tl = new LuaTileLayer(name, 0, 0, width(), height());
@@ -745,7 +729,6 @@ LuaObjectGroup *LuaMap::newObjectLayer(const char *name)
 {
     return new LuaObjectGroup(name, 0, 0, width(), height());
 }
-
 void LuaMap::addLayer(LuaLayer *layer)
 {
     if (mLayers.contains(layer))
@@ -818,13 +801,10 @@ static void ensureTilesetLoadedForLua(Tileset *tileset)
 {
     if (!tileset || tileset->isLoaded())
         return;
-    // A relative source is an unresolved catalog entry, not a confirmed
-    // missing tileset. TilesetManager resolves that one entry on demand.
     if (tileset->isMissing()
             && !QDir(tileset->imageSource()).isRelative()) {
         return;
     }
-
     QList<Tileset *> requested;
     requested += tileset;
     Tiled::Internal::TilesetManager::instance()
@@ -832,7 +812,6 @@ static void ensureTilesetLoadedForLua(Tileset *tileset)
     Tiled::Internal::TilesetManager::instance()
             ->waitForTilesets(requested);
 }
-
 Tile *LuaMap::tile(const char *name)
 {
     QString tilesetName;
@@ -866,7 +845,6 @@ Tile *LuaMap::tileForEdit(const QString &name)
         ensureTilesetLoadedForLua(tileset);
         return tileset->tileAt(tileID);
     }
-
     Tileset *source = Tiled::Internal::TileMetaInfoMgr::instance()
             ->tileset(tilesetName);
     if (!source)
@@ -886,7 +864,6 @@ Tile *LuaMap::tileForEdit(const QString &name)
     mNewTilesets += clone;
     return tile;
 }
-
 Tile *LuaMap::noneTile()
 {
     return BuildingEditor::BuildingTilesMgr::instance()->noneTiledTile();
@@ -1019,7 +996,6 @@ int LuaMap::clearTilesByName(const char *tileName)
 {
     return replaceTileByName(tileName, "");
 }
-
 int LuaMap::replaceTileByName(const char *oldTileName,
                               const char *newTileName)
 {
@@ -1031,7 +1007,6 @@ int LuaMap::replaceTileByName(const char *oldTileName,
         return 0;
     if (!newName.isEmpty() && !tileForEdit(newName))
         return 0;
-
     int changed = 0;
     for (LuaLayer *layer : qAsConst(mLayers)) {
         LuaTileLayer *tileLayer = layer->asTileLayer();
@@ -1048,7 +1023,6 @@ int LuaMap::replaceTileByName(const char *oldTileName,
     }
     return changed;
 }
-
 LuaMapBmp &LuaMap::bmp(int index)
 {
     return index ? mBmpVeg : mBmpMain;
@@ -1192,7 +1166,6 @@ bool LuaMap::write(const char *path)
         mError = QStringLiteral("No output file was specified.");
         return false;
     }
-
     QScopedPointer<Map> map(mClone->clone());
     Q_ASSERT(map->layerCount() == 0);
     foreach (LuaLayer *ll, mLayers) {
@@ -1225,7 +1198,6 @@ const char *LuaMap::errorString() const
 {
     return cstring(mError);
 }
-
 /////
 
 LuaMapBmp::LuaMapBmp(MapBmp &bmp) :
@@ -1381,19 +1353,16 @@ LuaMapObject::~LuaMapObject()
 {
     delete mClone;
 }
-
 MapObject *LuaMapObject::object() const
 {
     return mClone ? mClone : mOrig;
 }
-
 MapObject *LuaMapObject::editableObject()
 {
     if (!mClone && mOrig)
         mClone = mOrig->clone();
     return mClone;
 }
-
 const char *LuaMapObject::name()
 {
     return cstring(object()->name());
@@ -1403,12 +1372,10 @@ const char *LuaMapObject::type()
 {
     return cstring(object()->type());
 }
-
 void LuaMapObject::setName(const char *name)
 {
     editableObject()->setName(QString::fromUtf8(name));
 }
-
 void LuaMapObject::setType(const char *type)
 {
     editableObject()->setType(QString::fromUtf8(type));
@@ -1418,14 +1385,12 @@ QRect LuaMapObject::bounds()
 {
     return object()->bounds().toAlignedRect();
 }
-
 void LuaMapObject::setBounds(int x, int y, int width, int height)
 {
     MapObject *mapObject = editableObject();
     mapObject->setPosition(QPointF(x, y));
     mapObject->setSize(width, height);
 }
-
 const char *LuaMapObject::shape()
 {
     switch (object()->shape()) {
@@ -1434,17 +1399,14 @@ const char *LuaMapObject::shape()
     default: return "rectangle";
     }
 }
-
 const char *LuaMapObject::property(const char *name)
 {
     return cstring(object()->property(QString::fromUtf8(name)));
 }
-
 void LuaMapObject::setProperty(const char *name, const char *value)
 {
     editableObject()->setProperty(QString::fromUtf8(name), QString::fromUtf8(value));
 }
-
 void LuaMapObject::removeProperty(const char *name)
 {
     MapObject *mapObject = editableObject();
@@ -1452,7 +1414,6 @@ void LuaMapObject::removeProperty(const char *name)
     properties.remove(QString::fromUtf8(name));
     mapObject->setProperties(properties);
 }
-
 QStringList LuaMapObject::propertyNames()
 {
     QStringList names = object()->properties().keys();
@@ -1521,7 +1482,6 @@ void LuaObjectGroup::addObject(LuaMapObject *object)
     mObjects += object;
     mAddedObjects += object;
 }
-
 void LuaObjectGroup::removeObject(LuaMapObject *object)
 {
     if (!object || !mObjects.removeOne(object))
@@ -1543,7 +1503,6 @@ LuaMapObject *LuaObjectGroup::objectAt(int index) const
         return nullptr;
     return mObjects.at(index);
 }
-
 /////
 
 QStringList LuaBmpAlias::tiles()

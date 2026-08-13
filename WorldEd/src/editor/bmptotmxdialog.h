@@ -45,6 +45,9 @@ private slots:
 
 private:
     bool validate();
+    bool ensureExportDirectory();
+    bool chooseExportDirectory();
+    QString exportDirectoryCreationFailure() const;
     void toSettings();
     void populateFallbackColors(quint32 groundColor,
                                 quint32 vegetationColor);

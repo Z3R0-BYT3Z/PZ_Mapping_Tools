@@ -1,101 +1,61 @@
-# PZTools documentation index
+# PZTools documentation
 
-This is the source-tree index for the maintained WorldEd, TileZed, and
-BuildingEd documentation. A compiled release contains the same entry points
-under `docs/index.html`.
+This index covers the public documentation shipped with PZWorldEd, TileZed,
+and BuildingEd.
 
 ## Start here
 
-- [PZTools user guide](docs/TileZed/PZToolsGuide.html): installation,
-  shared paths, projects, major workflows, and troubleshooting.
-- [Logs, diagnostics, and issue reports](docs/Diagnostics-and-Logs.md):
-  log names and retention, reading severity and thread fields, regression
-  commands, and the information needed for a useful report.
-- [User-facing feature reference](docs/Feature-Reference.md): menu/location,
-  prerequisites, inputs, output ownership, and current scope for each major
-  function.
-- [Configuration files](docs/PZTools-Configuration-Files.md): which catalogue
-  each tool uses, the audited Build 42.20 state, and safe customization rules.
-- [Current release changes](RELEASE_CHANGELOG.md): user-facing release notes.
-- [Complete unofficial changelog](CHANGELOG-PZTOOLS.md): detailed differences
-  from the maintained Tim Baker baselines.
-- [How to build PZ Mapping Tools](BUILDING.md): source layout, Windows,
-  Linux, and macOS compilation, packaging, hash verification, and validation.
-- [GitHub release updater design](docs/PZTools-Auto-Updater-Design.md):
-  version discovery, signed manifests, staging, rollback, managed files, and
-  the separate Tiles synchronization policy.
-- [Upstream history](UPSTREAM-HISTORY.md): source provenance and selectively
-  ported upstream work.
+- [PZTools user guide](docs/TileZed/PZToolsGuide.html)
+- [Feature reference](docs/Feature-Reference.md)
+- [Logs and useful issue reports](docs/Diagnostics-and-Logs.md)
+- [Configuration files](docs/PZTools-Configuration-Files.md)
+- [Current release changes](RELEASE_CHANGELOG.md)
+- [Build instructions](BUILDING.md)
+- [Upstream history and source provenance](UPSTREAM-HISTORY.md)
 
 ## WorldEd
 
 | Subject | Reference |
 |---|---|
-| Guided PZW/TMX/TBX health check, stale tilesets, path repair, backups, and TBX ID remapping | [Project Doctor: tiles and paths](docs/PZ-Project-Doctor-Tiles-and-Paths.md) |
-| Shared configuration catalogues, Tiles resolution, audited counts, and safe customization | [PZTools configuration files](docs/PZTools-Configuration-Files.md) |
-| WorldGen biomes, 2x2-chunk preview, biome features, static prefabs, TMX/TBX conversion, and staging | [Build 42.20 WorldGen editor](docs/PZ-B42.20-WorldGen-Editor-and-Prefabs.md) |
-| Jumbo, XL, and XXL tree behavior | [Deterministic Jumbo trees](docs/PZ-B42.20-Jumbo-Trees.md) |
-| Terrain/vegetation image editor, project grids, thumbnails, Biomemap, Zombie Heatmap, InGameMap, and export | [PZTools user guide](docs/TileZed/PZToolsGuide.html) |
+| Project health, missing tilesets, paths, backups, and TBX IDs | [Project Doctor](docs/PZ-Project-Doctor-Tiles-and-Paths.md) |
+| WorldGen biomes, previews, features, and static prefabs | [WorldGen editor](docs/PZ-B42.20-WorldGen-Editor-and-Prefabs.md) |
+| Jumbo, XL, and XXL trees | [Jumbo trees](docs/PZ-B42.20-Jumbo-Trees.md) |
+| Build 42.20 Biomemap values and channels | [BiomeMapConfig](docs/PZ-B42.20-BiomeMapConfig.md) |
+| Terrain images, Biomemap, Zombie Heatmap, InGameMap, and export | [PZTools user guide](docs/TileZed/PZToolsGuide.html) |
 
 ## TileZed
 
 | Subject | Reference |
 |---|---|
-| Automapper concepts, manifest, layer rules, examples, interactive mode, and troubleshooting | [Automapper](docs/TileZed/Automapper.html) |
-| Build 42 procedural loot viewer/editor shared with BuildingEd | [Procedural loot editor](docs/PZ-B42.20-Procedural-Loot-Editor.md) |
-| Advanced `.pack` comparison, hashes, previews, extraction, and JSON provenance | [Pack comparator and extractor](docs/PZ-Pack-Comparator-and-Extractor.md) |
-| `.tiles` comparison and Snow/Burnt/custom replacement editing | [TileDef comparator and Snow editor](docs/PZ-TileDef-Comparator-and-Snow-Editor.md) |
-| TileDef property meanings | [Tile properties](docs/TileZed/TileProperties/index.html) |
-| Terrain BMP tools inside TileZed | [BMP tools](docs/TileZed/BMPTools.html) |
-| Lua batch/interactive mapping API and examples | [Lua scripting](docs/TileZed/LuaScripting.html) |
+| Automapper rules and interactive mode | [Automapper](docs/TileZed/Automapper.html) |
+| Procedural loot | [Procedural loot editor](docs/PZ-B42.20-Procedural-Loot-Editor.md) |
+| Texture packs and extraction | [Pack comparator and extractor](docs/PZ-Pack-Comparator-and-Extractor.md) |
+| TileDefs, snow, burnt tiles, and replacements | [TileDef tools](docs/PZ-TileDef-Comparator-and-Snow-Editor.md) |
+| Tile property meanings | [Tile properties](docs/TileZed/TileProperties/index.html) |
+| Terrain BMP tools | [BMP tools](docs/TileZed/BMPTools.html) |
+| Lua mapping API | [Lua scripting](docs/TileZed/LuaScripting.html) |
 | RoomDef tools | [RoomDefecator](docs/TileZed/RoomDefecator.html) |
-| Mapping-controlled spawn data | [Mapping spawn control](docs/TileZed/MappingSpawnControl.html) |
+| Mapping-controlled spawns | [Mapping spawn control](docs/TileZed/MappingSpawnControl.html) |
 
-The complete Automapper example is under
-`TileZed/examples/sewer_automap`.
+The complete Automapper example is under `TileZed/examples/sewer_automap`.
 
 ## BuildingEd
 
-The maintained manual lives under
-`TileZed/src/tiled/BuildingEditor/manual` and is installed as
-`docs/BuildingEd` in the portable release.
+The BuildingEd manual is installed under `docs/BuildingEd` in the portable
+release.
 
-- [BuildingEd manual index](TileZed/src/tiled/BuildingEditor/manual/index.html)
-- [BuildingEd Lua scripting](TileZed/src/tiled/BuildingEditor/manual/LuaScripting.html)
-- [BuildingEd tools](TileZed/src/tiled/BuildingEditor/manual/Tools.html)
+- [BuildingEd manual](TileZed/src/tiled/BuildingEditor/manual/index.html)
+- [Lua scripting](TileZed/src/tiled/BuildingEditor/manual/LuaScripting.html)
+- [Tools](TileZed/src/tiled/BuildingEditor/manual/Tools.html)
 - [Tile mode](TileZed/src/tiled/BuildingEditor/manual/TileEditingMode.html)
 - [Tiles dialog](TileZed/src/tiled/BuildingEditor/manual/TilesDialog.html)
 
-The procedural-loot editor is shared with TileZed and uses the same loader,
-project-output format, validation rules, and documentation.
+## Terminology
 
-## Documentation evidence labels
-
-The maintained documents use these distinctions:
-
-- **Game-confirmed** means the behavior or structure was checked against the
-  local Project Zomboid 42.20 Lua/Java/data reference.
-- **Tool-enforced** means it is an editor validation or safety policy and is
-  not presented as an engine limit.
-- **Representative preview** means the display is useful for authoring but is
-  not claimed to reproduce a particular game save exactly.
-- **Out of scope** identifies data that the current editor deliberately does
-  not read, write, package, or simulate.
-
-When one of these distinctions affects a workflow, the relevant document
-states it next to the feature or limit.
-
-## Documentation maintenance
-
-User-visible behavior changes are not complete until all applicable locations
-are updated:
-
-1. the dedicated feature reference;
-2. the user guide or documentation index;
-3. `README.md`;
-4. `RELEASE_CHANGELOG.md`;
-5. `CHANGELOG-PZTOOLS.md`;
-6. the copies installed in the portable distribution.
-
-Before a release, internal links are checked and duplicate packaged/source
-copies are compared by SHA-256.
+- **Game-confirmed** describes behavior checked against Project Zomboid data
+  or runtime code.
+- **Tool-enforced** describes an editor validation or safety policy.
+- **Representative preview** describes an authoring aid that does not claim
+  to reproduce a particular game save exactly.
+- **Out of scope** identifies data the current release does not read, write,
+  package, or simulate.

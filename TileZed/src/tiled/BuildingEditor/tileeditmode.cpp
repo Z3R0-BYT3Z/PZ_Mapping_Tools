@@ -27,6 +27,7 @@
 #include "buildingfurnituredock.h"
 #include "buildingisoview.h"
 #include "buildinglayersdock.h"
+#include "buildingmap.h"
 #include "buildingtemplates.h"
 #include "buildingtilesetdock.h"
 #include "buildingtiletools.h"
@@ -34,6 +35,7 @@
 #include "embeddedmainwindow.h"
 
 #include "zoomable.h"
+#include "tileselectionscope.h"
 
 #include <QAction>
 #include <QComboBox>
@@ -54,7 +56,9 @@ using namespace BuildingEditor;
 
 TileEditModeToolBar::TileEditModeToolBar(QWidget *parent) :
     QToolBar(parent),
-    mCurrentDocument(0)
+    mCurrentDocument(0),
+    mSelectionScope(new Tiled::Internal::TileSelectionScope(
+                        tr("Floor"), this))
 {
     setObjectName(QString::fromUtf8("TileEditModeToolBar"));
     setWindowTitle(tr("Tile ToolBar"));
@@ -71,6 +75,15 @@ TileEditModeToolBar::TileEditModeToolBar(QWidget *parent) :
     addAction(BuildingEditorWindow::instance()->actionIface()->actionSelectTiles);
     addAction(BuildingEditorWindow::instance()->actionIface()->actionPickTiles);
     addAction(BuildingEditorWindow::instance()->actionIface()->actionFloorGrime);
+    addSeparator();
+    addWidget(mSelectionScope->createToolButton(this, [this]() {
+        QStringList names;
+        if (!mCurrentDocument)
+            return names;
+        for (BuildingFloor *floor : mCurrentDocument->building()->floors())
+            names.append(BuildingMap::layerNames(floor->level()));
+        return names;
+    }));
     addSeparator();
     addWidget(mFloorLabel);
     addAction(BuildingEditorWindow::instance()->actionIface()->actionUpLevel);
@@ -108,6 +121,7 @@ void TileEditModeToolBar::updateActions()
     else
         mFloorLabel->setText(QString());
     mFloorLabel->setEnabled(mCurrentDocument != 0);
+    BuildingEditorWindow::instance()->setTileSelectionScope(mSelectionScope);
 }
 
 /////
@@ -330,10 +344,7 @@ void TileEditMode::onActiveStateChanged(bool active)
     menu->clear();
 
     if (active) {
-        // BuildingEd may activate this mode before Tilesets.txt has finished
-        // loading. Refreshing here is cheap and makes reactivation self-healing.
         mTilesetDock->firstTimeSetup();
-
         if (mCurrentDocumentStuff)
             mCurrentDocumentStuff->activate();
 
@@ -362,11 +373,8 @@ void TileEditMode::onActiveStateChanged(bool active)
 
 void TileEditMode::documentAdded(BuildingDocument *doc)
 {
-    // The mode can be activated before BuildingFurniture.txt has finished
-    // loading. A new document is another safe refresh point.
     mFurnitureDock->switchTo();
     mTilesetDock->firstTimeSetup();
-
     mDocumentStuff[doc] = new TileEditModePerDocumentStuff(this, doc);
 
     int docIndex = BuildingDocumentMgr::instance()->indexOf(doc);

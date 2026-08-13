@@ -141,9 +141,6 @@ bool IsoGridSquare256::loadTileDefFiles(const GenerateLotsSettings &settings, QS
     QMap<QString,QString> fileByLowerName;
     for (const QString &fileName : discovered)
         fileByLowerName[fileName.toLower()] = fileName;
-
-    // Match IsoWorld.LoadTileDefinitions() ordering in B42.20.  Remaining
-    // files (normally mod tiledefs) follow deterministically afterwards.
     const QStringList runtimeOrder = {
         QStringLiteral("newtiledefinitions.tiles"),
         QStringLiteral("tiledefinitions_erosion.tiles"),
@@ -160,7 +157,6 @@ bool IsoGridSquare256::loadTileDefFiles(const GenerateLotsSettings &settings, QS
             files += actualName;
     }
     files += fileByLowerName.values();
-
     foreach (QString fileName, files) {
         if (fileName.endsWith(QLatin1String("_4.tiles")))
             continue;

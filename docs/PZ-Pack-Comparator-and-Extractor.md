@@ -68,16 +68,32 @@ unchanged sprite art as modified pixels.
 Open **Tools > .pack Viewer / Extractor...**, load a pack, then choose
 **Extract...**.
 
-Opening a large pack no longer leaves the Pack Viewer apparently frozen while
-the extractor is being constructed. A cancellable progress window identifies
-the current atlas page and texture while thumbnails and hashes are prepared.
-The extraction itself also reports validation, texture/page/sheet output, and
-manifest-writing phases.
+Opening a large pack indexes page and texture metadata without decoding every
+atlas PNG. The extractor does not create thumbnails or calculate per-texture
+pixel hashes before extraction. A page is decoded only when its pixels are
+actually needed. Individual-tile and atlas-page exports release each page as
+soon as its final selected source is written. Other modes release their pages
+when the operation finishes. This keeps the extraction workflow responsive and
+avoids retaining the complete decoded pack in memory.
 
-The texture list includes a thumbnail, the parsed tileset and tile number,
-source page, reconstructed size, packed rectangle, and pixel hash. Checkboxes
-control the exact extraction set. The visible rows can be selected or cleared
-in one action.
+The texture list includes the parsed tileset and tile number, source page,
+reconstructed size, and packed rectangle. Checkboxes control the exact
+extraction set. The visible rows can be selected or cleared in one action.
+
+Three complete-export presets remove the need to type a prefix or tileset
+name:
+
+- **All tiles** clears the filter, selects the complete pack, prepares one
+  reconstructed PNG per texture, and selects one output subdirectory per
+  tileset automatically.
+- **All tilesets** clears the filter, selects the complete pack, and prepares
+  every tileset sheet whose texture names contain numeric tile IDs.
+- **All objects** clears the filter, selects the complete pack, and prepares
+  every complete multi-tile furniture object described by the active
+  `BuildingFurniture.txt` catalogue.
+
+The presets configure the selection and output mode. Choose the destination
+directory, review the conflict policy, then press **Extract**.
 
 Available filters are:
 
@@ -97,6 +113,13 @@ case-insensitive by default and can be made case-sensitive.
 - **One reconstructed sheet per tileset** parses names such as
   `floors_exterior_natural_01_42` and places tile 42 in the corresponding
   sheet cell.
+- **Assembled multi-tile objects** uses the active `BuildingFurniture.txt`
+  variant, orientation, and square coordinates to compose complete beds,
+  sofas, tables, and other multi-square furniture as compact isometric PNGs.
+  It writes one image per available variant and orientation under a directory
+  named after the furniture group. Definitions with a missing selected tile
+  are reported and skipped. A logical tile name that resolves to different
+  pixel content in the same pack is treated as ambiguous rather than guessed.
 - **Complete matching atlas pages** writes every source page referenced by the
   selection.
 
@@ -111,27 +134,48 @@ files can be handled by safe renaming (the default), skipping, or explicit
 overwrite. PNG files are committed atomically, and unsafe or Windows-reserved
 filenames are normalized.
 
-The optional JSON manifest records the source pack path and SHA-256, pack
-version, selected texture metadata, pixel and metadata hashes, and written
-outputs. It is useful for reproducible extraction and later regression checks.
+For individual extraction, **Exclude tiles that belong to multi-tile
+objects** removes every texture referenced by a multi-square furniture
+definition. This is intended for a two-pass workflow where complete objects
+are exported first and the remaining standalone tiles are exported second.
+Single-tile furniture is not excluded.
 
-## Validation and limitations
+### Optional orphan-pixel correction
+
+**Remove orphan pixels from reconstructed output** applies a deterministic
+cleanup inspired by the useful TileSetZ cleanup behavior. It removes pixels
+with alpha values from 1 through 4 and visible pixels that have no more than
+two visible neighbors in their surrounding 3 x 3 area. Every decision is made
+from the original image, so scan order cannot change the result.
+
+The correction is optional and disabled by default because deliberate
+one-pixel artwork can resemble an orphan. It applies to individual textures,
+reconstructed tilesets, and assembled objects. Complete atlas pages remain
+pixel-identical reconstructions and therefore do not use it. The source pack
+is always read-only. The completion report and JSON manifest record the number
+of removed pixels.
+
+The optional version-3 JSON manifest records the source pack path and SHA-256,
+pack version, selected texture metadata and metadata hashes, output mode,
+object-tile exclusion settings and count, orphan-pixel settings and count,
+assembled-object members and geometry, incomplete or ambiguous object counts,
+and written outputs. Per-texture pixel hashes are deliberately not recomputed
+for extraction because that would decode and copy every texture before useful
+work starts. Pixel hashes remain available in the dedicated pack comparator.
+
+## Input safety and limitations
 
 The reader validates signatures, versions, counts, string lengths, encoded PNG
-lengths, PNG decoding, packed rectangles, trim offsets, and reconstructed
-canvas bounds before exposing data to either UI. PNG pages and reconstructed
-sheets are subject to explicit dimension/allocation limits. Malformed or
+lengths, PNG headers and dimensions, packed rectangles, trim offsets, and
+reconstructed canvas bounds while indexing. Full PNG decoding is deferred
+until a viewer or exporter requests the page. PNG pages and reconstructed
+sheets are subject to explicit dimension and allocation limits. Malformed or
 truncated input is rejected with an explicit error. New packs and extracted
-PNG/JSON files are committed atomically.
+PNG or JSON files are committed atomically.
 
 The comparator currently compares two packs at a time and exports CSV. It does
-not create patches or merge packs. The extractor reconstructs PNG assets; use
-TileZed's existing pack creator when a new `.pack` must be assembled.
-
-Maintainer regression commands:
-
-```text
-TileZed.exe --validate-pack-tools
-TileZed.exe --render-pack-comparator <output.png>
-TileZed.exe --render-pack-extractor <output.png>
-```
+not create patches or merge packs. The extractor reconstructs PNG assets.
+Object assembly depends on the active `BuildingFurniture.txt`, since a `.pack`
+stores texture rectangles and names but does not store furniture
+relationships. Use TileZed's existing pack creator when a new `.pack` must be
+assembled.

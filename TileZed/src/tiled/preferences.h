@@ -107,6 +107,10 @@ public:
     QString tilesDirectory() const;
     QString tiles2xDirectory() const;
 
+    QString projectZomboidDirectory() const;
+    void setProjectZomboidDirectory(const QString &path);
+    QString gameMediaPath(const QString &relativePath = QString()) const;
+
     qreal tilesetScale() const;
 
     bool sortTilesets() const;
@@ -134,6 +138,9 @@ public:
 
     bool restoreLastSession() const
     { return mRestoreLastSession; }
+
+    int autoSaveIntervalMinutes() const
+    { return mAutoSaveIntervalMinutes; }
 
     QStringList worldedFiles() const
     { return mWorldEdFiles; }
@@ -191,6 +198,7 @@ public slots:
     void setBackgroundColor(const QColor &bgColor);
     void setShowAdjacentMaps(bool show);
     void setRestoreLastSession(bool restore);
+    void setAutoSaveIntervalMinutes(int minutes);
     void setWorldEdFiles(const QStringList &fileNames);
     void setTilePropertiesFiles(const QStringList &fileNames);
     void setHighlightRoomUnderPointer(bool highlight);
@@ -216,6 +224,7 @@ signals:
     void mapsDirectoryChanged();
     void autoSwitchLayerChanged(bool enabled);
     void tilesDirectoryChanged();
+    void projectZomboidDirectoryChanged();
     void tilesetScaleChanged(qreal scale);
     void sortTilesetsChanged(bool sort);
     void showLotFloorsOnlyChanged(bool show);
@@ -226,6 +235,7 @@ signals:
     void showInvisibleTilesChanged(bool show);
     void backgroundColorChanged(const QColor &color);
     void showAdjacentMapsChanged(bool show);
+    void autoSaveIntervalChanged(int minutes);
     void worldEdFilesChanged(const QStringList &fileNames);
     void tilePropertiesFilesChanged(const QStringList &fileNames);
     void highlightRoomUnderPointerChanged(bool highlight);
@@ -261,6 +271,7 @@ private:
     QString mConfigDirectory;
     bool mAutoSwitchLayer;
     QString mTilesDirectory;
+    QString mProjectZomboidDirectory;
     qreal mTilesetScale;
     bool mShowLotFloorsOnly = false;
     bool mSortTilesets;
@@ -270,6 +281,7 @@ private:
     QColor mBackgroundColor;
     bool mShowAdjacentMaps;
     bool mRestoreLastSession;
+    int mAutoSaveIntervalMinutes;
     QStringList mWorldEdFiles;
     QStringList mTilePropertiesFiles;
     bool mHighlightRoomUnderPointer;

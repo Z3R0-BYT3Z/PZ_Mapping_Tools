@@ -44,14 +44,12 @@ void LuaConsole::clearScriptRunnerIfExists()
     if (mInstance)
         mInstance->clearScriptRunner();
 }
-
 LuaConsole::LuaConsole(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::LuaConsole),
     mBuildingEditorMode(false)
 {
 #ifdef Q_OS_MACOS
-    // Using the Qt::Tool flag prevents the menu bar working.
 #else
     setWindowFlags(windowFlags() | Qt::Tool);
 #endif
@@ -89,7 +87,6 @@ void LuaConsole::setScriptRunner(
     ui->actionRunInDirectory->setVisible(!buildingEditorMode);
     ui->actionRunOnWorld->setVisible(!buildingEditorMode);
 }
-
 void LuaConsole::clearScriptRunner()
 {
     mScriptRunner = std::function<void (const QString &)>();
@@ -97,7 +94,6 @@ void LuaConsole::clearScriptRunner()
     ui->actionRunInDirectory->setVisible(true);
     ui->actionRunOnWorld->setVisible(true);
 }
-
 void LuaConsole::runScript()
 {
     if (mScriptRunner)

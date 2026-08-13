@@ -57,6 +57,7 @@ public:
     int terrainImageMemoryLimitMiB() const
     { return mTerrainImageMemoryLimitMiB; }
     bool restoreLastSession() const { return mRestoreLastSession; }
+    int autoSaveIntervalMinutes() const { return mAutoSaveIntervalMinutes; }
     qreal roadSimplificationHighway() const { return mRoadSimplificationHighway; }
     int roadPointSpacingHighway() const { return mRoadPointSpacingHighway; }
     qreal roadSimplificationTrail() const { return mRoadSimplificationTrail; }
@@ -78,6 +79,10 @@ public:
 
     QString tilesDirectory() const;
     void setTilesDirectory(const QString &path);
+
+    QString projectZomboidDirectory() const;
+    void setProjectZomboidDirectory(const QString &path);
+    QString gameMediaPath(const QString &relativePath = QString()) const;
 
     QString tiles2xDirectory() const;
 
@@ -130,6 +135,7 @@ signals:
     void gridColorChanged(const QColor &gridColor);
     void gridWidthChanged(int width);
     void thumbnailWidthChanged(int width);
+    void autoSaveIntervalChanged(int minutes);
 
     void useOpenGLChanged(bool useOpenGL);
     void loadAllWorldThumbnailsChanged(bool thumbs);
@@ -152,6 +158,7 @@ signals:
     void highlightCurrentLevelChanged(bool highlight);
     void mapsDirectoryChanged();
     void tilesDirectoryChanged();
+    void projectZomboidDirectoryChanged();
     void showAdjacentMapsChanged(bool show);
     void highlightRoomUnderPointerChanged(bool highlight);
     void showLotFloorsOnlyChanged(bool show);
@@ -169,6 +176,7 @@ public slots:
     void setThumbnailWidth(int width);
     void setTerrainImageMemoryLimitMiB(int limitMiB);
     void setRestoreLastSession(bool restore);
+    void setAutoSaveIntervalMinutes(int minutes);
     void setRoadSimplificationHighway(qreal tolerance);
     void setRoadPointSpacingHighway(int spacing);
     void setRoadSimplificationTrail(qreal tolerance);
@@ -208,6 +216,7 @@ private:
     int mThumbnailWidth;
     int mTerrainImageMemoryLimitMiB;
     bool mRestoreLastSession;
+    int mAutoSaveIntervalMinutes;
     qreal mRoadSimplificationHighway;
     int mRoadPointSpacingHighway;
     qreal mRoadSimplificationTrail;
@@ -231,6 +240,7 @@ private:
     QString mConfigDirectory;
     QString mMapsDirectory;
     QString mTilesDirectory;
+    QString mProjectZomboidDirectory;
     QStringList mTilePropertiesFiles;
     QString mOpenFileDirectory;
     QString mWorldMapXMLFile;

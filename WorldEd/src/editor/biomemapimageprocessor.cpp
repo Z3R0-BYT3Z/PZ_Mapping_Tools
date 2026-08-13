@@ -1,8 +1,6 @@
 #include "biomemapimageprocessor.h"
-
 #include <QHash>
 #include <QStringList>
-
 const QList<BiomeMapImageProcessor::PaletteEntry> &
 BiomeMapImageProcessor::palette()
 {
@@ -66,7 +64,6 @@ BiomeMapImageProcessor::palette()
     };
     return entries;
 }
-
 const BiomeMapImageProcessor::PaletteEntry *
 BiomeMapImageProcessor::entryForValue(int value)
 {
@@ -76,7 +73,6 @@ BiomeMapImageProcessor::entryForValue(int value)
     }
     return nullptr;
 }
-
 QString BiomeMapImageProcessor::oreSelectorDescription(const QString &ore)
 {
     if (ore == QStringLiteral("map_forest")) {
@@ -98,7 +94,6 @@ QString BiomeMapImageProcessor::oreSelectorDescription(const QString &ore)
     }
     return QStringLiteral("No secondary WorldGen ore-biome lookup.");
 }
-
 QColor BiomeMapImageProcessor::displayColor(int value)
 {
     const PaletteEntry *entry = entryForValue(value);
@@ -106,7 +101,6 @@ QColor BiomeMapImageProcessor::displayColor(int value)
         return entry->color;
     return QColor(value, value, value);
 }
-
 const QSet<int> &BiomeMapImageProcessor::knownValues()
 {
     static const QSet<int> values = [] {
@@ -117,7 +111,6 @@ const QSet<int> &BiomeMapImageProcessor::knownValues()
     }();
     return values;
 }
-
 const QSet<int> &BiomeMapImageProcessor::overrideValues()
 {
     static const QSet<int> values = [] {
@@ -130,7 +123,6 @@ const QSet<int> &BiomeMapImageProcessor::overrideValues()
     }();
     return values;
 }
-
 QImage BiomeMapImageProcessor::createBiomeLayer(const QImage &mainImage,
                                                 const QImage &vegetationImage,
                                                 QSet<QRgb> *unknownColors)
@@ -138,14 +130,11 @@ QImage BiomeMapImageProcessor::createBiomeLayer(const QImage &mainImage,
     if (mainImage.isNull() || vegetationImage.isNull() ||
             mainImage.size() != vegetationImage.size())
         return QImage();
-
     static const QHash<QRgb, int> biomeForColor = {
         {qRgb(0, 138, 255), 0},
         {qRgb(100, 100, 100), 64},
         {qRgb(120, 120, 120), 115},
         {qRgb(165, 160, 140), 115},
-        // Biome 171 is intentionally map-specific in B42.20. It is enabled
-        // by WorldGenOverride.lua and deterministically places a redbud XXL.
         {qRgb(145, 135, 60), 171},
         {qRgb(145, 135, 61), 171},
         {qRgb(90, 100, 35), 171},
@@ -161,7 +150,6 @@ QImage BiomeMapImageProcessor::createBiomeLayer(const QImage &mainImage,
         {qRgb(255, 128, 0), 128},
         {qRgb(220, 100, 0), 128}
     };
-
     if (unknownColors)
         unknownColors->clear();
     QImage result(mainImage.size(), QImage::Format_ARGB32);
@@ -181,7 +169,6 @@ QImage BiomeMapImageProcessor::createBiomeLayer(const QImage &mainImage,
     }
     return result;
 }
-
 QImage BiomeMapImageProcessor::process(const QImage &biomeLayer,
                                        const QImage &zoneLayer)
 {
@@ -189,7 +176,6 @@ QImage BiomeMapImageProcessor::process(const QImage &biomeLayer,
             biomeLayer.size() != zoneLayer.size()) {
         return QImage();
     }
-
     QImage result(biomeLayer.size(), QImage::Format_ARGB32);
     for (int y = 0; y < result.height(); ++y) {
         QRgb *output = reinterpret_cast<QRgb *>(result.scanLine(y));
@@ -201,7 +187,6 @@ QImage BiomeMapImageProcessor::process(const QImage &biomeLayer,
     }
     return result;
 }
-
 BiomeMapImageProcessor::Analysis BiomeMapImageProcessor::analyze(
         const QImage &biomeLayer, const QImage &zoneLayer, int chunkSize)
 {
@@ -209,7 +194,6 @@ BiomeMapImageProcessor::Analysis BiomeMapImageProcessor::analyze(
     if (biomeLayer.isNull() || zoneLayer.isNull() ||
             biomeLayer.size() != zoneLayer.size() || chunkSize <= 0)
         return result;
-
     for (int y = 0; y < biomeLayer.height(); ++y) {
         for (int x = 0; x < biomeLayer.width(); ++x) {
             result.biomeValues.insert(qRed(biomeLayer.pixel(x, y)));
@@ -226,7 +210,6 @@ BiomeMapImageProcessor::Analysis BiomeMapImageProcessor::analyze(
     }
     result.valuesRequiringOverride =
             (result.biomeValues | result.zoneValues) & overrideValues();
-
     for (int y = 0; y < zoneLayer.height(); y += chunkSize) {
         for (int x = 0; x < zoneLayer.width(); x += chunkSize) {
             const int first = qGreen(zoneLayer.pixel(x, y));
@@ -245,7 +228,6 @@ BiomeMapImageProcessor::Analysis BiomeMapImageProcessor::analyze(
     }
     return result;
 }
-
 bool BiomeMapImageProcessor::validateConfiguration(QString *errorString)
 {
     const QString expected = QStringLiteral(
@@ -268,7 +250,6 @@ bool BiomeMapImageProcessor::validateConfiguration(QString *errorString)
         "243|organic_forest|map_forest|OrganicForest|default\n"
         "254|dirt|dirt|ForagingNav|default\n"
         "255|primary_forest|map_deep_forest|DeepForest|default");
-
     QStringList actual;
     QSet<int> values;
     for (const PaletteEntry &entry : palette()) {
@@ -290,7 +271,6 @@ bool BiomeMapImageProcessor::validateConfiguration(QString *errorString)
                      ? QStringLiteral("default")
                      : QStringLiteral("override"));
     }
-
     if (actual.join(QLatin1Char('\n')) != expected) {
         if (errorString) {
             *errorString = QStringLiteral(
@@ -299,7 +279,6 @@ bool BiomeMapImageProcessor::validateConfiguration(QString *errorString)
         }
         return false;
     }
-
     const QString mapForestDescription =
             oreSelectorDescription(QStringLiteral("map_forest"));
     const QString mapDeepForestDescription =
@@ -317,7 +296,6 @@ bool BiomeMapImageProcessor::validateConfiguration(QString *errorString)
         }
         return false;
     }
-
     QImage biome(2, 1, QImage::Format_ARGB32);
     QImage zone(2, 1, QImage::Format_ARGB32);
     biome.setPixel(0, 0, qRgb(254, 254, 254));
@@ -336,7 +314,6 @@ bool BiomeMapImageProcessor::validateConfiguration(QString *errorString)
         }
         return false;
     }
-
     if (errorString)
         errorString->clear();
     return true;

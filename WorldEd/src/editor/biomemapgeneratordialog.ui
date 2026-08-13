@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>580</width>
-    <height>660</height>
+    <height>720</height>
    </rect>
   </property>
   <property name="minimumSize">
@@ -79,6 +79,20 @@
       <item><widget class="QRadioButton" name="zonesFromWorld">
        <property name="text"><string>Rasterize only those seven zone types from the current WorldEd project</string></property>
        <property name="checked"><bool>true</bool></property>
+      </widget></item>
+      <item><layout class="QHBoxLayout" name="unzonedFallbackLayout">
+       <item><widget class="QLabel" name="unzonedFallbackLabel">
+        <property name="text"><string>Unzoned terrain fallback:</string></property>
+       </widget></item>
+       <item><widget class="QComboBox" name="unzonedFallback">
+        <item><property name="text"><string>Automatic: Vegitation 171 when its override is detected</string></property></item>
+        <item><property name="text"><string>ForagingNav 64: Vanilla-safe neutral navigation</string></property></item>
+        <item><property name="text"><string>Vegitation 171: WorldGenOverride.lua required</string></property></item>
+       </widget></item>
+      </layout></item>
+      <item><widget class="QLabel" name="unzonedFallbackStatus">
+       <property name="wordWrap"><bool>true</bool></property>
+       <property name="text"><string>Automatic fallback status</string></property>
       </widget></item>
       <item><layout class="QHBoxLayout" name="zonePngLayout">
        <item><widget class="QRadioButton" name="zonesFromPng">

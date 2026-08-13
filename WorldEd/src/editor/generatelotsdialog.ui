@@ -7,14 +7,14 @@
     <x>0</x>
     <y>0</y>
     <width>400</width>
-    <height>690</height>
+    <height>790</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Generate Lots</string>
   </property>
   <layout class="QGridLayout" name="gridLayout">
-   <item row="6" column="0">
+   <item row="7" column="0">
     <spacer name="verticalSpacer">
      <property name="orientation">
       <enum>Qt::Vertical</enum>
@@ -171,7 +171,7 @@
      </layout>
     </widget>
    </item>
-   <item row="7" column="0">
+   <item row="8" column="0">
     <widget class="QDialogButtonBox" name="buttonBox">
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
@@ -181,7 +181,7 @@
      </property>
    </widget>
   </item>
-  <item row="5" column="0">
+  <item row="6" column="0">
    <widget class="QGroupBox" name="exportModGroup">
     <property name="title">
      <string>Export as a complete Project Zomboid mod</string>
@@ -279,6 +279,74 @@
       <widget class="QLabel" name="modExportHint">
        <property name="text">
         <string>Generated LOT files are written to common/media/maps/&lt;Map Name&gt;. Existing mod.info, poster.png and map.info files are preserved.</string>
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </widget>
+  </item>
+  <item row="5" column="0">
+   <widget class="QGroupBox" name="holeRepairGroup">
+    <property name="title">
+     <string>Hole handling</string>
+    </property>
+    <layout class="QVBoxLayout" name="holeRepairLayout">
+     <item>
+      <widget class="QCheckBox" name="autoFillHoles">
+       <property name="text">
+        <string>Fill detected holes in generated LOT files</string>
+       </property>
+       <property name="toolTip">
+        <string>Repairs the generated LOT output on the fly. Source TMX and TBX files are not modified.</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <layout class="QFormLayout" name="holeFillForm">
+       <item row="0" column="0">
+        <widget class="QLabel" name="holeFillModeLabel">
+         <property name="text">
+          <string>Fill with:</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QComboBox" name="holeFillMode">
+         <item>
+          <property name="text">
+           <string>Nearest available tile</string>
+          </property>
+         </item>
+         <item>
+          <property name="text">
+           <string>Specific tile name</string>
+          </property>
+         </item>
+        </widget>
+       </item>
+       <item row="1" column="0">
+        <widget class="QLabel" name="holeFillTileLabel">
+         <property name="text">
+          <string>Tile name:</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="1">
+        <widget class="QLineEdit" name="holeFillTile">
+         <property name="placeholderText">
+          <string>blends_natural_01_0</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </item>
+     <item>
+      <widget class="QLabel" name="holeRepairHint">
+       <property name="text">
+        <string>Only unresolved holes are reported. Keep this disabled when you want the full diagnostic list.</string>
        </property>
        <property name="wordWrap">
         <bool>true</bool>

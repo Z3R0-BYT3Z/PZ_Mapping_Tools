@@ -27,13 +27,18 @@ format names is not required to use Project Doctor.
 |---|---|---|
 | `.pzw` | World project, cell assignments, source/output paths | WorldEd |
 | `.tmx` | One editable tile map/cell | TileZed |
-| `.tbx` | One editable building | BuildingEd |
+| `.tbx` | Optional editable and reusable building source | BuildingEd |
 | Tiles PNG | Sprite sheet used by all three tools | Configured shared Tiles tree |
 
 “Build 42 compatible” does not mean that every file can be opened in every
 application. It means that this release understands the maintained Build 42
 mapping formats and data. Open TMX maps in TileZed, TBX buildings in
 BuildingEd, and the PZW project in WorldEd.
+
+A TMX map may be fully self-contained. Buildings can be painted or embedded
+directly in its tile layers, object layers, and RoomDefs without retaining a
+separate TBX source. Creating buildings in BuildingEd and placing TBX files is
+a useful authoring convention, not a map-format requirement.
 
 ## Recommended project layout
 
@@ -70,8 +75,9 @@ When a PZW project is loaded, the check resolves its:
 - TMX export folder; and
 - configured game media folder.
 
-Every TMX is also inspected for object references whose `type` points to a
-TBX building. A TBX reference is classified as:
+When a TMX contains object references whose `type` points to a TBX building,
+Project Doctor inspects those optional source dependencies. A TBX reference is
+classified as:
 
 - **inside project and found** — safe to normalize;
 - **missing** — preserved and reported;
@@ -103,6 +109,12 @@ BMP aliases, rules, blends, exclusion lists, placed tile layers, and tile
 objects protect their referenced sheets. A missing used declaration is never
 deleted merely to make the warning disappear.
 
+Placed tile and tile-object references are counted directly from the raw TMX
+GIDs. This remains reliable when the PNG is absent and the normal map loader
+cannot construct the corresponding tile objects. Removing a declaration while
+leaving those GIDs in place would shift their interpretation to another sheet,
+so Project Doctor preserves the declaration by default.
+
 For retained inline declarations, path resolution follows the same shared
 catalogue policy as the editors:
 
@@ -115,28 +127,14 @@ actual PNG selected by the tools. External TSX declarations can be retained or
 removed when stale, but their internal image path is not rewritten by this
 version.
 
-## Why TBX cleanup must remap IDs
+## TBX safety
 
-TBX does not contain a simple list of independent tile names.
-`tile_entry`, `user_tiles`, and furniture elements are ordered tables. Their
-positions act as IDs used later by building, room, object, floor, and
-`used_*` references. Removing an XML element directly would shift those IDs
-and corrupt the building.
+Project Doctor reports TBX dependencies and missing tilesets but does not
+rewrite TBX files. Their internal `tile_entry`, `user_tiles`, and furniture
+tables are semantic data. A stable second save is not sufficient proof that a
+first canonical rewrite preserved the original building exactly.
 
-Project Doctor never edits those tables directly. It:
-
-1. loads the complete TBX with BuildingEd's reader;
-2. resolves every numeric ID to its in-memory object;
-3. retains definitions referenced by the building, rooms, objects, grime,
-   furniture, and explicit used lists;
-4. asks BuildingEd's writer to rebuild the ordered tables;
-5. writes every reference with its newly assigned ID; and
-6. reloads and rewrites the result a second time.
-
-The two canonical outputs must be byte-identical. If the remapping is not
-stable, the file is reported as an error and is not offered for replacement.
-This is the same semantic path as a normal BuildingEd load/save, with an
-additional stability gate.
+Use BuildingEd for deliberate TBX edits.
 
 ## Backups and recovery
 
@@ -157,6 +155,10 @@ To undo a cleanup:
 3. copy the required original file back to the same relative project path;
 4. reopen the project and run **Check project**.
 
+If LOT files were generated after an incorrect cleanup, restore the source TMX
+files first and regenerate the LOT output into a clean export directory. LOT
+files do not repair themselves when the source is restored.
+
 ## Does cleanup make the tools faster?
 
 Removing stale missing declarations and broken dependency paths avoids failed
@@ -166,23 +168,6 @@ reduce work in project-specific loading paths.
 It does not disable the intentional complete Tiles catalogue preload. Valid
 unused TMX declarations remain available for compatibility, so Project Doctor
 should not be sold as a universal startup-speed switch.
-
-## Diagnostics
-
-The deployed build provides read-only and self-test commands:
-
-```powershell
-.\PZWorldEd.exe --validate-tileset-cleanup
-.\PZWorldEd.exe --audit-tileset-cleanup=<TMX-TBX-or-project-folder>
-.\PZWorldEd.exe --render-tileset-cleanup=<project-folder> --worldgen-preview-output=<output.png>
-```
-
-`--validate-tileset-cleanup` checks stale TMX removal, valid-header retention,
-2x/1x path normalization, missing-reference preservation, TBX dependency
-paths, atomic backups, backup exclusion, and stable TBX ID-table remapping.
-
-`--audit-tileset-cleanup` never writes the target. The result is recorded in
-the newest PZWorldEd log under `settings/logs`.
 
 ## If the status says “A few items need your help”
 

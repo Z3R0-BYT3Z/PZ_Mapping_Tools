@@ -107,9 +107,6 @@ bool SimpleFile::write(const QString &filePath)
         // a successful save.
         tempFile.setAutoRemove(false);
     } else {
-        // On Windows, a cross-volume rename can leave the destination behind
-        // even though QTemporaryFile::rename() reports failure. QFile::copy()
-        // never overwrites, so remove that partial destination before copying.
         QFile destination(filePath);
         if (destination.exists() && !destination.remove()) {
             mError = QString(QLatin1String("Error replacing file!\n%1\n\n%2"))
@@ -124,9 +121,8 @@ bool SimpleFile::write(const QString &filePath)
                     .arg(tempFile.fileName())
                     .arg(filePath)
                     .arg(tempFile.errorString());
-            // Try to un-rename the backup file
             if (backupFile.exists())
-                backupFile.rename(filePath); // might fail
+                backupFile.rename(filePath);
             return false;
         }
     }

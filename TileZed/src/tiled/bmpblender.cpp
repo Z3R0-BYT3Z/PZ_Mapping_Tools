@@ -123,7 +123,6 @@ void BmpBlender::flush(const MapRenderer *renderer, const QRect &rect, const QPo
 
     QElapsedTimer totalTimer;
     totalTimer.start();
-
     QPolygonF polygon;
     int level = 0;
     polygon << QPointF(renderer->pixelToTileCoords(rect.topLeft(), level) - mapPos);
@@ -154,7 +153,6 @@ void BmpBlender::flush(const MapRenderer *renderer, const QRect &rect, const QPo
     imagesToTileGrids(work.left(), work.top(), work.right(), work.bottom());
     addEdgeTiles(work.left(), work.top(), work.right(), work.bottom());
     tileGridsToLayers(work.left(), work.top(), work.right(), work.bottom());
-
     const qint64 redrawMs = timer.elapsed();
     const qint64 totalMs = totalTimer.elapsed();
     if (totalMs >= 250) {
@@ -178,7 +176,6 @@ void BmpBlender::flush(const QRect &rect)
 {
     QElapsedTimer totalTimer;
     totalTimer.start();
-
     QRegion dirty = mDirtyRegion & rect;
     if (dirty.isEmpty())
         return;
@@ -195,10 +192,6 @@ void BmpBlender::flush(const QRect &rect)
     if (mRuleByColor.isEmpty() && mBlendsByLayer.isEmpty())
         return;
 
-    // This overload is used by whole-map consumers such as previews and
-    // exports. The old code intersected mDirtyRegion with rect, but then
-    // regenerated all of rect anyway. After Rules.txt was imported, a
-    // one-tile brush edit could therefore recalculate an entire 300x300 map.
     QElapsedTimer timer;
     timer.start();
     const int dirtyRectCount = dirty.rectCount();
@@ -206,7 +199,6 @@ void BmpBlender::flush(const QRect &rect)
     imagesToTileGrids(work.left(), work.top(), work.right(), work.bottom());
     addEdgeTiles(work.left(), work.top(), work.right(), work.bottom());
     tileGridsToLayers(work.left(), work.top(), work.right(), work.bottom());
-
     const qint64 redrawMs = timer.elapsed();
     const qint64 totalMs = totalTimer.elapsed();
     if (totalMs >= 250) {
@@ -450,9 +442,6 @@ void BmpBlender::fromMap()
                 }
             }
             if (wholeSheet) {
-                // This selector represents every tile in the named sheet.
-                // Keep the numeric sheet suffix out of tile-name
-                // normalization (foo_01 is not tile 1 of sheet foo).
                 blend->exclude2[i] = wholeSheet->name();
             } else if (BuildingEditor::BuildingTilesMgr::legalTileName(tileName)) {
                 tileNames += tileName;
@@ -609,7 +598,6 @@ void BmpBlender::initTiles()
         if (!mBlendLayers.contains(blendW->mBlend->targetLayer))
             mBlendLayers += blendW->mBlend->targetLayer;
     }
-
     if (mInactiveRuleCount || mInactiveBlendCount) {
         qInfo() << "BMP unavailable-tileset filtering skipped"
                 << mInactiveRuleCount << "of" << mRules.size()
@@ -655,7 +643,6 @@ bool BmpBlender::validateUnavailableTilesetFiltering(
     unavailable.setMissing(true);
     map.addTileset(&available);
     map.addTileset(&unavailable);
-
     const QString valid0 =
             QStringLiteral("PZTools_valid_sheet_01_000");
     const QString valid1 =
@@ -681,7 +668,6 @@ bool BmpBlender::validateUnavailableTilesetFiltering(
                 QStringList() << QString(),
                 QStringLiteral("0_FloorOverlay"), noCondition, false);
     map.rbmpSettings()->setRules(rules);
-
     QList<BmpBlend *> blends;
     blends += new BmpBlend(
                 QStringLiteral("0_FloorOverlay"), valid0, valid1,
@@ -693,10 +679,8 @@ bool BmpBlender::validateUnavailableTilesetFiltering(
                 QStringLiteral("0_FloorOverlay"), valid0, retired0,
                 BmpBlend::N, QStringList(), QStringList());
     map.rbmpSettings()->setBlends(blends);
-
     BmpBlender blender(&map);
     blender.initTiles();
-
     const bool activeRulesAreCorrect =
             blender.mInactiveRuleCount == 1
             && blender.mRuleByColor.contains(qRgb(1, 2, 3))
@@ -710,7 +694,6 @@ bool BmpBlender::validateUnavailableTilesetFiltering(
         }
         return false;
     }
-
     RuleWrapper *mixedRule =
             blender.mRuleByColor.value(qRgb(7, 8, 9)).value(0);
     RuleWrapper *nullRule =
@@ -725,7 +708,6 @@ bool BmpBlender::validateUnavailableTilesetFiltering(
         }
         return false;
     }
-
     const QList<BlendWrapper *> activeBlends =
             blender.mBlendsByLayer.value(
                 QStringLiteral("0_FloorOverlay"));
@@ -741,7 +723,6 @@ bool BmpBlender::validateUnavailableTilesetFiltering(
         }
         return false;
     }
-
     if (!blender.tileNameToTiles(retired0).isEmpty()
             || !blender.tileNameToTiles(unavailable.name()).isEmpty()
             || blender.mKnownBlendTiles.contains(
@@ -753,13 +734,11 @@ bool BmpBlender::validateUnavailableTilesetFiltering(
         }
         return false;
     }
-
     qInfo() << "Validated unavailable-tileset filtering:"
             << blender.mInactiveRuleCount << "inactive rule and"
             << blender.mInactiveBlendCount << "inactive blends";
     return true;
 }
-
 static bool adjacentToNonBlack(const QImage &image1, const QImage &image2, int x1, int y1)
 {
     const QRgb black = qRgb(0, 0, 0);
@@ -1024,7 +1003,6 @@ void BmpBlender::updateWarnings()
             warnings += tr("Map is missing \"%1\" tileset.").arg(tilesetName);
         }
     }
-
     if (mInactiveRuleCount) {
         warnings += tr(
                     "Skipped %1 BMP rule(s) because none of their tile "
@@ -1097,7 +1075,6 @@ void BmpBlender::updateWarnings()
         else if (ruleW->mRule->bitmapIndex == 1)
             vegetationRuleColors += ruleW->mRule->color;
     }
-
     QMap<QRgb, int> unknownGroundCounts;
     QMap<QRgb, int> unknownVegetationCounts;
     QMap<QRgb, QPoint> firstGroundPixels;
@@ -1145,7 +1122,6 @@ void BmpBlender::updateWarnings()
                         firstGroundPixels);
     appendColorWarnings(tr("Vegetation image"), 1,
                         unknownVegetationCounts, firstVegetationPixels);
-
     if (warnings != mWarnings) {
         mWarnings = warnings;
         emit warningsChanged();
@@ -1794,9 +1770,6 @@ missingKV:
                     if (aliasToName.contains(tileName)) {
                         exclude2 += tileName;
                     } else if (wholeSheet) {
-                        // exclude2 accepts a complete sheet selector.
-                        // Preserve it verbatim instead of interpreting its
-                        // numeric suffix as a tile index.
                         exclude2 += wholeSheet->name();
                     } else {
                         if (!BuildingEditor::BuildingTilesMgr::legalTileName(tileName)) {
@@ -1873,7 +1846,6 @@ QString BmpBlendsFile::unpaddedTileName(const QString &tileName)
 {
     if (TileMetaInfoMgr::instance()->tileset(tileName))
         return tileName;
-
     for (Tileset *tileset : TileMetaInfoMgr::instance()->tilesets()) {
         if (tileset && BuildingEditor::BuildingTilesMgr::
                 normalizeTileName(tileset->name()).compare(
@@ -1881,7 +1853,6 @@ QString BmpBlendsFile::unpaddedTileName(const QString &tileName)
             return tileset->name();
         }
     }
-
     if (!mAliasNames.contains(tileName)) {
         QString tilesetName;
         int tileID;

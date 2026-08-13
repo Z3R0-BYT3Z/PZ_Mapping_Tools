@@ -468,7 +468,7 @@ public:
         while (mEntriesByCategoryName.contains(key + QString::number(n)))
             n++;
 
-        return name;
+        return key + QString::number(n);
     }
 
     void addEntry(BuildingTileEntry *entry)

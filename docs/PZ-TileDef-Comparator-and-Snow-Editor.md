@@ -6,10 +6,10 @@ save.
 
 ## Evidence and merge boundary
 
-Binary/text TileDef structure, tileset IDs, image/grid metadata, tile records,
-and property maps are read by the maintained TileDef implementation and
-covered by the split/comparison regression path. The comparator distinguishes
-property changes from structural changes before any merge choice is enabled.
+Binary and text TileDef structure, tileset IDs, image and grid metadata, tile
+records, and property maps are read by the maintained TileDef implementation.
+The comparator distinguishes property changes from structural changes before
+any merge choice is enabled.
 
 File 2 as merge base, refusal to invent missing structural records, and the
 available replacement-property presets are **tool-enforced** policies. They
@@ -63,18 +63,8 @@ property, mapped and unresolved counts, selection size, and modified state.
 
 Custom properties are written directly to the tile property map and are not
 discarded merely because they are absent from the current property UI schema.
-**Clear Property Values** removes the selected mapping keys. The editor now
-prompts to save only after an actual modification and marks modified files
-with `*` in the title.
+**Clear Property Values** removes the selected mapping keys. The editor asks
+to save only after an actual modification and marks modified files with `*`
+in the title.
 
 Saving writes the binary `.tiles` file and its `.tiles.txt` companion.
-
-## Regression validation
-
-The tile-definition validator also checks unique tilesets, structural
-metadata, modified properties, and one-sided tile records:
-
-```text
-TileZed.exe --validate-tiledef-split
-TileZed.exe --render-tiledef-comparator <output.png>
-```

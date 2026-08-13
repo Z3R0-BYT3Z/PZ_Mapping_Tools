@@ -63,10 +63,6 @@ ShadowMap::ShadowMap(MapInfo *mapInfo)
     Map *map = mapInfo->map()->clone(); // FIXME: make copy of BMP images, not thread-safe
     qInfo() << "TileZed mini-map setup: map clone"
             << setupTimer.restart() << "ms";
-    // The shadow map shares the already loaded tileset objects with the
-    // document. It only needs to keep them alive; requesting image loads here
-    // used to enqueue every declared TMX tileset again, including hundreds of
-    // unused header entries in older exported cells.
     TilesetManager::instance()->addReferences(map->tilesets(), false);
     mapInfo = MapManager::instance()->newFromMap(map, mapInfo->path()); // FIXME: save as... changes path?
     qInfo() << "TileZed mini-map setup: references"
@@ -240,7 +236,6 @@ void MiniMapRenderWorker::work()
         mImage.fill(Qt::transparent);
         emit imageResized(mImage.size());
     }
-
     QRectF paintRect = mDirtyRect;
     if (mRedrawAll)
         paintRect = sceneRect;

@@ -745,17 +745,46 @@ using namespace Tiled::Internal;
 
 namespace {
 
-QString tilesetResolution(const Tileset *tileset)
+bool pathIsInside(const QString &rootPath, const QString &filePath)
 {
-    if (tileset->imageSource2x().isEmpty())
-        return QStringLiteral("1x");
-    if (QFileInfo(tileset->imageSource2x()).dir().dirName().compare(
-                QStringLiteral("2x"), Qt::CaseInsensitive) == 0) {
+    if (rootPath.isEmpty() || filePath.isEmpty())
+        return false;
+    QString root = QDir::fromNativeSeparators(
+                QFileInfo(rootPath).absoluteFilePath());
+    QString file = QDir::fromNativeSeparators(
+                QFileInfo(filePath).absoluteFilePath());
+    root = QDir::cleanPath(root).toCaseFolded();
+    file = QDir::cleanPath(file).toCaseFolded();
+    return file == root || file.startsWith(root + QLatin1Char('/'));
+}
+QString tilesetResolutionForSources(const QString &imageSource,
+                                    const QString &imageSource2x)
+{
+    const QString selected = imageSource2x.isEmpty()
+            ? imageSource : imageSource2x;
+    const QString tilesRoot = Preferences::instance()->tilesDirectory();
+    const QString tiles2xRoot = Preferences::instance()->tiles2xDirectory();
+    if (pathIsInside(tiles2xRoot, selected))
         return QStringLiteral("2x");
+    if (!imageSource2x.isEmpty())
+        return QStringLiteral("custom");
+    const QString tiles1xRoot = QDir(tilesRoot).filePath(
+                QStringLiteral("1x"));
+    if (pathIsInside(tiles1xRoot, selected) ||
+            QFileInfo(selected).absolutePath().compare(
+                QFileInfo(tilesRoot).absoluteFilePath(),
+                Qt::CaseInsensitive) == 0) {
+        return QStringLiteral("1x");
     }
+    if (pathIsInside(tilesRoot, selected))
+        return QStringLiteral("custom");
     return QStringLiteral("custom");
 }
-
+QString tilesetResolution(const Tileset *tileset)
+{
+    return tilesetResolutionForSources(tileset->imageSource(),
+                                       tileset->imageSource2x());
+}
 QIcon tilesetResolutionIcon(const QString &resolution)
 {
     if (resolution == QStringLiteral("2x"))
@@ -764,7 +793,6 @@ QIcon tilesetResolutionIcon(const QString &resolution)
         return QIcon(QStringLiteral(":/images/1x.png"));
     return QIcon(QStringLiteral(":/images/custom.png"));
 }
-
 void updateTilesetListItem(QListWidgetItem *item, Tileset *tileset, Map *map)
 {
     const bool inUse = map && map->isTilesetUsed(tileset);
@@ -772,7 +800,6 @@ void updateTilesetListItem(QListWidgetItem *item, Tileset *tileset, Map *map)
     const QString source = tileset->imageSource2x().isEmpty()
             ? tileset->imageSource()
             : tileset->imageSource2x();
-
     QString status;
     if (tileset->isMissing()) {
         if (inUse) {
@@ -789,13 +816,10 @@ void updateTilesetListItem(QListWidgetItem *item, Tileset *tileset, Map *map)
         status = QCoreApplication::translate(
                     "TilesetDock", "used by the map and available");
     } else {
-        // Remove the role entirely. setForeground(QBrush()) leaves a valid empty
-        // brush that some dark QSS themes render as black.
         item->setData(Qt::ForegroundRole, QVariant());
         status = QCoreApplication::translate(
                     "TilesetDock", "not used by the map");
     }
-
     QFont font = item->font();
     font.setBold(inUse);
     item->setFont(font);
@@ -812,7 +836,6 @@ void updateTilesetListItem(QListWidgetItem *item, Tileset *tileset, Map *map)
                           resolution,
                           QDir::toNativeSeparators(source)));
 }
-
 /**
  * Used for exporting/importing tilesets.
  *
@@ -888,6 +911,59 @@ private:
 
 } // anonymous namespace
 
+bool TilesetDock::validateResolutionTags(QString *error)
+{
+    const QString root = Preferences::instance()->tilesDirectory();
+    const QString root2x = Preferences::instance()->tiles2xDirectory();
+    struct TestCase {
+        QString source1x;
+        QString source2x;
+        QString expected;
+        QString description;
+    };
+    const QList<TestCase> tests = {
+        {QString(), QDir(root2x).filePath(
+             QStringLiteral("B42ChunkCaching2x.pack/nested/official.png")),
+         QStringLiteral("2x"), QStringLiteral("nested official 2x pack")},
+        {QString(), QDir(root2x).filePath(
+             QStringLiteral("DepthMaps2x.pack/official.png")),
+         QStringLiteral("2x"), QStringLiteral("official DepthMaps pack")},
+        {QString(), QDir(root2x).filePath(
+             QStringLiteral("JumboTrees2x.pack/official.png")),
+         QStringLiteral("2x"), QStringLiteral("official JumboTrees pack")},
+        {QString(), QDir(root2x).filePath(
+             QStringLiteral("JumboTreesBigs2x.pack/official.png")),
+         QStringLiteral("2x"), QStringLiteral("official JumboTreesBigs pack")},
+        {QString(), QDir(root2x).filePath(
+             QStringLiteral("Overlays2x.pack/official.png")),
+         QStringLiteral("2x"), QStringLiteral("official Overlays pack")},
+        {QString(), QDir(root2x).filePath(
+             QStringLiteral("Tiles2x.pack/official.png")),
+         QStringLiteral("2x"), QStringLiteral("official Tiles pack")},
+        {QDir(root).filePath(QStringLiteral("1x/legacy.png")), QString(),
+         QStringLiteral("1x"), QStringLiteral("official 1x tree")},
+        {QDir(root).filePath(QStringLiteral("direct.png")), QString(),
+         QStringLiteral("1x"), QStringLiteral("official root 1x sheet")},
+        {QDir(root).filePath(QStringLiteral("custom/mod.png")), QString(),
+         QStringLiteral("custom"), QStringLiteral("custom tree")},
+        {QDir(root).filePath(QStringLiteral("MyPack/mod.png")), QString(),
+         QStringLiteral("custom"), QStringLiteral("custom nested pack")}
+    };
+    for (const TestCase &test : tests) {
+        const QString actual = tilesetResolutionForSources(
+                    test.source1x, test.source2x);
+        if (actual != test.expected) {
+            if (error) {
+                *error = QStringLiteral("%1 was tagged %2 instead of %3")
+                        .arg(test.description, actual, test.expected);
+            }
+            return false;
+        }
+    }
+    if (error)
+        error->clear();
+    return true;
+}
 TilesetDock::TilesetDock(QWidget *parent):
     QDockWidget(parent),
     mMapDocument(0),
@@ -925,7 +1001,6 @@ TilesetDock::TilesetDock(QWidget *parent):
         else
             mStatusRefreshTimer->stop();
     });
-
     mTilesetView->setModel(new TilesetModel(0, mTilesetView));
     mTilesetNamesView->setIconSize(QSize(24, 24));
     mTilesetNamesView->setSpacing(2);
@@ -1240,16 +1315,12 @@ void TilesetDock::currentTilesetChanged(int row)
     if (mMapDocument && (row >= 0))
         mCurrentTileset = mTilesets[row];
 
-    // Maps may declare the complete tileset catalogue while using only a
-    // handful of sheets. Keep map opening fast and load an otherwise-unused
-    // sheet only when the user explicitly selects it in the tileset dock.
     if (mCurrentTileset && !mCurrentTileset->isLoaded()) {
         TilesetManager *manager = TilesetManager::instance();
         manager->loadTileset(mCurrentTileset,
                              mCurrentTileset->imageSource());
         manager->waitForTilesets(QList<Tileset *>() << mCurrentTileset);
     }
-
     setTilesetList();
     updateCurrentTiles();
     updateActions();
@@ -1742,13 +1813,11 @@ void TilesetDock::refreshTilesetStatus()
 {
     if (!mMapDocument)
         return;
-
     Map *map = mMapDocument->map();
     const int count = qMin(mTilesets.size(), mTilesetNamesView->count());
     for (int row = 0; row < count; ++row)
         updateTilesetListItem(mTilesetNamesView->item(row), mTilesets.at(row), map);
 }
-
 void TilesetDock::setTilesetList()
 {
     mTilesetView->tilesetModel()->setTileset(mCurrentTileset);

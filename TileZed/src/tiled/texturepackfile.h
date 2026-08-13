@@ -21,6 +21,7 @@
 #include <QByteArray>
 #include <QCoreApplication>
 #include <QImage>
+#include <QSize>
 
 class PackSubTexInfo
 {
@@ -57,7 +58,9 @@ public:
 
     QString name;
     QList<PackSubTexInfo> mInfo;
-    QImage image;
+    mutable QImage image;
+    QByteArray encodedImage;
+    QSize imageSize;
     bool mask = true;
 };
 
@@ -68,12 +71,17 @@ public:
     PackFile();
     ~PackFile();
 
-    bool read(const QString &fileName);
+    bool read(const QString &fileName, bool decodeImages = false);
     bool write(const QString &fileName);
 
     QString errorString() const { return mError; }
 
-    void addPage(PackPage &page) { mPages += page; }
+    void addPage(PackPage &page)
+    {
+        if (!page.image.isNull())
+            page.imageSize = page.image.size();
+        mPages += page;
+    }
     const QList<PackPage> &pages() const { return mPages; }
     int version() const { return mVersion; }
     bool isLegacyFormat() const { return mVersion == 0; }
@@ -83,6 +91,8 @@ public:
 
     static QImage extractTexture(const PackPage &page,
                                  const PackSubTexInfo &texture);
+    static QImage pageImage(const PackPage &page);
+    static void releaseDecodedImage(const PackPage &page);
     static QByteArray textureSha256(const PackPage &page,
                                     const PackSubTexInfo &texture);
     static QByteArray metadataSha256(const PackPage &page,

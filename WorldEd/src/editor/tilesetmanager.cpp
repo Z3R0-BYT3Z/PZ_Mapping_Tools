@@ -239,11 +239,9 @@ void TilesetManager::setReloadTilesetsOnChange(bool enabled)
 void TilesetManager::tilesetDirectoryChanged()
 {
     mTilesetPaths.clear();
-
     if (!mWatchedTilesetDirectories.isEmpty())
         mWatcher->removePaths(mWatchedTilesetDirectories);
     mWatchedTilesetDirectories.clear();
-
     const QString rootPath = Preferences::instance()->tilesDirectory();
     const QString path2x = Preferences::instance()->tiles2xDirectory();
     QStringList directories = { rootPath, path2x };
@@ -290,7 +288,6 @@ bool TilesetManager::getTilesetFileName(const QString &tilesetName, QString &pat
         mTilesetPaths[tilesetName] = paths;
         return true;
     }
-
     auto findImage = [&fileName](const QDir &root,
                                  const QString &excludedTree = QString()) {
         QStringList candidates;
@@ -317,7 +314,6 @@ bool TilesetManager::getTilesetFileName(const QString &tilesetName, QString &pat
         candidates.sort(Qt::CaseInsensitive);
         return candidates.isEmpty() ? QString() : candidates.first();
     };
-
     const QString nested2x = findImage(dir2x);
     if (!nested2x.isEmpty()) {
         const QString relative = dir2x.relativeFilePath(nested2x);
@@ -375,23 +371,18 @@ void TilesetManager::directoryChanged(const QString &path)
     mChangedDirectories.insert(path);
     mChangedFilesTimer.start();
 }
-
 void TilesetManager::fileChangedTimeout()
 {
 #ifdef ZOMBOID
     if (!mChangedDirectories.isEmpty()) {
         qInfo() << "Tiles directory changed:" << mChangedDirectories;
         mTilesetPaths.clear();
-
         if (!TileMetaInfoMgr::instance()->addNewTilesets()) {
             qWarning().noquote()
                     << "Unable to discover new PNG sheets after a Tiles "
                        "directory change:"
                     << TileMetaInfoMgr::instance()->errorString();
         }
-
-        // Deleting a PNG commonly emits only directoryChanged(). Feed missing
-        // cache sources through the normal file invalidation path as well.
         for (Tileset *cached : std::as_const(mTilesetImageCache->mTilesets)) {
             const QString source = cached->imageSource2x().isEmpty()
                     ? cached->imageSource() : cached->imageSource2x();
@@ -401,7 +392,6 @@ void TilesetManager::fileChangedTimeout()
                 mChangedFiles.insert(source);
             }
         }
-
         for (Tileset *tileset
              : TileMetaInfoMgr::instance()->tilesets()) {
             if (tileset->isLoaded() && !tileset->isMissing())
@@ -413,7 +403,6 @@ void TilesetManager::fileChangedTimeout()
         mChangedDirectories.clear();
         tilesetDirectoryChanged();
     }
-
     qDebug() << "fileChangedTimeout " << mChangedFiles;
     foreach (Tileset *tileset, mTilesetImageCache->mTilesets) {
         QString fileName = tileset->imageSource2x().isEmpty() ? tileset->imageSource() : tileset->imageSource2x();
@@ -544,8 +533,6 @@ void TilesetManager::tilePropertiesChanged()
 
 void TilesetManager::loadTileset(Tileset *tileset, const QString &imageSource_)
 {
-    // Catalog entries keep a relative path until the shared Tiles directory
-    // has been configured.
     if (QDir(imageSource_).isRelative()) {
         TileMetaInfoMgr::instance()->resolveTilesets(
                     QList<Tileset *>() << tileset);
@@ -554,7 +541,6 @@ void TilesetManager::loadTileset(Tileset *tileset, const QString &imageSource_)
             return;
         }
     }
-
     if (tileset->isLoaded())
         return;
 
@@ -607,7 +593,6 @@ void TilesetManager::waitForTilesets(const QList<Tileset *> &tilesets, QWidget *
     QList<Tileset *> requested = tilesets;
     if (requested.isEmpty())
         requested = TileMetaInfoMgr::instance()->tilesets();
-
     const int total = expectedTotal >= 0 ? expectedTotal : requested.size();
     QScopedPointer<PROGRESS> progress;
     if (parent) {

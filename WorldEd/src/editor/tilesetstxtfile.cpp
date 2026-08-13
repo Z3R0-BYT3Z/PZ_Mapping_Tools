@@ -94,7 +94,7 @@ bool TilesetsTxtFile::read(const QString &path)
                 return false;
             }
 //            tilesetFileName += QLatin1String(".png");
-            QFileInfo finfo(cleanFileName); // relative to Tiles directory
+            QFileInfo finfo(cleanFileName);
             QString tilesetName = finfo.completeBaseName();
             const QString tilesetKey = tilesetName.toCaseFolded();
             if (tilesetNameSet.contains(tilesetKey)) {

@@ -33,6 +33,7 @@
 #include "buildingpropertiesdialog.h"
 #include "buildingreader.h"
 #include "buildingundoredo.h"
+#include "tileselectionscope.h"
 #include "buildingisoview.h"
 #include "buildingorthoview.h"
 #include "buildingtemplates.h"
@@ -115,7 +116,6 @@ static QString splitterSettingsKey(const QObject *root,
     }
     return parts.join(QLatin1Char('.'));
 }
-
 static void saveSplitterStates(QWidget *root, QSettings &settings)
 {
     settings.beginGroup(QLatin1String("Splitters"));
@@ -124,14 +124,11 @@ static void saveSplitterStates(QWidget *root, QSettings &settings)
         int totalSize = 0;
         for (int size : splitter->sizes())
             totalSize += size;
-        // Splitters belonging to inactive edit modes can temporarily report
-        // 0,0. Keep the last valid state instead of overwriting it.
         if (!key.isEmpty() && splitter->isVisible() && totalSize > 0)
             settings.setValue(key, splitter->saveState());
     }
     settings.endGroup();
 }
-
 static void restoreSplitterStates(QWidget *root, QSettings &settings)
 {
     QList<QPair<QSplitter*, QByteArray>> states;
@@ -145,13 +142,11 @@ static void restoreSplitterStates(QWidget *root, QSettings &settings)
         }
     }
     settings.endGroup();
-
     QTimer::singleShot(0, root, [states]() {
         for (const auto &entry : states)
             entry.first->restoreState(entry.second);
     });
 }
-
 /////
 
 EditorWindowPerDocumentStuff::EditorWindowPerDocumentStuff(BuildingDocument *doc) :
@@ -172,8 +167,21 @@ EditorWindowPerDocumentStuff::EditorWindowPerDocumentStuff(BuildingDocument *doc
     connect(document()->undoStack(), &QUndoStack::indexChanged, this, &EditorWindowPerDocumentStuff::autoSaveCheck);
 
     mAutoSaveTimer.setSingleShot(true);
-    mAutoSaveTimer.setInterval(2.5 * 60 * 1000); // 2.5 minutes
+    mAutoSaveTimer.setInterval(qMax(1,
+        BuildingPreferences::instance()->autoSaveIntervalMinutes()) *
+        60 * 1000);
     connect(&mAutoSaveTimer, &QTimer::timeout, this, &EditorWindowPerDocumentStuff::autoSaveTimeout);
+    connect(BuildingPreferences::instance(),
+            &BuildingPreferences::autoSaveIntervalChanged,
+            this, [this](int minutes) {
+        if (minutes <= 0) {
+            mAutoSaveTimer.stop();
+            removeAutoSaveFile();
+            return;
+        }
+        mAutoSaveTimer.setInterval(minutes * 60 * 1000);
+        autoSaveCheck();
+    });
 }
 
 EditorWindowPerDocumentStuff::~EditorWindowPerDocumentStuff()
@@ -323,6 +331,11 @@ void EditorWindowPerDocumentStuff::setInitialPosition()
 
 void EditorWindowPerDocumentStuff::autoSaveCheck()
 {
+    if (BuildingPreferences::instance()->autoSaveIntervalMinutes() <= 0) {
+        mAutoSaveTimer.stop();
+        removeAutoSaveFile();
+        return;
+    }
     if (!document()->isModified()) {
         if (mAutoSaveTimer.isActive()) {
             mAutoSaveTimer.stop();
@@ -339,6 +352,8 @@ void EditorWindowPerDocumentStuff::autoSaveCheck()
 
 void EditorWindowPerDocumentStuff::autoSaveTimeout()
 {
+    if (BuildingPreferences::instance()->autoSaveIntervalMinutes() <= 0)
+        return;
     qDebug() << "BuildingEd auto-save timeout";
     if (mAutoSaveFileName.isEmpty()) {
         QString fileName = document()->fileName();
@@ -542,16 +557,6 @@ BuildingEditorWindow::BuildingEditorWindow(QWidget *parent) :
     connect(prefs, &BuildingPreferences::highlightUnlitRoomsChanged,
             this, &BuildingEditorWindow::highlightUnlitRoomsChanged);
 
-    mNightPreviewAction = new QAction(tr("Night Preview"), this);
-    mNightPreviewAction->setCheckable(true);
-    mNightPreviewAction->setToolTip(
-                tr("Dim the building and preview tiledef lights and powered rooms"));
-    mSettings.setValue(QLatin1String("NightPreview/Enabled"), false);
-    mNightPreviewAction->setChecked(false);
-    // This preview is intentionally hidden until it can match the game's
-    // lighting renderer instead of approximating it with circular glows.
-    mNightPreviewAction->setVisible(false);
-    mNightPreviewAction->setEnabled(false);
     ui->menuView->addSeparator();
     QAction *renderDiagnosticsAction = new QAction(
                 tr("Render Diagnostics"), this);
@@ -570,46 +575,6 @@ BuildingEditorWindow::BuildingEditorWindow(QWidget *parent) :
         for (BuildingIsoView *view : views)
             view->setRenderDiagnosticsEnabled(enabled);
     });
-    ui->menuView->addAction(mNightPreviewAction);
-    QToolButton *nightPreviewButton = new QToolButton(this);
-    nightPreviewButton->setCheckable(true);
-    nightPreviewButton->setText(tr("DAY"));
-    nightPreviewButton->setToolTip(
-                tr("Toggle day/night and tiledef lighting preview"));
-    nightPreviewButton->setAutoRaise(false);
-    nightPreviewButton->setVisible(false);
-    nightPreviewButton->setStyleSheet(QStringLiteral(
-        "QToolButton { padding: 2px 7px; border: 1px solid #68717d;"
-        " border-radius: 4px; font-weight: bold; }"
-        "QToolButton:checked { border: 2px solid #76c7ff;"
-        " background: #235c84; color: white; }"));
-    statusBar()->addPermanentWidget(nightPreviewButton);
-    connect(nightPreviewButton, &QToolButton::toggled,
-            mNightPreviewAction, &QAction::setChecked);
-    connect(mNightPreviewAction, &QAction::toggled,
-            nightPreviewButton, [nightPreviewButton](bool enabled) {
-        const QSignalBlocker blocker(nightPreviewButton);
-        nightPreviewButton->setChecked(enabled);
-        nightPreviewButton->setText(enabled
-                                    ? QObject::tr("NIGHT")
-                                    : QObject::tr("DAY"));
-    });
-    connect(mNightPreviewAction, &QAction::toggled, this,
-            [this](bool enabled) {
-        mSettings.setValue(QLatin1String("NightPreview/Enabled"), enabled);
-        for (EditorWindowPerDocumentStuff *stuff :
-             qAsConst(mDocumentStuff)) {
-            const QList<BuildingIsoView*> views = {
-                stuff->isoView(), stuff->tileView(),
-                stuff->attributeView()
-            };
-            for (BuildingIsoView *view : views) {
-                if (view && view->scene())
-                    view->scene()->setNightPreviewEnabled(enabled);
-            }
-        }
-    });
-
     QList<QKeySequence> keys = QKeySequence::keyBindings(QKeySequence::ZoomIn);
     keys += QKeySequence(tr("Ctrl+="));
     keys += QKeySequence(tr("+"));
@@ -664,7 +629,6 @@ BuildingEditorWindow::BuildingEditorWindow(QWidget *parent) :
             this, &BuildingEditorWindow::runLuaScript);
     connect(mLuaConsoleAction, &QAction::triggered,
             this, &BuildingEditorWindow::showLuaConsole);
-
     connect(ui->actionHelp, &QAction::triggered, this, &BuildingEditorWindow::help);
     connect(ui->actionAboutQt, &QAction::triggered, qApp, &QApplication::aboutQt);
 
@@ -746,7 +710,6 @@ bool BuildingEditorWindow::openFile(const QString &fileName)
 {
     if (!ensureTilesDirectoryConfigured())
         return false;
-
     // Select existing document if this file is already open
     int documentIndex = docman()->findDocument(fileName);
     if (documentIndex != -1) {
@@ -787,7 +750,6 @@ bool BuildingEditorWindow::openAutoSave(const QString &fileName)
 {
     if (!ensureTilesDirectoryConfigured())
         return false;
-
     QString error;
     if (BuildingDocument *doc = BuildingDocument::read(fileName, error)) {
         docman()->addDocument(doc);
@@ -803,7 +765,6 @@ bool BuildingEditorWindow::ensureTilesDirectoryConfigured()
     const QString tilesDirectory = Preferences::instance()->tilesDirectory();
     if (PortableSettings::isTilesPath(tilesDirectory))
         return true;
-
     qWarning() << "BuildingEd cannot open a building because the Tiles "
                   "directory is not configured";
     QMessageBox::warning(
@@ -817,7 +778,6 @@ bool BuildingEditorWindow::ensureTilesDirectoryConfigured()
                    "restart BuildingEd."));
     return false;
 }
-
 bool BuildingEditorWindow::confirmAllSave()
 {
     foreach (BuildingDocument *doc, docman()->documents()) {
@@ -921,6 +881,7 @@ void BuildingEditorWindow::readSettings()
         toggleOrthoIso();
 #endif
     mSettings.endGroup();
+    PortableSettings::applyOneShotMainWindowGeometry(this);
     restoreSplitterStates(this, mSettings);
 
     mOrthoObjectEditMode->readSettings(mSettings);
@@ -932,20 +893,18 @@ void BuildingEditorWindow::readSettings()
 void BuildingEditorWindow::writeSettings()
 {
     writeWindowSettings();
-    saveSplitterStates(this, mSettings);
-
+    if (PortableSettings::shouldPersistMainWindowGeometry(this))
+        saveSplitterStates(this, mSettings);
     mOrthoObjectEditMode->writeSettings(mSettings);
     mIsoObjectEditMode->writeSettings(mSettings);
     mTileEditMode->writeSettings(mSettings);
     mAttributeEditMode->writeSettings(mSettings);
     mSettings.sync();
 }
-
 void BuildingEditorWindow::startSettingsAutoSave()
 {
     if (findChild<QTimer*>(QStringLiteral("settingsAutoSaveTimer")))
         return;
-
     QTimer *settingsSaveTimer = new QTimer(this);
     settingsSaveTimer->setObjectName(QStringLiteral("settingsAutoSaveTimer"));
     settingsSaveTimer->setInterval(5000);
@@ -953,9 +912,12 @@ void BuildingEditorWindow::startSettingsAutoSave()
             this, &BuildingEditorWindow::writeSettings);
     settingsSaveTimer->start();
 }
-
 void BuildingEditorWindow::writeWindowSettings()
 {
+    if (!PortableSettings::shouldPersistMainWindowGeometry(this)) {
+        qInfo() << "One-shot main-window session: persistent window layout skipped";
+        return;
+    }
     mSettings.beginGroup(QLatin1String("MainWindow"));
     mSettings.setValue(QLatin1String("geometry"), saveGeometry());
     mSettings.setValue(QLatin1String("state"), saveState());
@@ -1109,7 +1071,6 @@ void BuildingEditorWindow::newBuilding()
                     .arg(unresolved.count())
                     .arg(details.join(QLatin1Char('\n'))));
     }
-
     docman()->addDocument(doc);
 }
 
@@ -1408,19 +1369,6 @@ void BuildingEditorWindow::currentDocumentChanged(BuildingDocument *doc)
     mCurrentDocument = doc;
     mCurrentDocumentStuff = doc ? mDocumentStuff[doc] : nullptr; // FIXME: unset when deleted
 
-    if (mCurrentDocumentStuff && mNightPreviewAction) {
-        const bool enabled = mNightPreviewAction->isChecked();
-        const QList<BuildingIsoView*> views = {
-            mCurrentDocumentStuff->isoView(),
-            mCurrentDocumentStuff->tileView(),
-            mCurrentDocumentStuff->attributeView()
-        };
-        for (BuildingIsoView *view : views) {
-            if (view && view->scene())
-                view->scene()->setNightPreviewEnabled(enabled);
-        }
-    }
-
     if (mCurrentDocument) {
         IMode *mode = 0;
         switch (mCurrentDocumentStuff->editMode()) {
@@ -1617,18 +1565,56 @@ void BuildingEditorWindow::editCut()
         QRegion selection = mCurrentDocument->tileSelection();
         if (!selection.isEmpty()) {
             QRect r = selection.boundingRect();
-            FloorTileGrid *tiles = currentFloor()->grimeAt(currentLayer(), r, selection);
-            mCurrentDocument->setClipboardTiles(tiles, selection.translated(-r.topLeft()));
-
-            tiles = tiles->clone();
-            if (tiles->replace(selection.translated(-r.topLeft()), QString()))
-                mCurrentDocument->undoStack()->push(
-                            new PaintFloorTiles(mCurrentDocument, currentFloor(),
-                                                currentLayer(), selection,
-                                                r.topLeft(), tiles,
-                                                "Cut Tiles"));
-            else
-                delete tiles;
+            QList<BuildingDocument::ClipboardTileLayer> clips;
+            QUndoStack *undoStack = mCurrentDocument->undoStack();
+            undoStack->beginMacro(tr("Cut Tiles"));
+            for (BuildingFloor *floor : mCurrentDocument->building()->floors()) {
+                if (!mTileSelectionScope && floor != currentFloor())
+                    continue;
+                if (mTileSelectionScope &&
+                        mTileSelectionScope->levelMode() ==
+                        Tiled::Internal::TileSelectionScope::CurrentLevel &&
+                        floor != currentFloor()) {
+                    continue;
+                }
+                for (const QString &layerName : BuildingMap::layerNames(
+                         floor->level())) {
+                    const bool current = layerName == currentLayer();
+                    if (!mTileSelectionScope && !current)
+                        continue;
+                    if (mTileSelectionScope &&
+                            !mTileSelectionScope->includesLayer(
+                                layerName, floor->layerVisibility(layerName),
+                                current)) {
+                        continue;
+                    }
+                    FloorTileGrid *tiles = floor->grimeAt(
+                                layerName, r, selection);
+                    if (!tiles->isEmpty()) {
+                        BuildingDocument::ClipboardTileLayer clip;
+                        clip.level = floor->level();
+                        clip.layerName = layerName;
+                        clip.tiles = tiles;
+                        clips.append(clip);
+                    } else {
+                        delete tiles;
+                    }
+                    FloorTileGrid *erased = floor->grimeAt(layerName, r);
+                    if (erased->replace(selection.translated(-r.topLeft()),
+                                        QString())) {
+                        undoStack->push(new PaintFloorTiles(
+                            mCurrentDocument, floor, layerName, selection,
+                            r.topLeft(), erased, "Cut Tiles"));
+                    } else {
+                        delete erased;
+                    }
+                }
+            }
+            undoStack->endMacro();
+            if (!clips.isEmpty())
+                mCurrentDocument->setClipboardTileLayers(
+                            clips, selection.translated(-r.topLeft()),
+                            mCurrentDocument->currentLevel());
         }
     }
 }
@@ -1642,8 +1628,44 @@ void BuildingEditorWindow::editCopy()
         QRegion selection = mCurrentDocument->tileSelection();
         if (!selection.isEmpty()) {
             QRect r = selection.boundingRect();
-            FloorTileGrid *tiles = currentFloor()->grimeAt(currentLayer(), r, selection);
-            mCurrentDocument->setClipboardTiles(tiles, selection.translated(-r.topLeft()));
+            QList<BuildingDocument::ClipboardTileLayer> clips;
+            for (BuildingFloor *floor : mCurrentDocument->building()->floors()) {
+                if (!mTileSelectionScope && floor != currentFloor())
+                    continue;
+                if (mTileSelectionScope &&
+                        mTileSelectionScope->levelMode() ==
+                        Tiled::Internal::TileSelectionScope::CurrentLevel &&
+                        floor != currentFloor()) {
+                    continue;
+                }
+                for (const QString &layerName : BuildingMap::layerNames(
+                         floor->level())) {
+                    const bool current = layerName == currentLayer();
+                    if (!mTileSelectionScope && !current)
+                        continue;
+                    if (mTileSelectionScope &&
+                            !mTileSelectionScope->includesLayer(
+                                layerName, floor->layerVisibility(layerName),
+                                current)) {
+                        continue;
+                    }
+                    FloorTileGrid *tiles = floor->grimeAt(
+                                layerName, r, selection);
+                    if (tiles->isEmpty()) {
+                        delete tiles;
+                        continue;
+                    }
+                    BuildingDocument::ClipboardTileLayer clip;
+                    clip.level = floor->level();
+                    clip.layerName = layerName;
+                    clip.tiles = tiles;
+                    clips.append(clip);
+                }
+            }
+            if (!clips.isEmpty())
+                mCurrentDocument->setClipboardTileLayers(
+                            clips, selection.translated(-r.topLeft()),
+                            mCurrentDocument->currentLevel());
         }
     }
 }
@@ -1654,10 +1676,45 @@ void BuildingEditorWindow::editPaste()
         return;
 
     if (mCurrentDocumentStuff->isTile()) {
-        if (FloorTileGrid *tiles = mCurrentDocument->clipboardTiles()) {
+        const QList<BuildingDocument::ClipboardTileLayer> &clips =
+                mCurrentDocument->clipboardTileLayers();
+        if (clips.size() == 1 &&
+                !mCurrentDocument->clipboardPreservesPlanes()) {
+            FloorTileGrid *tiles = clips.first().tiles;
             DrawTileTool::instance()->makeCurrent();
             DrawTileTool::instance()->setCaptureTiles(tiles->clone(),
                                                       mCurrentDocument->clipboardTilesRgn());
+        } else if (!clips.isEmpty()) {
+            QRegion selection = mCurrentDocument->tileSelection();
+            if (selection.isEmpty()) {
+                statusBar()->showMessage(
+                            tr("Select the destination anchor tile before "
+                               "pasting a multi-layer selection."), 6000);
+                return;
+            }
+            QPoint targetPos = selection.boundingRect().topLeft();
+            QUndoStack *undoStack = mCurrentDocument->undoStack();
+            undoStack->beginMacro(tr("Paste Tile Selection"));
+            int pasted = 0;
+            for (const BuildingDocument::ClipboardTileLayer &clip : clips) {
+                const int level = currentDocument()->currentLevel() +
+                        clip.level - currentDocument()->clipboardAnchorLevel();
+                BuildingFloor *floor = currentBuilding()->floor(level);
+                if (!floor)
+                    continue;
+                const QRegion targetRegion =
+                        mCurrentDocument->clipboardTilesRgn()
+                        .translated(targetPos);
+                undoStack->push(new PaintFloorTiles(
+                    mCurrentDocument, floor, clip.layerName, targetRegion,
+                    targetPos, clip.tiles->clone(), "Paste Tiles"));
+                ++pasted;
+            }
+            undoStack->endMacro();
+            statusBar()->showMessage(
+                        tr("Pasted %1 tile layer(s) at %2,%3")
+                        .arg(pasted).arg(targetPos.x()).arg(targetPos.y()),
+                        5000);
         }
     }
 }
@@ -1671,16 +1728,40 @@ void BuildingEditorWindow::editDelete()
             return;
         QRegion selection = currentDocument()->tileSelection();
         QRect r = selection.boundingRect();
-        FloorTileGrid *tiles = currentFloor()->grimeAt(currentLayer(), r);
-        bool changed = tiles->replace(selection.translated(-r.topLeft()), QString());
-        if (changed)
-            mCurrentDocument->undoStack()->push(
-                        new PaintFloorTiles(mCurrentDocument, currentFloor(),
-                                            currentLayer(), selection,
-                                            r.topLeft(), tiles,
-                                            "Delete Tiles"));
-        else
-            delete tiles;
+        QUndoStack *undoStack = mCurrentDocument->undoStack();
+        undoStack->beginMacro(tr("Delete Tiles"));
+        for (BuildingFloor *floor : mCurrentDocument->building()->floors()) {
+            if (!mTileSelectionScope && floor != currentFloor())
+                continue;
+            if (mTileSelectionScope &&
+                    mTileSelectionScope->levelMode() ==
+                    Tiled::Internal::TileSelectionScope::CurrentLevel &&
+                    floor != currentFloor()) {
+                continue;
+            }
+            for (const QString &layerName : BuildingMap::layerNames(
+                     floor->level())) {
+                const bool current = layerName == currentLayer();
+                if (!mTileSelectionScope && !current)
+                    continue;
+                if (mTileSelectionScope &&
+                        !mTileSelectionScope->includesLayer(
+                            layerName, floor->layerVisibility(layerName),
+                            current)) {
+                    continue;
+                }
+                FloorTileGrid *tiles = floor->grimeAt(layerName, r);
+                if (tiles->replace(selection.translated(-r.topLeft()),
+                                   QString())) {
+                    undoStack->push(new PaintFloorTiles(
+                        mCurrentDocument, floor, layerName, selection,
+                        r.topLeft(), tiles, "Delete Tiles"));
+                } else {
+                    delete tiles;
+                }
+            }
+        }
+        undoStack->endMacro();
         return;
     }
     deleteObjects();
@@ -1896,7 +1977,6 @@ void BuildingEditorWindow::proceduralLootEditor()
                 this, roomName, QString(), projectRoot);
     dialog.exec();
 }
-
 void BuildingEditorWindow::roomAdded(Room *room)
 {
     Q_UNUSED(room)
@@ -2502,7 +2582,6 @@ void BuildingEditorWindow::showLuaConsole()
                                     tr("Open a building before running a script."));
                         return;
                     }
-
                     mLuaScriptFile = selected;
                     console->setFile(selected);
                     BuildingLuaScript script(mCurrentDocument);
@@ -2539,7 +2618,6 @@ void BuildingEditorWindow::showLuaConsole()
     console->raise();
     console->activateWindow();
 }
-
 void BuildingEditorWindow::runLuaScript()
 {
     showLuaConsole();
@@ -2547,7 +2625,6 @@ void BuildingEditorWindow::runLuaScript()
     QMetaObject::invokeMethod(LuaConsole::instance(), "runScript",
                               Qt::QueuedConnection);
 }
-
 void BuildingEditorWindow::initActionManager()
 {
     const QString fileName = Preferences::instance()->userPath(QStringLiteral("shortcuts/BuildingEd.txt"));
@@ -2767,7 +2844,6 @@ void BuildingEditorWindow::reportMissingTilesets()
     }
     unavailableTilesets.removeDuplicates();
     unavailableTilesets.sort(Qt::CaseInsensitive);
-
     if (!unavailableTilesets.isEmpty()) {
         ListOfStringsDialog dialog(
                     tr("The following tilesets could not be loaded from the "

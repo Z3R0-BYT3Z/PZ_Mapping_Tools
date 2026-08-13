@@ -22,6 +22,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QLineEdit;
 
 namespace Ui {
 class BuildingPreferencesDialog;
@@ -51,6 +52,8 @@ private:
     bool mUseOpenGL;
     QComboBox *mThemeCombo;
     QCheckBox *mSyncThemeCheckBox;
+    QLineEdit *mProjectZomboidDirectory;
+    QComboBox *mAutoSaveCombo;
 };
 
 } // BuildingEditor

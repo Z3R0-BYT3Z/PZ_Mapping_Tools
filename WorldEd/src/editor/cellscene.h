@@ -29,6 +29,7 @@
 
 #include <QGraphicsItem>
 #include <QHash>
+#include <QImage>
 #include <QOpenGLBuffer>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
@@ -44,11 +45,11 @@ class BaseCellSceneTool;
 class CellDocument;
 class CellGridItem;
 class CompositeLayerGroup;
+class DnDItem;
 class MapBuildings;
 class MapComposite;
 class MapImage;
 class MapInfo;
-class NightPreviewItem;
 class EnvironmentPreviewItem;
 class ObjectItem;
 class PropertyHolder;
@@ -95,8 +96,11 @@ public:
     void setShowSize(bool b) { mShowSize = b; }
 
 private:
+    void rebuildRasterLabel();
+
     ObjectItem *mItem;
     QColor mBgColor;
+    QImage mRasterLabel;
     bool mShowSize;
 };
 
@@ -127,7 +131,7 @@ public:
       * Note: QGraphicsItem already defines these, but I'm avoiding any
       * QGraphicsScene() selection behavior.
       */
-    void setSelected(bool selected);
+    virtual void setSelected(bool selected);
     bool isSelected() const { return mIsSelected; }
 
     WorldCellObject *object() const { return mObject; }
@@ -295,12 +299,15 @@ public:
     void setEditable(bool editable) override;
     bool isBasement() const override { return true; }
     bool hoverToolCurrent() const override;
+    void setSelected(bool selected) override;
     void synchWithObject() override;
     int getStairOffsetX() const;
     int getStairOffsetY() const;
+    QString getAccessName() const;
     QString getStairDirection() const;
     bool isStairDirectionNorth() const;
     QRect stairBoundsRelativeToThis() const;
+    void mapImageChanged(MapImage *mapImage);
     void setStairDragOffset(const QPoint& offset)
     {
         mStairDragOffset = offset;
@@ -311,8 +318,13 @@ public:
         return mStairDragOffset;
     }
 private:
+    void refreshAccessPreview();
+
     QPoint mStairDragOffset;
     BasementStairHandle *mStairHandle;
+    DnDItem *mAccessPreview = nullptr;
+    QString mAccessPreviewPath;
+    QString mAccessPreviewStatus;
 };
 
 /////
@@ -371,13 +383,25 @@ public:
     WorldCellLot *lot() const { return mLot; }
     MapComposite *subMap() const { return mMap; }
 
+    bool occupiesLevel(int level) const;
+
     void checkValidPos();
 
 private:
+    QRect occupiedTileBounds(int *lowestSourceLevel,
+                             int *highestSourceLevel) const;
+    QRectF volumeBoundingRect() const;
+    void drawVolumeOutline(QPainter *painter, const QRect &tileBounds,
+                           int bottomLevel, int topLevel,
+                           const QColor &color) const;
+
     MapComposite *mMap;
     Tiled::MapRenderer *mRenderer;
     QRectF mBoundingRect;
+    QRect mOccupiedTileBounds;
     WorldCellLot *mLot;
+    int mLowestSourceLevel;
+    int mHighestSourceLevel;
     bool mIsEditable;
     bool mIsMouseOver;
     bool mIsValidPos;
@@ -431,7 +455,8 @@ private:
 class DnDItem : public QGraphicsItem
 {
 public:
-    DnDItem(MapInfo *mapInfo, Tiled::MapRenderer *renderer, int level, QGraphicsItem *parent = 0);
+    DnDItem(MapInfo *mapInfo, Tiled::MapRenderer *renderer, int level,
+            QGraphicsItem *parent = 0, bool persistentPreview = false);
 
     QRectF boundingRect() const;
 
@@ -449,6 +474,9 @@ public:
     QPoint dropPosition() const;
 
     MapInfo *mapInfo();
+    void mapImageChanged(MapImage *mapImage);
+    void setAlignmentWarning(bool warning)
+    { mAlignmentWarning = warning; update(); }
 
 private:
     MapInfo *mMapInfo;
@@ -458,6 +486,8 @@ private:
     QPoint mPositionInMap; // x,y square coordinate in the cell of the mouse pointer
     QPoint mHotSpot; // x,y square offset relative to the top-left of MapInfo map
     int mLevel;
+    bool mPersistentPreview;
+    bool mAlignmentWarning = false;
 };
 
 /**
@@ -900,8 +930,6 @@ public:
     bool isDestroying() const
     { return mDestroying; }
 
-    void setNightPreviewEnabled(bool enabled);
-    void rebuildNightPreview();
     void setPoweredPreviewEnabled(bool enabled);
     void setSnowPreviewEnabled(bool enabled);
     void setJumboPreviewEnabled(bool enabled);
@@ -923,6 +951,11 @@ public:
     void checkHolesOnLevelZero();
     int autoFixHolesOnLevelZero(QString *backupPath, QString *error);
     static bool validateHoleRepair(QString *error);
+    int basementGroundOpeningCount(WorldCellLot *lot) const;
+    int pierceGroundAtBasementStairs(WorldCellLot *lot,
+                                     QStringList *backupPaths,
+                                     QString *error);
+    static bool validateBasementPlacement(QString *error);
 
     bool hasHoleInFloor() const
     { return !mHoleInFloor.isEmpty(); }
@@ -1077,8 +1110,6 @@ private:
     QSet<InGameMapFeatureItem*> mSelectedFeatureItems;
     QGraphicsRectItem *mDarkRectangle;
     EnvironmentPreviewItem *mEnvironmentPreviewItem;
-    NightPreviewItem *mNightPreviewItem;
-    bool mNightPreviewEnabled;
     bool mPoweredPreviewEnabled;
     bool mSnowPreviewEnabled;
     bool mJumboPreviewEnabled;

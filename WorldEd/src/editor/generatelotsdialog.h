@@ -23,6 +23,9 @@ public:
     void setExportAsMod(bool enabled);
     bool finalizeModExport(QString *error) const;
     void setModExportAvailable(bool available);
+    bool fillHolesDuringExport() const;
+    bool fillHolesWithNearestTile() const;
+    QString holeFillTileName() const;
 
 private slots:
     void exportBrowse();

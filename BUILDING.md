@@ -74,9 +74,11 @@ Install:
 - Qt 5.14.2 for MSVC 2017 64-bit
 - Visual Studio 2022 with Desktop development with C++
 - a Windows SDK
+- an OpenSSL 1.1 runtime compatible with the exact Qt 5.14.2 build, including
+  its redistributable license text
 
 The Qt 5.14.2 `msvc2017_64` package can be built with the Visual Studio 2022
-x64 compiler environment. The maintainer paths used below are examples:
+x64 compiler environment. The paths used below are examples:
 
 ```text
 C:\Qt\Qt5.14.2\5.14.2\msvc2017_64\bin\qmake.exe
@@ -131,7 +133,8 @@ Use a native Linux build host with:
 - a C++17-capable GCC or Clang toolchain
 - GNU Make
 - Qt 5.15.x development tools with qmake
-- Qt Core, Gui, Widgets, XML, SVG, OpenGL, and development headers
+- Qt Core, Gui, Widgets, XML, SVG, OpenGL, Network, Concurrent, and
+  development headers
 - the normal XCB runtime plugins required by Qt applications
 
 The source contains Unix branches and origin-relative library search paths.
@@ -258,7 +261,11 @@ documented package-relative lookup.
 
 On Windows, copy the three newly linked executables to `bin` and run
 `windeployqt` against them. Copy rebuilt shared DLLs and plugins only when
-their content changed.
+their content changed. `windeployqt` does not supply the OpenSSL runtime used
+by Qt Network. Place compatible `libssl-1_1-x64.dll` and
+`libcrypto-1_1-x64.dll` files beside the executables and retain
+`licenses/OpenSSL-1.1.1.txt` plus the matching entry in
+`THIRD_PARTY_NOTICES.txt`.
 
 On Linux, deploy the Qt libraries and platform plugins with a maintained
 deployment tool or distribution package recipe. Preserve origin-relative
@@ -271,42 +278,3 @@ Use `macdeployqt`, then sign and notarize the completed bundles.
 
 Do not include Project Zomboid Tiles, textures, or other game assets. Users
 must supply those separately.
-
-## Verify a build
-
-For every platform:
-
-1. Record the exact source commit or tag.
-2. Confirm a clean qmake configure and native compilation.
-3. Verify that PZWorldEd, TileZed, and BuildingEd start without a developer Qt
-   installation.
-4. Confirm that settings and logs use a writable location.
-5. Confirm sibling-editor launching.
-6. Load complete 1x, 2x, and custom Tiles catalogues.
-7. Test raster and OpenGL rendering.
-8. Open and save representative PZW, TMX, and TBX projects.
-9. Run the validators supported by the target platform.
-10. Compare packaged executables with the compiler outputs by SHA-256.
-
-Windows hash example:
-
-```powershell
-Get-FileHash C:\PZ_Mapping_Tools\build\worlded\PZWorldEd.exe -Algorithm SHA256
-Get-FileHash C:\PZ_Mapping_Tools\package\bin\PZWorldEd.exe -Algorithm SHA256
-
-Get-FileHash C:\PZ_Mapping_Tools\build\tilezed\TileZed.exe -Algorithm SHA256
-Get-FileHash C:\PZ_Mapping_Tools\package\bin\TileZed.exe -Algorithm SHA256
-
-Get-FileHash C:\PZ_Mapping_Tools\build\tilezed\BuildingEd.exe -Algorithm SHA256
-Get-FileHash C:\PZ_Mapping_Tools\package\bin\BuildingEd.exe -Algorithm SHA256
-```
-
-Linux and macOS hash example:
-
-```sh
-shasum -a 256 /path/to/compiler/output
-shasum -a 256 /path/to/packaged/output
-```
-
-The corresponding source and required license files must be available for
-every public binary release.

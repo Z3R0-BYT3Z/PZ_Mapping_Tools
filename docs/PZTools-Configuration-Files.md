@@ -1,113 +1,64 @@
 # PZTools configuration files
 
-This page explains the shared `config` directory used by PZWorldEd, TileZed,
-and BuildingEd. It is written for mappers first: most users should not edit
-these files by hand.
+PZWorldEd, TileZed, and BuildingEd share the packaged `config` directory.
+Most users should change these files only through the applications.
 
-## The short version
+## Shared paths
 
-- **Tiles** points to the extracted PNG tree.
-- **Configuration** points to the PZTools `config` directory.
-- **Settings** contains preferences and logs; it is not a configuration
-  directory.
-- Project files and mod overrides belong in the mapper's project, not in the
-  game installation and not in PZTools `config`.
+- **Tiles** points to the extracted PNG tree used by the renderers.
+- **Configuration** points to the packaged PZTools `config` directory.
+- **Project Zomboid Installation** points to the game root or `media` folder.
+- **Settings** contains preferences and logs. It is not configuration data.
 
-The three applications share the selected Tiles and configuration paths
-through `settings/PZTools.ini`. Changing either path affects all three tools
-after they are restarted.
+The game installation is a read-only reference. Project rules and overrides
+belong inside the mapper's project or mod.
 
-## What each file does
+## File ownership
 
-| File | Used mainly by | Purpose | Normal user action |
-|---|---|---|---|
-| `Tilesets.txt` | All three tools | Ordered catalogue of logical sheet names, PNG locations, and logical columns/rows | Use the Tileset tools or catalogue rebuild; do not casually reorder it |
-| `TileProperties.txt` | TileZed, BuildingEd | Controls and tooltips shown by the TileDef property editor | Edit only when adding a verified engine property |
-| `BuildingTiles.txt` | BuildingEd | Tile categories used by walls, roofs, windows, grime, and object tools | Normally read-only |
-| `BuildingFurniture.txt` | BuildingEd | Named furniture/object groups and their ordered tile definitions | Normally read-only |
-| `BuildingTemplates.txt` | BuildingEd | Reusable building defaults and template categories | Normally read-only |
-| `TMXConfig.txt` | TileZed, BuildingEd | Layer/object layout used when creating or exporting maps | Normally read-only |
-| `RoomNames.txt` | BuildingEd | Valid room-name catalogue | Choose values in BuildingEd |
-| `RoomTone.txt` | BuildingEd | Valid room-tone/building-type catalogue | Choose values in BuildingEd |
-| `WorldDefaults.txt` | WorldEd | Default object types, groups, properties, templates, colors, professions, and Build 42 zone values | Project-specific values belong in the PZW project |
-| `Rules.txt` | WorldEd terrain/BMP tools | Color aliases and terrain-generation rules | Copy into a project before customizing |
-| `Blends.txt` | WorldEd terrain/BMP tools | Terrain edge and overlay transitions | Copy into a project before customizing |
-| `MapBaseXML.txt` | WorldEd BMP-to-TMX | Base TMX layer/object structure for generated maps | Normally read-only |
-| `Roads.txt` | WorldEd | Road drawing presets | Normally read-only |
-| `Fences.txt` | TileZed Lua tools | Fence presets and directional tile choices | Use through Draw Fence |
-| `Curbs.txt` | TileZed Lua tools | Curb presets and near/far/sunken pieces | Use through Draw Curb |
-| `Edges.txt` | TileZed Lua tools | Terrain-edge presets | Use through Draw Edge |
-| `LuaTools.txt` | TileZed | Menu labels, icons, and scripts for shipped Lua tools | Add user tools in a separate user catalogue |
-| `Rearrange.txt` | TileZed | Ordered tile selections used by rearrangement helpers | Normally read-only |
-| `RearrangeGrid.txt` | TileZed | Old/new tile-grid remapping tables | Normally read-only |
+| File | Used mainly by | Purpose |
+|---|---|---|
+| `Tilesets.txt` | All tools | Ordered logical sheet names, image paths, columns, and rows |
+| `TileProperties.txt` | TileZed, BuildingEd | TileDef controls and tooltips |
+| `BuildingTiles.txt` | BuildingEd | Walls, roofs, windows, grime, and object categories |
+| `BuildingFurniture.txt` | BuildingEd, Pack Extractor | Furniture groups and ordered multi-tile definitions |
+| `BuildingTemplates.txt` | BuildingEd | Building defaults and template categories |
+| `TMXConfig.txt` | TileZed, BuildingEd | Layer and object layout for created maps |
+| `RoomNames.txt` | BuildingEd | Room-name catalogue |
+| `RoomTone.txt` | BuildingEd | Room-tone and building-type catalogue |
+| `WorldDefaults.txt` | WorldEd | Object types, groups, properties, templates, colors, professions, and zone values |
+| `Rules.txt` | WorldEd BMP tools | Color aliases and terrain-generation rules |
+| `Blends.txt` | WorldEd BMP tools | Terrain edges and overlay transitions |
+| `MapBaseXML.txt` | WorldEd BMP tools | Base TMX structure for generated maps |
+| `Roads.txt` | WorldEd | Road presets |
+| `Fences.txt` | TileZed | Fence presets and directional pieces |
+| `Curbs.txt` | TileZed | Curb presets and directional pieces |
+| `Edges.txt` | TileZed | Terrain-edge presets |
+| `LuaTools.txt` | TileZed | Shipped Lua tool menu entries, icons, and scripts |
+| `Rearrange.txt` | TileZed | Ordered tile selections for rearrangement tools |
+| `RearrangeGrid.txt` | TileZed | Old and new tile-grid mappings |
 
-Legacy source files such as `MapToPNG.txt`, `Textures.txt`, `TileShapes.txt`,
-and `thumbnails.txt` are not shipped as active runtime catalogues. Their old
-presence in `config` did not make a current feature use them.
+Legacy files such as `MapToPNG.txt`, `Textures.txt`, `TileShapes.txt`, and
+`thumbnails.txt` are not active runtime catalogues.
 
-## Current Build 42.20 audit
+## Tileset resolution
 
-The August 4 audit checks the maintained catalogues against the configured
-`C:\pz\Tiles` tree and the local Build 42.20 reference:
+The tools scan the configured Tiles tree recursively. A readable 2x sheet is
+preferred. A readable 1x or custom sheet is used when no 2x sheet exists. A
+placeholder appears only when no readable source resolves.
 
-| Check | Audited result |
-|---|---:|
-| PNG files discovered recursively | 546 |
-| Unique logical PNG base names | 543 |
-| `Tilesets.txt` entries | 543 |
-| Missing discovered names from the catalogue | 0 |
-| Catalogue names without a readable PNG | 0 |
-| Room names | 588 |
-| Room tones/building types | 267 |
-| TileDef property controls with tooltips | 211 |
-| WorldEd profession choices | `all` plus 25 Build 42.20 professions |
-
-Three logical names exist in more than one installed location. Selection is
-deterministic: 2x wins over 1x/custom, and the maintained catalogue keeps the
-chosen nested pack path. File names containing spaces are valid and are not
-split into a different logical name.
-
-Every tile reference in the maintained `Rules`, `Roads`, `Fences`, `Curbs`,
-`Edges`, `BuildingTiles`, `BuildingTemplates`, `BuildingFurniture`,
-`Rearrange`, `RearrangeGrid`, and explicit `Blends` entries was checked against
-the logical sheet dimensions. Invalid burnt-roof names, six furniture groups
-using nonexistent `signs_one-off_05_512` through `_559`, and two obsolete
-rearrangement groups were removed or corrected.
-
-Some special-effect PNGs do not encode a conventional 64x128 sheet rectangle.
-When their decoded rectangle cannot represent their stored tile count, the
-tools preserve the valid logical columns/rows recorded by the catalogue.
-This is intentional for sheets such as the Giblet, Rain, and large-blood
-effects; it is not permission to hide an arbitrary size mismatch.
+`Tilesets.txt` can store logical columns and rows for special-effect sheets
+whose decoded PNG rectangle does not express their complete logical tile
+count. This is required for supported effects and does not make arbitrary
+image-size mismatches valid.
 
 ## Safe customization
 
-1. Back up the file you intend to change.
-2. Keep project rules and WorldGen/loot overrides inside the project.
-3. Never delete or reorder a TBX `tile_entry`, `user_tiles`, or furniture list
-   by hand. Its position is an ID used elsewhere in the file.
-4. Keep tile IDs within `columns x rows` from `Tilesets.txt`.
-5. Restart all three applications after changing a shared catalogue.
-6. Read the newest log under `settings/logs` if loading stops.
+1. Back up a catalogue before changing it.
+2. Keep project Rules, Blends, WorldGen, and loot overrides in the project.
+3. Do not reorder TBX `tile_entry`, `user_tiles`, or furniture lists by hand.
+4. Keep tile IDs inside the declared columns and rows.
+5. Restart the applications after changing shared catalogues.
+6. Read the newest log if loading stops.
 
-If a TMX or TBX project accumulated stale paths and definitions, use
-**WorldEd > Tools > Project Doctor: Tiles and Paths...**. Its first
-**Check project** pass is read-only, and the normal result is a plain-language
-table. Technical parser details stay hidden unless support asks for them.
-
-## Maintainer checks
-
-Run validators from the deployed `bin` directory, where all Qt dependencies
-are present:
-
-```powershell
-.\TileZed.exe --validate-tileset-catalog
-.\BuildingEd.exe --validate-building-categories
-.\PZWorldEd.exe --validate-world-defaults=..\config\WorldDefaults.txt
-.\PZWorldEd.exe --validate-tileset-cleanup
-```
-
-`--rebuild-tileset-catalog=<Tiles-path>` is an explicit maintenance command.
-It scans recursively, resolves 2x before 1x/custom, preserves valid logical
-geometry where required, creates a backup, and rewrites the catalogue. It is
-not part of ordinary application startup.
+Project Doctor can inspect stale paths, missing tilesets, and TBX references.
+Its first pass is read-only. Applied corrections create a backup.

@@ -64,7 +64,6 @@ macx {
 #OBJECTS_DIR = .obj
 
 SOURCES += aboutdialog.cpp \
-    nightpreviewitem.cpp \
     BuildingEditor/attributeeditmode.cpp \
     BuildingEditor/attributeeditmode_p.cpp \
     BuildingEditor/buildingattributesdock.cpp \
@@ -95,6 +94,7 @@ SOURCES += aboutdialog.cpp \
     changepolygon.cpp \
     changeproperties.cpp \
     changetileselection.cpp \
+    tileselectionscope.cpp \
     clipboardmanager.cpp \
     colorbutton.cpp \
     commandbutton.cpp \
@@ -305,9 +305,9 @@ SOURCES += aboutdialog.cpp \
     BuildingEditor/roofhiding.cpp
 
 HEADERS += aboutdialog.h \
-    nightpreviewitem.h \
     ../firstlaunchdialog.h \
     ../portablesettings.h \
+    ../sharedmainwindowgeometrywidget.h \
     BuildingEditor/attributeeditmode.h \
     BuildingEditor/attributeeditmode_p.h \
     BuildingEditor/buildingattributesdock.h \
@@ -339,6 +339,7 @@ HEADERS += aboutdialog.h \
     changepolygon.h \
     changeproperties.h \
     changetileselection.h \
+    tileselectionscope.h \
     clipboardmanager.h \
     colorbutton.h \
     commandbutton.h \

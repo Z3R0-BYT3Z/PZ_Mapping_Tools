@@ -32,6 +32,7 @@ class Map;
 namespace Internal {
 
 class MapDocument;
+class TileSelectionScope;
 
 /**
  * The clipboard manager deals with interaction with the clipboard.
@@ -63,7 +64,8 @@ public:
      * Convenience method to copy the current selection to the clipboard.
      * Deals with either tile selection or object selection.
      */
-    void copySelection(const MapDocument *mapDocument);
+    void copySelection(const MapDocument *mapDocument,
+                       const TileSelectionScope *scope = nullptr);
 
 signals:
     /**

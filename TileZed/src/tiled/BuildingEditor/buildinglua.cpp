@@ -1,5 +1,4 @@
 #include "buildinglua.h"
-
 #include "building.h"
 #include "buildingdocument.h"
 #include "buildingfloor.h"
@@ -8,45 +7,36 @@
 #include "buildingtiles.h"
 #include "buildingundoredo.h"
 #include "furnituregroups.h"
-
 #include "luaconsole.h"
 #include "zprogress.h"
-
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QUndoStack>
-
 extern "C" {
 #include "lauxlib.h"
 #include "lua.h"
 #include "lualib.h"
 }
-
 using namespace BuildingEditor;
-
 namespace {
-
 static QByteArray utf8(const QString &text)
 {
     return text.toUtf8();
 }
-
 static QString luaString(lua_State *state, int index)
 {
     size_t length = 0;
     const char *value = luaL_checklstring(state, index, &length);
     return QString::fromUtf8(value, int(length));
 }
-
 static void pushString(lua_State *state, const QString &value)
 {
     const QByteArray bytes = utf8(value);
     lua_pushlstring(state, bytes.constData(), size_t(bytes.size()));
 }
-
 static int traceback(lua_State *state)
 {
     const char *message = lua_tostring(state, 1);
@@ -57,7 +47,6 @@ static int traceback(lua_State *state)
         lua_pushliteral(state, "(no error message)");
     return 1;
 }
-
 static void cancellationHook(lua_State *state, lua_Debug *)
 {
     qApp->processEvents(QEventLoop::AllEvents);
@@ -66,7 +55,6 @@ static void cancellationHook(lua_State *state, lua_Debug *)
         luaL_error(state, "Script cancelled by user.");
     }
 }
-
 static void setFunction(lua_State *state, const char *name, lua_CFunction fn,
                         BuildingLuaScript *script)
 {
@@ -74,7 +62,6 @@ static void setFunction(lua_State *state, const char *name, lua_CFunction fn,
     lua_pushcclosure(state, fn, 1);
     lua_setfield(state, -2, name);
 }
-
 static FurnitureGroup *furnitureGroup(lua_State *state, int argument)
 {
     FurnitureGroups *catalog = FurnitureGroups::instance();
@@ -82,7 +69,6 @@ static FurnitureGroup *furnitureGroup(lua_State *state, int argument)
         return catalog->group(catalog->indexOf(luaString(state, argument)));
     return catalog->group(int(luaL_checkinteger(state, argument)));
 }
-
 static FurnitureTile::FurnitureOrientation furnitureOrientation(
         lua_State *state, int argument)
 {
@@ -94,7 +80,6 @@ static FurnitureTile::FurnitureOrientation furnitureOrientation(
     }
     return FurnitureTile::FurnitureUnknown;
 }
-
 static FurnitureTiles *furnitureDefinition(lua_State *state, int groupArgument,
                                            int itemArgument)
 {
@@ -104,9 +89,7 @@ static FurnitureTiles *furnitureDefinition(lua_State *state, int groupArgument,
         return nullptr;
     return group->mTiles.at(item);
 }
-
-} // namespace
-
+}
 BuildingLuaScript::BuildingLuaScript(BuildingDocument *document)
     : mDocument(document)
     , mProperties(document->building()->properties())
@@ -128,7 +111,6 @@ BuildingLuaScript::BuildingLuaScript(BuildingDocument *document)
         mFloors.append(state);
     }
 }
-
 BuildingLuaScript::~BuildingLuaScript()
 {
     qDeleteAll(mAddedObjects);
@@ -137,7 +119,6 @@ BuildingLuaScript::~BuildingLuaScript()
         delete state;
     }
 }
-
 BuildingLuaScript::FloorState *BuildingLuaScript::floorState(int level)
 {
     for (FloorState *state : mFloors) {
@@ -146,7 +127,6 @@ BuildingLuaScript::FloorState *BuildingLuaScript::floorState(int level)
     }
     return nullptr;
 }
-
 const BuildingLuaScript::FloorState *BuildingLuaScript::floorState(int level) const
 {
     for (const FloorState *state : mFloors) {
@@ -155,24 +135,20 @@ const BuildingLuaScript::FloorState *BuildingLuaScript::floorState(int level) co
     }
     return nullptr;
 }
-
 int BuildingLuaScript::roomIndex(Room *room) const
 {
     return room ? mDocument->building()->rooms().indexOf(room) : -1;
 }
-
 BuildingObject *BuildingLuaScript::objectAt(FloorState *state, int index) const
 {
     return state && index >= 0 && index < state->objects.size()
             ? state->objects.at(index) : nullptr;
 }
-
 QPoint BuildingLuaScript::objectPosition(BuildingObject *object) const
 {
     return mMovedObjects.contains(object)
             ? mMovedObjects.value(object) : object->pos();
 }
-
 QString BuildingLuaScript::objectType(BuildingObject *object) const
 {
     if (object->asDoor()) return QStringLiteral("Door");
@@ -183,7 +159,6 @@ QString BuildingLuaScript::objectType(BuildingObject *object) const
     if (object->asWall()) return QStringLiteral("Wall");
     return QStringLiteral("Object");
 }
-
 FloorTileGrid *BuildingLuaScript::userTiles(FloorState *state,
                                             const QString &layerName,
                                             bool create)
@@ -198,24 +173,20 @@ FloorTileGrid *BuildingLuaScript::userTiles(FloorState *state,
     }
     return grid;
 }
-
 BuildingLuaScript *BuildingLuaScript::fromLua(lua_State *state)
 {
     return static_cast<BuildingLuaScript *>(
                 lua_touserdata(state, lua_upvalueindex(1)));
 }
-
 int BuildingLuaScript::argumentBase(lua_State *state)
 {
     return lua_istable(state, 1) ? 2 : 1;
 }
-
 void BuildingLuaScript::registerApi(lua_State *state)
 {
     lua_newtable(state);
     lua_pushinteger(state, 3);
     lua_setfield(state, -2, "apiVersion");
-
     setFunction(state, "width", luaWidth, this);
     setFunction(state, "height", luaHeight, this);
     setFunction(state, "floorCount", luaFloorCount, this);
@@ -258,9 +229,7 @@ void BuildingLuaScript::registerApi(lua_State *state)
     setFunction(state, "clearRoomSelection", luaClearRoomSelection, this);
     setFunction(state, "setTileSelection", luaSetTileSelection, this);
     setFunction(state, "clearTileSelection", luaClearTileSelection, this);
-
     lua_setglobal(state, "building");
-
     lua_newtable(state);
     lua_pushinteger(state, 1);
     lua_setfield(state, -2, "apiVersion");
@@ -268,7 +237,6 @@ void BuildingLuaScript::registerApi(lua_State *state)
     setFunction(state, "invoke", luaInvoke, this);
     lua_setglobal(state, "app");
 }
-
 bool BuildingLuaScript::run(const QString &fileName, QString *error)
 {
     lua_State *state = luaL_newstate();
@@ -277,18 +245,15 @@ bool BuildingLuaScript::run(const QString &fileName, QString *error)
             *error = QObject::tr("Lua could not allocate a new state.");
         return false;
     }
-
     luaL_openlibs(state);
     registerApi(state);
     pushString(state, QFileInfo(fileName).absolutePath());
     lua_setglobal(state, "scriptDirectory");
-
     PROGRESS progress(QObject::tr("Running BuildingEd Lua script: %1")
                       .arg(QFileInfo(fileName).fileName()),
                       LuaConsole::instance(), true);
     QElapsedTimer elapsed;
     elapsed.start();
-
     const QByteArray nativeFileName = QFile::encodeName(fileName);
     int status = luaL_loadfile(state, nativeFileName.constData());
     if (status == LUA_OK) {
@@ -300,7 +265,6 @@ bool BuildingLuaScript::run(const QString &fileName, QString *error)
         lua_sethook(state, nullptr, 0, 0);
         lua_remove(state, base);
     }
-
     if (status != LUA_OK) {
         const char *message = lua_tostring(state, -1);
         QString text = QString::fromUtf8(message ? message : "");
@@ -310,7 +274,6 @@ bool BuildingLuaScript::run(const QString &fileName, QString *error)
             *error = text;
         LuaConsole::instance()->write(text, Qt::red);
     }
-
     const QString result = progress.wasCanceled()
             ? QObject::tr("---------- BuildingEd script cancelled after %1s ----------")
             : QObject::tr("---------- BuildingEd script completed in %1s ----------");
@@ -318,7 +281,6 @@ bool BuildingLuaScript::run(const QString &fileName, QString *error)
     lua_close(state);
     return status == LUA_OK;
 }
-
 bool BuildingLuaScript::applyChanges(const QString &undoText)
 {
     int changeCount = 0;
@@ -339,11 +301,9 @@ bool BuildingLuaScript::applyChanges(const QString &undoText)
     changeCount += mTileSelectionChanged ? 1 : 0;
     if (!changeCount)
         return false;
-
     QUndoStack *stack = mDocument->undoStack();
     stack->beginMacro(undoText.isEmpty()
                       ? QObject::tr("BuildingEd Lua Script") : undoText);
-
     for (FloorState *state : mFloors) {
         const QVector<QVector<Room *> > &live = state->floor->grid();
         for (int x = 0; x < state->rooms.size(); ++x) {
@@ -355,7 +315,6 @@ bool BuildingLuaScript::applyChanges(const QString &undoText)
                 }
             }
         }
-
         for (auto it = state->changedUserTiles.constBegin();
              it != state->changedUserTiles.constEnd(); ++it) {
             const QRegion region = it.value();
@@ -367,19 +326,16 @@ bool BuildingLuaScript::applyChanges(const QString &undoText)
                             bounds.topLeft(), patch, "BuildingEd Lua Script"));
         }
     }
-
     for (auto it = mMovedObjects.constBegin(); it != mMovedObjects.constEnd(); ++it) {
         if (!mRemovedObjects.contains(it.key()) && it.key()->pos() != it.value())
             stack->push(new MoveObject(mDocument, it.key(), it.value()));
     }
-
     for (BuildingObject *object : mRemovedObjects) {
         BuildingFloor *floor = object->floor();
         const int index = floor->indexOf(object);
         if (index >= 0)
             stack->push(new RemoveObject(mDocument, floor, index));
     }
-
     for (FloorState *state : mFloors) {
         for (BuildingObject *object : state->objects) {
             if (mAddedObjects.contains(object)) {
@@ -390,36 +346,30 @@ bool BuildingLuaScript::applyChanges(const QString &undoText)
             }
         }
     }
-
     if (mPropertiesChanged)
         stack->push(new ChangeBuildingKeyValues(mDocument, mProperties));
     if (mRoomSelectionChanged)
         stack->push(new ChangeRoomSelection(mDocument, mRoomSelection));
     if (mTileSelectionChanged)
         stack->push(new ChangeTileSelection(mDocument, mTileSelection));
-
     stack->endMacro();
     return true;
 }
-
 int BuildingLuaScript::luaWidth(lua_State *state)
 {
     lua_pushinteger(state, fromLua(state)->mDocument->building()->width());
     return 1;
 }
-
 int BuildingLuaScript::luaHeight(lua_State *state)
 {
     lua_pushinteger(state, fromLua(state)->mDocument->building()->height());
     return 1;
 }
-
 int BuildingLuaScript::luaFloorCount(lua_State *state)
 {
     lua_pushinteger(state, fromLua(state)->mFloors.size());
     return 1;
 }
-
 int BuildingLuaScript::luaFloorLevel(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -430,19 +380,16 @@ int BuildingLuaScript::luaFloorLevel(lua_State *state)
     lua_pushinteger(state, self->mFloors.at(index)->floor->level());
     return 1;
 }
-
 int BuildingLuaScript::luaCurrentLevel(lua_State *state)
 {
     lua_pushinteger(state, fromLua(state)->mDocument->currentLevel());
     return 1;
 }
-
 int BuildingLuaScript::luaRoomCount(lua_State *state)
 {
     lua_pushinteger(state, fromLua(state)->mDocument->building()->roomCount());
     return 1;
 }
-
 int BuildingLuaScript::luaRoomName(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -452,7 +399,6 @@ int BuildingLuaScript::luaRoomName(lua_State *state)
     pushString(state, self->mDocument->building()->room(index)->Name);
     return 1;
 }
-
 int BuildingLuaScript::luaRoomInternalName(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -462,7 +408,6 @@ int BuildingLuaScript::luaRoomInternalName(lua_State *state)
     pushString(state, self->mDocument->building()->room(index)->internalName);
     return 1;
 }
-
 int BuildingLuaScript::luaRoomAt(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -475,7 +420,6 @@ int BuildingLuaScript::luaRoomAt(lua_State *state)
     lua_pushinteger(state, self->roomIndex(floor->rooms[x][y]));
     return 1;
 }
-
 int BuildingLuaScript::luaSetRoom(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -492,7 +436,6 @@ int BuildingLuaScript::luaSetRoom(lua_State *state)
             ? nullptr : self->mDocument->building()->room(roomIndex);
     return 0;
 }
-
 int BuildingLuaScript::luaFillRoom(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -515,7 +458,6 @@ int BuildingLuaScript::luaFillRoom(lua_State *state)
             floor->rooms[x][y] = room;
     return 0;
 }
-
 int BuildingLuaScript::luaObjectCount(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -526,7 +468,6 @@ int BuildingLuaScript::luaObjectCount(lua_State *state)
     lua_pushinteger(state, floor->objects.size());
     return 1;
 }
-
 int BuildingLuaScript::luaObjectType(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -539,7 +480,6 @@ int BuildingLuaScript::luaObjectType(lua_State *state)
     pushString(state, self->objectType(object));
     return 1;
 }
-
 int BuildingLuaScript::luaObjectX(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -552,7 +492,6 @@ int BuildingLuaScript::luaObjectX(lua_State *state)
     lua_pushinteger(state, self->objectPosition(object).x());
     return 1;
 }
-
 int BuildingLuaScript::luaObjectY(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -565,7 +504,6 @@ int BuildingLuaScript::luaObjectY(lua_State *state)
     lua_pushinteger(state, self->objectPosition(object).y());
     return 1;
 }
-
 int BuildingLuaScript::luaObjectDirection(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -578,7 +516,6 @@ int BuildingLuaScript::luaObjectDirection(lua_State *state)
     pushString(state, object->dirString());
     return 1;
 }
-
 int BuildingLuaScript::luaMoveObject(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -599,7 +536,6 @@ int BuildingLuaScript::luaMoveObject(lua_State *state)
     self->mMovedObjects.insert(object, target);
     return 0;
 }
-
 int BuildingLuaScript::luaRemoveObject(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -618,7 +554,6 @@ int BuildingLuaScript::luaRemoveObject(lua_State *state)
     self->mRemovedObjects.insert(object);
     return 0;
 }
-
 int BuildingLuaScript::luaFurnitureGroupNames(lua_State *state)
 {
     const QList<FurnitureGroup *> groups = FurnitureGroups::instance()->groups();
@@ -629,7 +564,6 @@ int BuildingLuaScript::luaFurnitureGroupNames(lua_State *state)
     }
     return 1;
 }
-
 int BuildingLuaScript::luaFurnitureCount(lua_State *state)
 {
     const int base = argumentBase(state);
@@ -639,14 +573,12 @@ int BuildingLuaScript::luaFurnitureCount(lua_State *state)
     lua_pushinteger(state, group->mTiles.size());
     return 1;
 }
-
 int BuildingLuaScript::luaFurnitureOrientations(lua_State *state)
 {
     const int base = argumentBase(state);
     FurnitureTiles *tiles = furnitureDefinition(state, base, base + 1);
     if (!tiles)
         return luaL_error(state, "furniture group or item index not found");
-
     lua_newtable(state);
     int resultIndex = 1;
     for (int orient = 0; orient < FurnitureTile::OrientCount; ++orient) {
@@ -658,7 +590,6 @@ int BuildingLuaScript::luaFurnitureOrientations(lua_State *state)
     }
     return 1;
 }
-
 int BuildingLuaScript::luaFurnitureSize(lua_State *state)
 {
     const int base = argumentBase(state);
@@ -674,7 +605,6 @@ int BuildingLuaScript::luaFurnitureSize(lua_State *state)
     lua_pushinteger(state, tile->resolved()->height());
     return 2;
 }
-
 int BuildingLuaScript::luaFurnitureTileAt(lua_State *state)
 {
     const int base = argumentBase(state);
@@ -694,7 +624,6 @@ int BuildingLuaScript::luaFurnitureTileAt(lua_State *state)
                ? buildingTile->name() : QString());
     return 1;
 }
-
 int BuildingLuaScript::luaFindFurniture(lua_State *state)
 {
     const int base = argumentBase(state);
@@ -702,7 +631,6 @@ int BuildingLuaScript::luaFindFurniture(lua_State *state)
                 luaString(state, base));
     if (!BuildingTilesMgr::legalTileName(wanted))
         return luaL_error(state, "invalid tile name");
-
     const QList<FurnitureGroup *> groups = FurnitureGroups::instance()->groups();
     lua_newtable(state);
     int matchIndex = 1;
@@ -746,7 +674,6 @@ int BuildingLuaScript::luaFindFurniture(lua_State *state)
     }
     return 1;
 }
-
 int BuildingLuaScript::luaPlaceFurniture(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -761,24 +688,20 @@ int BuildingLuaScript::luaPlaceFurniture(lua_State *state)
         return luaL_error(state, "invalid floor level");
     if (!tiles || orient == FurnitureTile::FurnitureUnknown)
         return luaL_error(state, "furniture definition or orientation not found");
-
     FurnitureTile *tile = tiles->tile(orient);
     if (!tile || !tile->resolved() || tile->resolved()->isEmpty())
         return luaL_error(state, "furniture orientation has no tiles");
-
     FurnitureObject *object = new FurnitureObject(floor->floor, x, y);
     object->setFurnitureTile(tile);
     if (!object->isValidPos()) {
         delete object;
         return luaL_error(state, "furniture position is outside the floor");
     }
-
     floor->objects.append(object);
     self->mAddedObjects.insert(object);
     lua_pushinteger(state, floor->objects.size() - 1);
     return 1;
 }
-
 int BuildingLuaScript::luaUserLayerNames(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -794,7 +717,6 @@ int BuildingLuaScript::luaUserLayerNames(lua_State *state)
     }
     return 1;
 }
-
 int BuildingLuaScript::luaUserTileAt(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -810,7 +732,6 @@ int BuildingLuaScript::luaUserTileAt(lua_State *state)
                ? grid->at(x, y) : QString());
     return 1;
 }
-
 int BuildingLuaScript::luaSetUserTile(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -828,12 +749,10 @@ int BuildingLuaScript::luaSetUserTile(lua_State *state)
     floor->changedUserTiles[layerName] += QRect(x, y, 1, 1);
     return 0;
 }
-
 int BuildingLuaScript::luaTileAt(lua_State *state)
 {
     return luaUserTileAt(state);
 }
-
 int BuildingLuaScript::luaPlaceTile(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -850,14 +769,12 @@ int BuildingLuaScript::luaPlaceTile(lua_State *state)
             || !BuildingTilesMgr::legalTileName(tileName)
             || !BuildingTilesMgr::instance()->tileFor(tileName))
         return luaL_error(state, "unknown or invalid tile name");
-
     FloorTileGrid *grid = self->userTiles(floor, layerName, true);
     grid->replace(x, y, tileName);
     floor->changedUserTiles[layerName] += QRect(x, y, 1, 1);
     lua_pushboolean(state, 1);
     return 1;
 }
-
 int BuildingLuaScript::luaDeleteTile(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -869,7 +786,6 @@ int BuildingLuaScript::luaDeleteTile(lua_State *state)
     if (!floor || layerName.isEmpty()
             || !floor->floor->contains(x, y, 1, 1))
         return luaL_error(state, "invalid floor, layer, or tile coordinate");
-
     FloorTileGrid *grid = self->userTiles(floor, layerName, false);
     if (!grid || !grid->contains(x, y) || grid->at(x, y).isEmpty()) {
         lua_pushboolean(state, 0);
@@ -887,7 +803,6 @@ int BuildingLuaScript::luaDeleteTile(lua_State *state)
     lua_pushboolean(state, 1);
     return 1;
 }
-
 int BuildingLuaScript::luaDeleteTilesByName(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -897,7 +812,6 @@ int BuildingLuaScript::luaDeleteTilesByName(lua_State *state)
     const QString tileName = luaString(state, base + 2);
     if (!floor || layerName.isEmpty() || tileName.isEmpty())
         return luaL_error(state, "invalid floor, layer, or tile name");
-
     FloorTileGrid *grid = self->userTiles(floor, layerName, false);
     int changed = 0;
     if (grid) {
@@ -914,7 +828,6 @@ int BuildingLuaScript::luaDeleteTilesByName(lua_State *state)
     lua_pushinteger(state, changed);
     return 1;
 }
-
 int BuildingLuaScript::luaReplaceTile(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -932,7 +845,6 @@ int BuildingLuaScript::luaReplaceTile(lua_State *state)
             || !BuildingTilesMgr::legalTileName(newTileName)
             || !BuildingTilesMgr::instance()->tileFor(newTileName))
         return luaL_error(state, "unknown or invalid replacement tile name");
-
     FloorTileGrid *grid = self->userTiles(floor, layerName, false);
     if (!grid || !grid->contains(x, y)
             || grid->at(x, y) != oldTileName) {
@@ -944,7 +856,6 @@ int BuildingLuaScript::luaReplaceTile(lua_State *state)
     lua_pushboolean(state, 1);
     return 1;
 }
-
 int BuildingLuaScript::luaReplaceTilesByName(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -959,7 +870,6 @@ int BuildingLuaScript::luaReplaceTilesByName(lua_State *state)
             || !BuildingTilesMgr::legalTileName(newTileName)
             || !BuildingTilesMgr::instance()->tileFor(newTileName))
         return luaL_error(state, "unknown or invalid replacement tile name");
-
     FloorTileGrid *grid = self->userTiles(floor, layerName, false);
     int changed = 0;
     if (grid) {
@@ -976,7 +886,6 @@ int BuildingLuaScript::luaReplaceTilesByName(lua_State *state)
     lua_pushinteger(state, changed);
     return 1;
 }
-
 int BuildingLuaScript::luaProperty(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -988,7 +897,6 @@ int BuildingLuaScript::luaProperty(lua_State *state)
     pushString(state, self->mProperties.value(key));
     return 1;
 }
-
 int BuildingLuaScript::luaPropertyNames(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -1001,7 +909,6 @@ int BuildingLuaScript::luaPropertyNames(lua_State *state)
     }
     return 1;
 }
-
 int BuildingLuaScript::luaSetProperty(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -1014,7 +921,6 @@ int BuildingLuaScript::luaSetProperty(lua_State *state)
     self->mPropertiesChanged = true;
     return 0;
 }
-
 int BuildingLuaScript::luaRemoveProperty(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -1023,7 +929,6 @@ int BuildingLuaScript::luaRemoveProperty(lua_State *state)
         self->mPropertiesChanged = true;
     return 0;
 }
-
 int BuildingLuaScript::luaSetRoomSelection(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -1036,7 +941,6 @@ int BuildingLuaScript::luaSetRoomSelection(lua_State *state)
     self->mRoomSelectionChanged = true;
     return 0;
 }
-
 int BuildingLuaScript::luaClearRoomSelection(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -1044,7 +948,6 @@ int BuildingLuaScript::luaClearRoomSelection(lua_State *state)
     self->mRoomSelectionChanged = true;
     return 0;
 }
-
 int BuildingLuaScript::luaSetTileSelection(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -1057,7 +960,6 @@ int BuildingLuaScript::luaSetTileSelection(lua_State *state)
     self->mTileSelectionChanged = true;
     return 0;
 }
-
 int BuildingLuaScript::luaClearTileSelection(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);
@@ -1065,7 +967,6 @@ int BuildingLuaScript::luaClearTileSelection(lua_State *state)
     self->mTileSelectionChanged = true;
     return 0;
 }
-
 int BuildingLuaScript::luaAvailableActions(lua_State *state)
 {
     static const char *const actions[] = {
@@ -1080,7 +981,6 @@ int BuildingLuaScript::luaAvailableActions(lua_State *state)
     }
     return 1;
 }
-
 int BuildingLuaScript::luaInvoke(lua_State *state)
 {
     BuildingLuaScript *self = fromLua(state);

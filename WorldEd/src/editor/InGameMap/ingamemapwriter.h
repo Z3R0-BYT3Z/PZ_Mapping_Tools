@@ -18,6 +18,9 @@
 #ifndef INGAMEMAPWRITER_H
 #define INGAMEMAPWRITER_H
 
+#include "ingamemapcell.h"
+
+#include <QList>
 #include <QString>
 
 class World;
@@ -36,6 +39,20 @@ enum class InGameMapFeatureScope
 bool inGameMapFeatureMatchesScope(
         const InGameMapFeature *feature,
         InGameMapFeatureScope scope);
+
+struct InGameMapExportFeature
+{
+    InGameMapFeature *feature;
+    InGameMapGeometry geometry;
+};
+
+bool fitInGameMapRendererBudget(
+        QList<InGameMapExportFeature> &features,
+        WorldCell *cell,
+        const QString &outputPath,
+        const QString &formatName,
+        int *repairedFeatures,
+        QString *error);
 
 class InGameMapWriter
 {

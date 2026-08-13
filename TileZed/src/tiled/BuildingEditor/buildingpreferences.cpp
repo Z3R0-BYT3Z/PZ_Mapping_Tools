@@ -36,6 +36,7 @@ static const char *KEY_SHOW_OBJECTS = "PreviewWindow/ShowObjects";
 static const char *KEY_HIGHLIGHT_UNLIT_ROOMS = "HighlightUnlitRooms";
 static const char *KEY_OPENGL = "OpenGL";
 static const char *KEY_LEVEL_ISO = "LevelIsomettric";
+static const char *KEY_AUTOSAVE_INTERVAL = "AutoSaveIntervalMinutes";
 
 BuildingPreferences *BuildingPreferences::mInstance = 0;
 
@@ -80,6 +81,11 @@ BuildingPreferences::BuildingPreferences(QObject *parent) :
                                  0.5).toReal();
     mUseOpenGL = mSettings.value(QLatin1String(KEY_OPENGL), false).toBool();
     mLevelIsometric = mSettings.value(QLatin1String(KEY_LEVEL_ISO), false).toBool();
+    mAutoSaveIntervalMinutes = mSettings.value(
+                QLatin1String(KEY_AUTOSAVE_INTERVAL), 5).toInt();
+    if (!QList<int>({0, 1, 5, 10, 20, 60}).contains(
+                mAutoSaveIntervalMinutes))
+        mAutoSaveIntervalMinutes = 5;
 }
 
 QString BuildingPreferences::configPath() const
@@ -207,4 +213,16 @@ void BuildingPreferences::setLevelIsometric(bool levels)
     mLevelIsometric = levels;
     mSettings.setValue(QLatin1String(KEY_LEVEL_ISO), mLevelIsometric);
     emit levelIsometricChanged(mLevelIsometric);
+}
+
+void BuildingPreferences::setAutoSaveIntervalMinutes(int minutes)
+{
+    const int normalized = QList<int>({0, 1, 5, 10, 20, 60}).contains(
+                minutes) ? minutes : 0;
+    if (mAutoSaveIntervalMinutes == normalized)
+        return;
+    mAutoSaveIntervalMinutes = normalized;
+    mSettings.setValue(QLatin1String(KEY_AUTOSAVE_INTERVAL),
+                       mAutoSaveIntervalMinutes);
+    emit autoSaveIntervalChanged(mAutoSaveIntervalMinutes);
 }

@@ -454,18 +454,15 @@ void BmpBrushTool::setBrushShape(BmpBrushTool::BrushShape shape)
 {
     if (shape == BrushShape::Custom && mCustomBrushMask.isEmpty())
         return;
-
     mBrushShape = shape;
     tilePositionChanged(tilePosition());
     emit brushChanged();
 }
-
 void BmpBrushTool::setCustomBrush(const QRegion &mask, const QSize &size,
                                   const QString &sourcePath)
 {
     if (mask.isEmpty() || !size.isValid())
         return;
-
     mCustomBrushMask = mask;
     mCustomBrushSize = size;
     mCustomBrushPath = sourcePath;
@@ -473,12 +470,10 @@ void BmpBrushTool::setCustomBrush(const QRegion &mask, const QSize &size,
     tilePositionChanged(tilePosition());
     emit brushChanged();
 }
-
 QRegion BmpBrushTool::regionFromBrushImage(const QImage &source)
 {
     if (source.isNull())
         return QRegion();
-
     const QImage image = source.convertToFormat(QImage::Format_ARGB32);
     QRegion mask;
     for (int y = 0; y < image.height(); ++y) {
@@ -579,9 +574,6 @@ void BmpBrushTool::tilePositionChanged(const QPoint &tilePos)
                                                 tilePos.x(), tilePos.y());
         QRegion strokeRegion;
         for (const QPoint &p : linePts) {
-            // The previous endpoint was already painted by the preceding
-            // event. Unite all newly crossed footprints so a large custom
-            // mask triggers only one biome redraw and one undo merge.
             if (p != mStampPos)
                 strokeRegion += brushRegionAt(p);
         }
@@ -697,7 +689,6 @@ QRegion BmpBrushTool::brushRegionAt(const QPoint &tilePos) const
         tilePos - QPoint(mBrushSize / 2, mBrushSize / 2),
         QSize(mBrushSize, mBrushSize)));
 }
-
 void BmpBrushTool::setBrushRegion(const QPoint &tilePos)
 {
     if (useBmpClipboard()) {
@@ -743,7 +734,6 @@ void BmpBrushTool::paint()
 
     paint(brushItem()->tileRegion());
 }
-
 void BmpBrushTool::paint(const QRegion &brushRegion)
 {
     if (!mErasing && mColor == qRgb(0, 0, 0))
@@ -876,7 +866,6 @@ void BmpEraserTool::paint()
 {
     paint(brushItem()->tileRegion());
 }
-
 void BmpEraserTool::paint(const QRegion &brushRegion)
 {
     QRegion tileRgn = brushRegion;

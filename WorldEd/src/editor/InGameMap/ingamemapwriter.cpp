@@ -27,6 +27,142 @@
 #include <QTemporaryFile>
 #include <QXmlStreamWriter>
 #include <QDebug>
+#include <QtMath>
+
+#include <limits>
+
+namespace {
+bool hasInGameMapProperty(InGameMapFeature *feature,
+                          const QString &propertyName)
+{
+    for (const InGameMapProperty &property : feature->mProperties) {
+        if (property.mKey == propertyName)
+            return true;
+    }
+    return false;
+}
+
+double distanceToSegmentSquared(const InGameMapPoint &point,
+                                const InGameMapPoint &start,
+                                const InGameMapPoint &end)
+{
+    const double dx = end.x - start.x;
+    const double dy = end.y - start.y;
+    if (qFuzzyIsNull(dx) && qFuzzyIsNull(dy)) {
+        const double px = point.x - start.x;
+        const double py = point.y - start.y;
+        return px * px + py * py;
+    }
+    const double lengthSquared = dx * dx + dy * dy;
+    const double t = qBound(0.0,
+            ((point.x - start.x) * dx +
+             (point.y - start.y) * dy) / lengthSquared,
+            1.0);
+    const double px = point.x - (start.x + t * dx);
+    const double py = point.y - (start.y + t * dy);
+    return px * px + py * py;
+}
+
+void simplifySection(const QVector<InGameMapPoint> &points,
+                     int first, int last,
+                     double toleranceSquared,
+                     QVector<bool> &keep)
+{
+    if (last <= first + 1)
+        return;
+    double farthestDistance = -1.0;
+    int farthestIndex = -1;
+    for (int index = first + 1; index < last; ++index) {
+        const double distance = distanceToSegmentSquared(
+                    points.at(index), points.at(first), points.at(last));
+        if (distance > farthestDistance) {
+            farthestDistance = distance;
+            farthestIndex = index;
+        }
+    }
+    if (farthestIndex < 0 || farthestDistance <= toleranceSquared)
+        return;
+    keep[farthestIndex] = true;
+    simplifySection(points, first, farthestIndex,
+                    toleranceSquared, keep);
+    simplifySection(points, farthestIndex, last,
+                    toleranceSquared, keep);
+}
+
+InGameMapCoordinates simplifyClosedCoordinates(
+        const InGameMapCoordinates &source, double tolerance)
+{
+    if (source.size() <= 3 || tolerance <= 0.0)
+        return source;
+    int opposite = 1;
+    double farthestDistance = -1.0;
+    for (int index = 1; index < source.size(); ++index) {
+        const double dx = source.at(index).x - source.first().x;
+        const double dy = source.at(index).y - source.first().y;
+        const double distance = dx * dx + dy * dy;
+        if (distance > farthestDistance) {
+            farthestDistance = distance;
+            opposite = index;
+        }
+    }
+    if (opposite <= 0 || opposite >= source.size())
+        return source;
+    QVector<InGameMapPoint> unwrapped;
+    unwrapped.reserve(source.size() + 1);
+    for (int index = 0; index < source.size(); ++index)
+        unwrapped += source.at(index);
+    unwrapped += source.first();
+    QVector<bool> keep(unwrapped.size(), false);
+    keep[0] = true;
+    keep[opposite] = true;
+    keep[unwrapped.size() - 1] = true;
+    const double toleranceSquared = tolerance * tolerance;
+    simplifySection(unwrapped, 0, opposite,
+                    toleranceSquared, keep);
+    simplifySection(unwrapped, opposite, unwrapped.size() - 1,
+                    toleranceSquared, keep);
+    InGameMapCoordinates result;
+    for (int index = 0; index < unwrapped.size() - 1; ++index) {
+        if (keep.at(index))
+            result += unwrapped.at(index);
+    }
+    return result.size() >= 3 ? result : source;
+}
+
+int rendererIndexEstimate(const QList<InGameMapExportFeature> &features)
+{
+    qint64 estimate = 0;
+    for (const InGameMapExportFeature &item : features) {
+        if (!item.geometry.isPolygon())
+            continue;
+        int pointCount = 0;
+        for (const InGameMapCoordinates &coordinates :
+             item.geometry.mCoordinates)
+            pointCount += coordinates.size();
+        const int holeCount = qMax(0,
+                item.geometry.mCoordinates.size() - 1);
+        const qint64 baseTriangleIndices = qMax<qint64>(
+                    3, qint64(3) *
+                    (pointCount + holeCount * 2 - 2));
+        estimate += baseTriangleIndices *
+                (hasInGameMapProperty(item.feature,
+                                      QStringLiteral("highway")) ? 7 : 1);
+    }
+    return int(qMin<qint64>(estimate,
+                std::numeric_limits<int>::max()));
+}
+
+int exportPointCount(const QList<InGameMapExportFeature> &features)
+{
+    int count = 0;
+    for (const InGameMapExportFeature &item : features) {
+        for (const InGameMapCoordinates &coordinates :
+             item.geometry.mCoordinates)
+            count += coordinates.size();
+    }
+    return count;
+}
+}
 
 class InGameMapWriterPrivate
 {
@@ -51,6 +187,7 @@ public:
 
     void writeWorld(World *world, QIODevice *device, const QString &absDirPath)
     {
+        mError.clear();
         mMapDir = QDir(absDirPath);
         mWorld = world;
         mWrittenFeatures = 0;
@@ -84,6 +221,10 @@ public:
             for (int x = 0; x < world->width(); x++) {
                 WorldCell *cell = world->cellAt(x, y);
                 writeCell(w, cell);
+                if (!mError.isEmpty()) {
+                    w.writeEndElement();
+                    return;
+                }
             }
         }
 
@@ -92,16 +233,11 @@ public:
 
     void writeCell(QXmlStreamWriter &w, WorldCell *cell)
     {
-        struct ExportFeature {
-            InGameMapFeature *feature;
-            InGameMapGeometry geometry;
-        };
-        QList<ExportFeature> exportFeatures;
-        int cellPointCount = 0;
+        QList<InGameMapExportFeature> exportFeatures;
         for (InGameMapFeature *feature : std::as_const(cell->inGameMap().mFeatures)) {
             if (!inGameMapFeatureMatchesScope(feature, mFeatureScope))
                 continue;
-            ExportFeature item{feature, InGameMapGeometry()};
+            InGameMapExportFeature item{feature, InGameMapGeometry()};
             QStringList diagnostics;
             if (!sanitizeInGameMapGeometryForExport(feature->mGeometry,
                                                     item.geometry,
@@ -126,18 +262,13 @@ public:
                            .arg(propertySummary(feature))
                            .arg(diagnostics.join(QStringLiteral("; ")));
             }
-            for (const InGameMapCoordinates &coordinates : std::as_const(item.geometry.mCoordinates))
-                cellPointCount += coordinates.size();
             exportFeatures += item;
         }
 
-        if (cellPointCount > 30000) {
-            qWarning().noquote()
-                    << QStringLiteral("InGameMap XML complexity warning: output=\"%1\" cell=%2,%3 points=%4; the game renderer uses signed 16-bit geometry indices")
-                       .arg(mOutputPath)
-                       .arg(cell->x()).arg(cell->y())
-                       .arg(cellPointCount);
-        }
+        if (!fitInGameMapRendererBudget(
+                    exportFeatures, cell, mOutputPath,
+                    QStringLiteral("XML"), &mRepairedFeatures, &mError))
+            return;
 
         if (exportFeatures.isEmpty())
             return;
@@ -148,7 +279,7 @@ public:
         w.writeAttribute(QLatin1String("x"), QString::number(worldOrigin.x() + cell->x()));
         w.writeAttribute(QLatin1String("y"), QString::number(worldOrigin.y() + cell->y()));
 
-        for (const ExportFeature &item : std::as_const(exportFeatures)) {
+        for (const InGameMapExportFeature &item : std::as_const(exportFeatures)) {
             writeFeature(w, item.feature, item.geometry);
             ++mWrittenFeatures;
         }
@@ -220,6 +351,91 @@ bool inGameMapFeatureMatchesScope(
             : !forest;
 }
 
+bool fitInGameMapRendererBudget(
+        QList<InGameMapExportFeature> &features,
+        WorldCell *cell,
+        const QString &outputPath,
+        const QString &formatName,
+        int *repairedFeatures,
+        QString *error)
+{
+    static const int safeIndexBudget = 24000;
+    static const int safePointBufferShorts = 28000;
+    const int originalPoints = exportPointCount(features);
+    const int originalEstimate = rendererIndexEstimate(features);
+    if (originalPoints * 2 <= safePointBufferShorts &&
+            originalEstimate <= safeIndexBudget)
+        return true;
+    int changedFeatures = 0;
+    double usedTolerance = 0.0;
+    const QVector<double> tolerances =
+            {1.0, 2.0, 3.0, 4.0, 6.0, 8.0,
+             12.0, 16.0, 24.0, 32.0, 48.0, 64.0};
+    for (double tolerance : tolerances) {
+        changedFeatures = 0;
+        for (InGameMapExportFeature &item : features) {
+            if (!item.geometry.isPolygon() ||
+                    !hasInGameMapProperty(item.feature,
+                                          QStringLiteral("highway")))
+                continue;
+            InGameMapGeometry simplified = item.geometry;
+            for (InGameMapCoordinates &coordinates :
+                 simplified.mCoordinates) {
+                coordinates = simplifyClosedCoordinates(
+                            coordinates, tolerance);
+            }
+            InGameMapGeometry sanitized;
+            QStringList diagnostics;
+            if (!sanitizeInGameMapGeometryForExport(
+                        simplified, sanitized, diagnostics))
+                continue;
+            if (rendererIndexEstimate(
+                        {InGameMapExportFeature{
+                             item.feature, sanitized}}) <
+                    rendererIndexEstimate({item})) {
+                item.geometry = sanitized;
+                ++changedFeatures;
+            }
+        }
+        usedTolerance = tolerance;
+        if (exportPointCount(features) * 2 <= safePointBufferShorts &&
+                rendererIndexEstimate(features) <= safeIndexBudget)
+            break;
+    }
+    const int finalPoints = exportPointCount(features);
+    const int finalEstimate = rendererIndexEstimate(features);
+    const QPoint worldCoordinates =
+            cell->world()->getGenerateLotsSettings().worldOrigin +
+            QPoint(cell->x(), cell->y());
+    if (changedFeatures > 0) {
+        if (repairedFeatures)
+            *repairedFeatures += changedFeatures;
+        qWarning().noquote()
+                << QStringLiteral("InGameMap %1 simplified renderer-heavy highways: output=\"%2\" cell=%3,%4 tolerance=%5 points=%6->%7 estimated-indices=%8->%9 changed-features=%10")
+                   .arg(formatName, outputPath)
+                   .arg(worldCoordinates.x()).arg(worldCoordinates.y())
+                   .arg(usedTolerance)
+                   .arg(originalPoints).arg(finalPoints)
+                   .arg(originalEstimate).arg(finalEstimate)
+                   .arg(changedFeatures);
+    }
+    if (finalPoints * 2 > safePointBufferShorts ||
+            finalEstimate > safeIndexBudget) {
+        if (error) {
+            *error = QCoreApplication::translate(
+                        "InGameMapWriter",
+                        "InGameMap cell %1,%2 is too complex for the "
+                        "game's 16-bit world-map renderer after safe "
+                        "simplification (%3 points, estimated %4 indices).")
+                    .arg(worldCoordinates.x()).arg(worldCoordinates.y())
+                    .arg(finalPoints).arg(finalEstimate);
+            qCritical().noquote() << *error;
+        }
+        return false;
+    }
+    return true;
+}
+
 InGameMapWriter::InGameMapWriter()
     : d(new InGameMapWriterPrivate)
 {
@@ -238,6 +454,9 @@ bool InGameMapWriter::writeWorld(World *world, const QString &filePath)
         return false;
 
     d->writeWorld(world, &tempFile, QFileInfo(filePath).absolutePath());
+
+    if (!d->mError.isEmpty())
+        return false;
 
     if (tempFile.error() != QFile::NoError) {
         d->mError = tempFile.errorString();

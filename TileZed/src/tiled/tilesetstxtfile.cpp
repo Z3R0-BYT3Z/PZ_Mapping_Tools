@@ -97,7 +97,7 @@ bool TilesetsTxtFile::read(const QString &path)
                 return false;
             }
 //            tilesetFileName += QLatin1String(".png");
-            QFileInfo finfo(cleanFileName); // relative to Tiles directory
+            QFileInfo finfo(cleanFileName);
             QString tilesetName = finfo.completeBaseName();
             const QString tilesetKey = tilesetName.toCaseFolded();
             if (tilesetNameSet.contains(tilesetKey)) {
@@ -302,7 +302,6 @@ void TilesetsTxtFile::Tileset::fromTileset(Tiled::Tileset *tileset)
 
     if (mColumns <= 0)
         return;
-
     for (int i = 0; i < tileset->tileCount(); i++) {
         Tiled::Tile *tile = tileset->tileAt(i);
         QString metaEnum = Tiled::Internal::TileMetaInfoMgr::instance()->tileEnum(tile);

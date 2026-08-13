@@ -43,7 +43,6 @@ TileDefFile::~TileDefFile()
 }
 
 static const int MAX_TILEDEF_STRING_LENGTH = 1024 * 1024;
-
 static bool ReadString(QDataStream &in, QString *value)
 {
     value->clear();
@@ -66,7 +65,6 @@ static bool ReadString(QDataStream &in, QString *value)
 static const int MAX_RECOVERABLE_TILESETS = 8192;
 static const qint64 MAX_RECOVERABLE_TOTAL_TILES = 8 * 1024 * 1024;
 static const qint64 MAX_RECOVERABLE_TILE_SLOTS = 1024 * 1024;
-
 bool TileDefFile::read(const QString &fileName)
 {
     mError.clear();
@@ -303,7 +301,6 @@ bool TileDefFile::read(const QString &fileName)
         mTilesetByName.clear();
         return false;
     }
-
     mFileName = fileName;
 
     return true;
@@ -320,12 +317,10 @@ bool TileDefFile::write(const QString &fileName)
 {
     return write(fileName, inferredTargetFormat(fileName));
 }
-
 bool TileDefFile::write(const QString &fileName, TargetFormat target)
 {
     return writeTilesets(fileName, mTilesets, target);
 }
-
 bool TileDefFile::writeTilesets(
         const QString &fileName,
         const QList<TileDefTileset *> &tilesets,
@@ -340,7 +335,6 @@ bool TileDefFile::writeTilesets(
                 .arg(fileName).arg(tilesets.size()).arg(maxTilesets);
         return false;
     }
-
     QSet<int> usedIDs;
     for (TileDefTileset *tileset : tilesets) {
         const int id = idOverrides.value(tileset->mName, tileset->mID);
@@ -365,7 +359,6 @@ bool TileDefFile::writeTilesets(
             return false;
         }
     }
-
     QSaveFile file(fileName);
     if (!file.open(QIODevice::WriteOnly)) {
         mError = tr("Error opening file for writing.\n%1").arg(fileName);
@@ -404,7 +397,6 @@ bool TileDefFile::writeTilesets(
     }
     return true;
 }
-
 TileDefFile::TargetFormat TileDefFile::inferredTargetFormat(
         const QString &fileName)
 {
@@ -414,21 +406,18 @@ TileDefFile::TargetFormat TileDefFile::inferredTargetFormat(
             ? BaseGameFormat
             : ModFormat;
 }
-
 int TileDefFile::maximumTilesets(TargetFormat target)
 {
     return target == BaseGameFormat
             ? MAX_TILESET_ID_GAME
             : MAX_TILESET_ID_MODS;
 }
-
 int TileDefFile::maximumTilesPerTileset(TargetFormat target)
 {
     return target == BaseGameFormat
             ? MAX_TILES_PER_TILESET_GAME
             : MAX_TILES_PER_TILESET_MODS;
 }
-
 bool TileDefFile::validate(TargetFormat target, QString *error) const
 {
     QStringList problems;
@@ -438,7 +427,6 @@ bool TileDefFile::validate(TargetFormat target, QString *error) const
         problems += tr("%1 tilesets are present; the limit is %2.")
                 .arg(mTilesets.size()).arg(maxTilesets);
     }
-
     QSet<int> usedIDs;
     for (TileDefTileset *tileset : mTilesets) {
         if (tileset->mID < 1 || tileset->mID > maxTilesets) {
@@ -462,12 +450,10 @@ bool TileDefFile::validate(TargetFormat target, QString *error) const
             break;
         }
     }
-
     if (error)
         *error = problems.join(QLatin1Char('\n'));
     return problems.isEmpty();
 }
-
 QStringList TileDefFile::modSeriesFileNames(const QString &fileName) const
 {
     const int partCount = qMax(
@@ -475,7 +461,6 @@ QStringList TileDefFile::modSeriesFileNames(const QString &fileName) const
                 / MAX_TILESET_ID_MODS);
     if (partCount == 1)
         return QStringList() << fileName;
-
     const QFileInfo info(fileName);
     const QDir directory = info.absoluteDir();
     QString baseName = info.completeBaseName();
@@ -489,13 +474,11 @@ QStringList TileDefFile::modSeriesFileNames(const QString &fileName) const
     }
     return result;
 }
-
 bool TileDefFile::writeModSeries(const QString &fileName,
                                  QStringList *writtenFiles)
 {
     if (writtenFiles)
         writtenFiles->clear();
-
     for (TileDefTileset *tileset : std::as_const(mTilesets)) {
         if (tileset->mTiles.size() > MAX_TILES_PER_TILESET_MODS) {
             mError = tr("Tileset \"%1\" contains %2 tiles. Splitting a "
@@ -508,7 +491,6 @@ bool TileDefFile::writeModSeries(const QString &fileName,
             return false;
         }
     }
-
     const QStringList outputNames = modSeriesFileNames(fileName);
     for (int part = 0; part < outputNames.size(); ++part) {
         const int first = part * MAX_TILESET_ID_MODS;
@@ -519,11 +501,9 @@ bool TileDefFile::writeModSeries(const QString &fileName,
         QMap<QString,int> ids;
         for (int index = 0; index < subset.size(); ++index)
             ids.insert(subset.at(index)->mName, index + 1);
-
         const QString outputName = outputNames.at(part);
         if (!writeTilesets(outputName, subset, ModFormat, ids))
             return false;
-
         TileDefTextFile textFile;
         if (!textFile.write(outputName + QLatin1String(".txt"),
                             subset, ids)) {
@@ -598,7 +578,6 @@ int TileDefFile::mergePropertiesFrom(const TileDefFile &overlay)
     }
     return mergedTiles;
 }
-
 QSet<int> TileDefFile::usedTilesetIDs() const
 {
     QSet<int> result;
@@ -792,7 +771,6 @@ void TileDefTileset::resize(int columns, int rows)
 {
     if (columns <= 0 || rows <= 0)
         return;
-
     if (columns == mColumns && rows == mRows)
         return;
 
@@ -951,7 +929,6 @@ bool TilePropertyMgr::readTxt()
 {
     QFileInfo info(txtPath());
 
-    // Create the portable settings directory if needed.
     QString configPath = Preferences::instance()->configPath();
     QDir dir(configPath);
     if (!dir.exists()) {
@@ -962,7 +939,6 @@ bool TilePropertyMgr::readTxt()
         }
     }
 
-    // Copy TileProperties.txt from the application directory to the settings
     // directory if needed.
     if (!info.exists()) {
         QString source = Preferences::instance()->appConfigPath(txtName());

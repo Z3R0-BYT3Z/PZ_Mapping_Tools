@@ -91,6 +91,7 @@ class ZLevelsDock;
 class MapsDock;
 class TileDefDialog;
 class TileLayersPanel;
+class TileSelectionScope;
 class WorldEdDock;
 #endif
 
@@ -301,6 +302,8 @@ private:
     void writeWindowSettings();
 public:
     void startSettingsAutoSave();
+    void updateDocumentAutoSaveTimer();
+    void autoSaveCurrentDocument();
 #ifdef ZOMBOID
     void readSettings();
 private:
@@ -341,6 +344,7 @@ private:
     TilesetDock *mTilesetDock;
 #ifdef ZOMBOID
     TileLayersPanel *mTileLayersPanel;
+    TileSelectionScope *mTileSelectionScope = nullptr;
     QSplitter *mMainSplitter;
     QMenu *mCurrentLevelMenu;
     QToolButton *mCurrentLevelButton;
@@ -390,7 +394,6 @@ private:
     QAction *mRedoAction = nullptr;
     QAction *mBMPBrushSizeMinus = nullptr;
     QAction *mBMPBrushSizePlus = nullptr;
-    QAction *mNightPreviewAction = nullptr;
     QAction *mDepthMapEditorAction = nullptr;
 #endif
 };

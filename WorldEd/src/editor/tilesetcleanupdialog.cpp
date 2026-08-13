@@ -6,15 +6,12 @@
  * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  */
-
 #include "tilesetcleanupdialog.h"
-
 #include "BuildingEditor/building.h"
 #include "BuildingEditor/buildingreader.h"
 #include "BuildingEditor/buildingwriter.h"
 #include "tilemetainfomgr.h"
 #include "tilesetmanager.h"
-
 #include "compression.h"
 #include "map.h"
 #include "mapobject.h"
@@ -23,7 +20,6 @@
 #include "tile.h"
 #include "tilelayer.h"
 #include "tileset.h"
-
 #include <QApplication>
 #include <QBuffer>
 #include <QCheckBox>
@@ -57,13 +53,10 @@
 #include <QVBoxLayout>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
-
 using namespace BuildingEditor;
 using namespace Tiled;
 using namespace Tiled::Internal;
-
 namespace {
-
 struct TmxDeclaration
 {
     QString name;
@@ -71,7 +64,6 @@ struct TmxDeclaration
     uint firstGid = 0;
     bool external = false;
 };
-
 struct TmxDecision
 {
     QString name;
@@ -81,7 +73,6 @@ struct TmxDecision
     bool clearReferences = false;
     QString replacementSource;
 };
-
 struct TmxDependency
 {
     QString source;
@@ -90,7 +81,6 @@ struct TmxDependency
     bool missing = false;
     bool outsideProject = false;
 };
-
 struct TbxStats
 {
     int tileEntries = 0;
@@ -99,35 +89,27 @@ struct TbxStats
     int version = 0;
     int nonCanonicalTileNames = 0;
 };
-
 QString normalizedTileName(const QString &tileName)
 {
     const int separator = tileName.lastIndexOf(QLatin1Char('_'));
     if (separator <= 0 || separator + 1 >= tileName.size())
         return tileName;
-
     bool ok = false;
     const int index = tileName.mid(separator + 1).toInt(&ok);
     if (!ok || index < 0)
         return tileName;
-
-    // BuildingEd deliberately pads these indices so the ID-backed tile list
-    // remains naturally sorted by tileset and numeric tile index.
     return tileName.left(separator + 1)
             + QStringLiteral("%1").arg(index, 3, 10, QLatin1Char('0'));
 }
-
 QString tilesetNameFromTile(const QString &tileName)
 {
     const int separator = tileName.lastIndexOf(QLatin1Char('_'));
     if (separator <= 0 || separator + 1 >= tileName.size())
         return QString();
-
     bool ok = false;
     tileName.mid(separator + 1).toInt(&ok);
     return ok ? tileName.left(separator) : QString();
 }
-
 QString referencedTilesetName(
         const QString &tileName,
         const QSet<QString> &declaredNames)
@@ -138,7 +120,6 @@ QString referencedTilesetName(
     return declaredNames.contains(tilesetName)
             ? tilesetName : QString();
 }
-
 void addTileReference(const QString &tileName,
                       const QSet<QString> &declaredNames,
                       QSet<QString> *names)
@@ -148,7 +129,6 @@ void addTileReference(const QString &tileName,
     if (!tilesetName.isEmpty())
         names->insert(tilesetName);
 }
-
 QSet<QString> protectedTmxTilesets(Map *map)
 {
     QSet<QString> names;
@@ -162,7 +142,6 @@ QSet<QString> protectedTmxTilesets(Map *map)
         if (tileset)
             names.insert(tileset->name());
     }
-
     const BmpSettings *settings = map->bmpSettings();
     for (const BmpAlias *alias : settings->aliases()) {
         for (const QString &tile : alias->tiles)
@@ -186,14 +165,164 @@ QSet<QString> protectedTmxTilesets(Map *map)
     }
     return names;
 }
-
 struct TmxReferenceCounts
 {
     QHash<QString, int> tileCells;
     QHash<QString, int> tileObjects;
     QHash<QString, int> rulesAndBlends;
 };
-
+struct RawTmxReferenceCounts
+{
+    QVector<int> tileCells;
+    QVector<int> tileObjects;
+};
+int declarationIndexForGid(
+        uint rawGid,
+        const QVector<TmxDeclaration> &declarations)
+{
+    const uint gid = rawGid & 0x1fffffffU;
+    if (gid == 0)
+        return -1;
+    for (int index = declarations.size() - 1; index >= 0; --index) {
+        if (declarations.at(index).firstGid != 0
+                && gid >= declarations.at(index).firstGid) {
+            return index;
+        }
+    }
+    return -1;
+}
+void countRawGid(
+        uint rawGid,
+        const QVector<TmxDeclaration> &declarations,
+        QVector<int> *counts)
+{
+    const int index = declarationIndexForGid(rawGid, declarations);
+    if (index >= 0 && index < counts->size())
+        ++(*counts)[index];
+}
+bool countEncodedGids(
+        const QString &text,
+        const QString &encoding,
+        const QString &compression,
+        const QVector<TmxDeclaration> &declarations,
+        QVector<int> *counts,
+        QString *error)
+{
+    if (encoding == QLatin1String("csv")) {
+        const QStringList gids = text.split(QLatin1Char(','));
+        for (const QString &token : gids) {
+            bool ok = false;
+            const uint gid = token.trimmed().toUInt(&ok);
+            if (!ok) {
+                if (error)
+                    *error = QStringLiteral("Could not parse a CSV tile GID.");
+                return false;
+            }
+            countRawGid(gid, declarations, counts);
+        }
+        return true;
+    }
+    if (encoding != QLatin1String("base64")) {
+        if (error) {
+            *error = QStringLiteral("Unsupported TMX layer encoding '%1'.")
+                    .arg(encoding);
+        }
+        return false;
+    }
+    QByteArray bytes = QByteArray::fromBase64(text.toLatin1());
+    if (compression == QLatin1String("gzip")
+            || compression == QLatin1String("zlib")) {
+        bytes = decompress(bytes);
+    } else if (!compression.isEmpty()) {
+        if (error) {
+            *error = QStringLiteral("Unsupported TMX layer compression '%1'.")
+                    .arg(compression);
+        }
+        return false;
+    }
+    if (bytes.isNull() || bytes.size() % 4 != 0) {
+        if (error)
+            *error = QStringLiteral("Could not decode TMX layer data.");
+        return false;
+    }
+    for (int offset = 0; offset < bytes.size(); offset += 4) {
+        const unsigned char *data =
+                reinterpret_cast<const unsigned char *>(
+                    bytes.constData() + offset);
+        const uint gid = data[0]
+                | (uint(data[1]) << 8)
+                | (uint(data[2]) << 16)
+                | (uint(data[3]) << 24);
+        countRawGid(gid, declarations, counts);
+    }
+    return true;
+}
+RawTmxReferenceCounts rawTmxReferenceCounts(
+        const QByteArray &input,
+        const QVector<TmxDeclaration> &declarations,
+        QString *error)
+{
+    RawTmxReferenceCounts counts;
+    counts.tileCells.resize(declarations.size());
+    counts.tileObjects.resize(declarations.size());
+    QXmlStreamReader xml(input);
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (!xml.isStartElement())
+            continue;
+        if (xml.name() == QLatin1String("object")) {
+            bool ok = false;
+            const uint gid = xml.attributes()
+                    .value(QLatin1String("gid")).toUInt(&ok);
+            if (ok)
+                countRawGid(gid, declarations, &counts.tileObjects);
+            continue;
+        }
+        if (xml.name() != QLatin1String("data"))
+            continue;
+        const QString encoding = xml.attributes()
+                .value(QLatin1String("encoding")).toString();
+        const QString compression = xml.attributes()
+                .value(QLatin1String("compression")).toString();
+        if (encoding.isEmpty()) {
+            while (!xml.atEnd()) {
+                xml.readNext();
+                if (xml.isEndElement()
+                        && xml.name() == QLatin1String("data")) {
+                    break;
+                }
+                if (!xml.isStartElement()
+                        || xml.name() != QLatin1String("tile")) {
+                    continue;
+                }
+                bool ok = false;
+                const uint gid = xml.attributes()
+                        .value(QLatin1String("gid")).toUInt(&ok);
+                if (ok)
+                    countRawGid(gid, declarations, &counts.tileCells);
+            }
+            continue;
+        }
+        QString encodedText;
+        while (!xml.atEnd()) {
+            xml.readNext();
+            if (xml.isEndElement()
+                    && xml.name() == QLatin1String("data")) {
+                break;
+            }
+            if (xml.isCharacters())
+                encodedText += xml.text().toString();
+        }
+        if (!countEncodedGids(
+                    encodedText, encoding, compression,
+                    declarations, &counts.tileCells, error)) {
+            return RawTmxReferenceCounts();
+        }
+    }
+    if (xml.hasError() && error)
+        *error = xml.errorString();
+    return counts;
+}
 void countConfiguredReference(
         const QString &tileName,
         const QSet<QString> &declaredNames,
@@ -204,7 +333,6 @@ void countConfiguredReference(
     if (!tilesetName.isEmpty())
         ++(*counts)[tilesetName];
 }
-
 TmxReferenceCounts tmxReferenceCounts(Map *map)
 {
     TmxReferenceCounts counts;
@@ -213,7 +341,6 @@ TmxReferenceCounts tmxReferenceCounts(Map *map)
         if (tileset)
             declaredNames.insert(tileset->name());
     }
-
     for (TileLayer *layer : map->tileLayers()) {
         if (!layer)
             continue;
@@ -234,7 +361,6 @@ TmxReferenceCounts tmxReferenceCounts(Map *map)
                 ++counts.tileObjects[tile->tileset()->name()];
         }
     }
-
     const BmpSettings *settings = map->bmpSettings();
     for (const BmpAlias *alias : settings->aliases()) {
         for (const QString &tile : alias->tiles) {
@@ -272,7 +398,6 @@ TmxReferenceCounts tmxReferenceCounts(Map *map)
     }
     return counts;
 }
-
 QVector<TmxDeclaration> readTmxDeclarations(const QByteArray &bytes,
                                             QString *error)
 {
@@ -281,7 +406,6 @@ QVector<TmxDeclaration> readTmxDeclarations(const QByteArray &bytes,
     int depth = 0;
     int current = -1;
     int tilesetDepth = -1;
-
     while (!xml.atEnd()) {
         xml.readNext();
         if (xml.isStartElement()) {
@@ -311,12 +435,10 @@ QVector<TmxDeclaration> readTmxDeclarations(const QByteArray &bytes,
             }
         }
     }
-
     if (xml.hasError() && error)
         *error = xml.errorString();
     return declarations;
 }
-
 bool pathIsInside(const QString &fileName, const QString &root)
 {
     const QString relative = QDir(root).relativeFilePath(fileName);
@@ -324,7 +446,6 @@ bool pathIsInside(const QString &fileName, const QString &root)
             && !relative.startsWith(QLatin1String("../"))
             && !relative.startsWith(QLatin1String("..\\"));
 }
-
 QVector<TmxDependency> readTmxDependencies(
         const QByteArray &bytes,
         const QString &mapDirectory,
@@ -339,14 +460,12 @@ QVector<TmxDependency> readTmxDependencies(
                 || xml.name() != QLatin1String("object")) {
             continue;
         }
-
         const QString source = xml.attributes()
                 .value(QLatin1String("type")).toString().trimmed();
         if (!source.endsWith(QLatin1String(".tbx"),
                              Qt::CaseInsensitive)) {
             continue;
         }
-
         TmxDependency dependency;
         dependency.source = source;
         const QString nativeSource =
@@ -371,12 +490,10 @@ QVector<TmxDependency> readTmxDependencies(
                         dependency.resolvedPath));
         dependencies += dependency;
     }
-
     if (xml.hasError() && error)
         *error = xml.errorString();
     return dependencies;
 }
-
 bool writeStartElement(QXmlStreamWriter *writer,
                        const QXmlStreamReader &reader,
                        const QString &replacementAttribute = QString(),
@@ -387,13 +504,11 @@ bool writeStartElement(QXmlStreamWriter *writer,
     else
         writer->writeStartElement(reader.namespaceUri().toString(),
                                   reader.name().toString());
-
     for (const QXmlStreamNamespaceDeclaration &declaration
          : reader.namespaceDeclarations()) {
         writer->writeNamespace(declaration.namespaceUri().toString(),
                                declaration.prefix().toString());
     }
-
     for (const QXmlStreamAttribute &attribute : reader.attributes()) {
         QString value = attribute.value().toString();
         if (!replacementAttribute.isEmpty()
@@ -409,7 +524,6 @@ bool writeStartElement(QXmlStreamWriter *writer,
     }
     return true;
 }
-
 bool gidBelongsToRemovedTileset(
         uint rawGid,
         const QVector<TmxDecision> &decisions)
@@ -417,7 +531,6 @@ bool gidBelongsToRemovedTileset(
     const uint gid = rawGid & 0x1fffffffU;
     if (gid == 0)
         return false;
-
     for (const TmxDecision &decision : decisions) {
         if (!decision.clearReferences || decision.firstGid == 0
                 || gid < decision.firstGid) {
@@ -430,7 +543,6 @@ bool gidBelongsToRemovedTileset(
     }
     return false;
 }
-
 bool transformEncodedLayerData(
         const QString &text,
         const QString &encoding,
@@ -460,7 +572,6 @@ bool transformEncodedLayerData(
         *output = gids.join(QLatin1Char(','));
         return true;
     }
-
     if (encoding != QLatin1String("base64")) {
         if (error) {
             *error = QStringLiteral(
@@ -470,7 +581,6 @@ bool transformEncodedLayerData(
         }
         return false;
     }
-
     QByteArray bytes = QByteArray::fromBase64(text.toLatin1());
     if (compression == QLatin1String("gzip")
             || compression == QLatin1String("zlib")) {
@@ -492,7 +602,6 @@ bool transformEncodedLayerData(
         }
         return false;
     }
-
     for (int offset = 0; offset < bytes.size(); offset += 4) {
         const unsigned char *data =
                 reinterpret_cast<const unsigned char *>(
@@ -509,7 +618,6 @@ bool transformEncodedLayerData(
         bytes[offset + 3] = 0;
         ++(*clearedCells);
     }
-
     if (compression == QLatin1String("gzip"))
         bytes = compress(bytes, Gzip);
     else if (compression == QLatin1String("zlib"))
@@ -525,7 +633,6 @@ bool transformEncodedLayerData(
     *output = QString::fromLatin1(bytes.toBase64());
     return true;
 }
-
 bool writeTransformedLayerData(
         QXmlStreamReader *xml,
         QXmlStreamWriter *writer,
@@ -538,7 +645,6 @@ bool writeTransformedLayerData(
     const QString compression = xml->attributes()
             .value(QLatin1String("compression")).toString();
     writeStartElement(writer, *xml);
-
     if (encoding.isEmpty()) {
         while (!xml->atEnd()) {
             xml->readNext();
@@ -592,12 +698,10 @@ bool writeTransformedLayerData(
             }
         }
     }
-
     if (error)
         *error = QStringLiteral("Unexpected end of TMX layer data.");
     return false;
 }
-
 bool transformTmx(const QByteArray &input,
                   const QVector<TmxDecision> &decisions,
                   const QHash<QString, QString> &tbxPathReplacements,
@@ -617,7 +721,6 @@ bool transformTmx(const QByteArray &input,
             break;
         }
     }
-
     int depth = 0;
     int decisionIndex = -1;
     int tilesetDepth = -1;
@@ -641,7 +744,6 @@ bool transformTmx(const QByteArray &input,
                 ++depth;
                 continue;
             }
-
             if (clearTileReferences
                     && xml.name() == QLatin1String("data")) {
                 if (!writeTransformedLayerData(
@@ -651,7 +753,6 @@ bool transformTmx(const QByteArray &input,
                 }
                 continue;
             }
-
             if (clearTileReferences
                     && xml.name() == QLatin1String("object")) {
                 bool ok = false;
@@ -664,7 +765,6 @@ bool transformTmx(const QByteArray &input,
                     continue;
                 }
             }
-
             QString replacementAttribute;
             QString replacementValue;
             if (decisionIndex >= 0 && decisionIndex < decisions.size()
@@ -696,7 +796,6 @@ bool transformTmx(const QByteArray &input,
             writer.writeCurrentToken(xml);
         }
     }
-
     if (xml.hasError()) {
         if (error)
             *error = xml.errorString();
@@ -710,7 +809,6 @@ bool transformTmx(const QByteArray &input,
     }
     return true;
 }
-
 TbxStats readTbxStats(const QByteArray &bytes, QString *error)
 {
     TbxStats stats;
@@ -718,7 +816,6 @@ TbxStats readTbxStats(const QByteArray &bytes, QString *error)
     bool inUserTiles = false;
     int userTilesDepth = -1;
     int depth = 0;
-
     while (!xml.atEnd()) {
         xml.readNext();
         if (xml.isStartElement()) {
@@ -735,7 +832,6 @@ TbxStats readTbxStats(const QByteArray &bytes, QString *error)
             } else if (inUserTiles && xml.name() == QLatin1String("tile")) {
                 ++stats.userTiles;
             }
-
             QString tileName = xml.attributes()
                     .value(QLatin1String("tile")).toString();
             if (tileName.isEmpty()
@@ -760,14 +856,12 @@ TbxStats readTbxStats(const QByteArray &bytes, QString *error)
         *error = xml.errorString();
     return stats;
 }
-
 QString actualTilesetPath(const QString &tilesetName)
 {
     if (tilesetName == QLatin1String("INVISIBLE")
             || tilesetName == QLatin1String("MISSING")) {
         return QString();
     }
-
     QString path1x;
     QString path2x;
     if (!TilesetManager::instance()->getTilesetFileName(
@@ -780,14 +874,12 @@ QString actualTilesetPath(const QString &tilesetName)
         return QFileInfo(path1x).absoluteFilePath();
     return QString();
 }
-
 QString readableTilesetPath(Tileset *tileset,
                             const QString &tilesetName)
 {
     QString path = actualTilesetPath(tilesetName);
     if (!path.isEmpty() || !tileset || tileset->isMissing())
         return path;
-
     const QStringList candidates =
             QStringList() << tileset->imageSource2x()
                           << tileset->imageSource();
@@ -799,13 +891,11 @@ QString readableTilesetPath(Tileset *tileset,
     }
     return QString();
 }
-
 bool isPlaceholderTileset(const QString &tilesetName)
 {
     return tilesetName == QLatin1String("INVISIBLE")
             || tilesetName == QLatin1String("MISSING");
 }
-
 bool copyBackup(const QString &fileName,
                 const QString &scanRoot,
                 const QString &backupRoot,
@@ -816,7 +906,6 @@ bool copyBackup(const QString &fileName,
             *error = QStringLiteral("No backup directory was provided.");
         return false;
     }
-
     QString relative = QDir(scanRoot).relativeFilePath(fileName);
     if (relative.startsWith(QLatin1String("../"))
             || relative == QLatin1String("..")) {
@@ -835,9 +924,10 @@ bool copyBackup(const QString &fileName,
                     .arg(fileName, backupFile);
         return false;
     }
+    qInfo().noquote() << "Project Doctor backup:"
+                      << fileName << "->" << backupFile;
     return true;
 }
-
 bool writeAtomic(const QString &fileName,
                  const QByteArray &bytes,
                  QString *error)
@@ -861,7 +951,6 @@ bool writeAtomic(const QString &fileName,
     }
     return true;
 }
-
 TilesetCleanupResult processTmx(const QString &fileName,
                                 const QString &scanRoot,
                                 const TilesetCleanupOptions &options,
@@ -871,7 +960,6 @@ TilesetCleanupResult processTmx(const QString &fileName,
     TilesetCleanupResult result;
     result.fileName = fileName;
     result.type = QStringLiteral("TMX");
-
     QFile source(fileName);
     if (!source.open(QIODevice::ReadOnly)) {
         result.error = source.errorString();
@@ -879,7 +967,6 @@ TilesetCleanupResult processTmx(const QString &fileName,
     }
     const QByteArray input = source.readAll();
     source.close();
-
     QString declarationError;
     const QVector<TmxDeclaration> declarations =
             readTmxDeclarations(input, &declarationError);
@@ -887,7 +974,6 @@ TilesetCleanupResult processTmx(const QString &fileName,
         result.error = declarationError;
         return result;
     }
-
     const QString mapDirectory = QFileInfo(fileName).absolutePath();
     QString dependencyError;
     const QVector<TmxDependency> dependencies =
@@ -930,7 +1016,6 @@ TilesetCleanupResult processTmx(const QString &fileName,
                          dependency.normalizedSource);
         }
     }
-
     MapReader reader;
     QBuffer inputBuffer;
     inputBuffer.setData(input);
@@ -947,13 +1032,19 @@ TilesetCleanupResult processTmx(const QString &fileName,
                 .arg(declarations.size()).arg(map->tilesets().size());
         return result;
     }
-
     const QSet<QString> protectedNames = protectedTmxTilesets(map.data());
     const TmxReferenceCounts referenceCounts =
             tmxReferenceCounts(map.data());
+    QString rawReferenceError;
+    const RawTmxReferenceCounts rawReferenceCounts =
+            rawTmxReferenceCounts(input, declarations,
+                                  &rawReferenceError);
+    if (!rawReferenceError.isEmpty()) {
+        result.error = rawReferenceError;
+        return result;
+    }
     QVector<TmxDecision> decisions;
     result.declared = declarations.size();
-
     for (int index = 0; index < declarations.size(); ++index) {
         Tileset *tileset = map->tilesets().at(index);
         const TmxDeclaration &declaration = declarations.at(index);
@@ -963,17 +1054,15 @@ TilesetCleanupResult processTmx(const QString &fileName,
         decision.firstGid = declaration.firstGid;
         decision.nextFirstGid = index + 1 < declarations.size()
                 ? declarations.at(index + 1).firstGid : 0;
-        const bool used = protectedNames.contains(decision.name);
+        const bool used = protectedNames.contains(decision.name)
+                || rawReferenceCounts.tileCells.value(index) > 0
+                || rawReferenceCounts.tileObjects.value(index) > 0;
         const QString actual =
                 readableTilesetPath(tileset, decision.name);
         const bool unresolved = actual.isEmpty()
                 && !isPlaceholderTileset(decision.name);
         decision.keep = used || !actual.isEmpty()
                 || isPlaceholderTileset(decision.name);
-
-        // A valid but currently unused sheet remains in the complete ordered
-        // TMX header for deterministic legacy-map compatibility. Cleanup only
-        // removes a declaration when it is both unused and unresolved.
         if (!used && unresolved) {
             ++result.unused;
             result.removedNames += decision.name.isEmpty()
@@ -982,7 +1071,6 @@ TilesetCleanupResult processTmx(const QString &fileName,
             decisions += decision;
             continue;
         }
-
         if (used && unresolved
                 && options.removeUnresolvedTilesets) {
             decision.keep = false;
@@ -990,15 +1078,14 @@ TilesetCleanupResult processTmx(const QString &fileName,
             ++result.unresolvedRemoved;
             result.unresolvedRemovedNames += decision.name;
             result.affectedTileCells +=
-                    referenceCounts.tileCells.value(decision.name);
+                    rawReferenceCounts.tileCells.value(index);
             result.affectedTileObjects +=
-                    referenceCounts.tileObjects.value(decision.name);
+                    rawReferenceCounts.tileObjects.value(index);
             result.affectedRuleReferences +=
                     referenceCounts.rulesAndBlends.value(decision.name);
             decisions += decision;
             continue;
         }
-
         ++result.retained;
         if (!used)
             ++result.validUnusedKept;
@@ -1025,7 +1112,6 @@ TilesetCleanupResult processTmx(const QString &fileName,
         }
         decisions += decision;
     }
-
     result.removedNames.removeDuplicates();
     result.removedNames.sort(Qt::CaseInsensitive);
     result.missingNames.removeDuplicates();
@@ -1036,7 +1122,6 @@ TilesetCleanupResult processTmx(const QString &fileName,
             || result.unresolvedRemoved > 0;
     if (!apply || !result.changed)
         return result;
-
     QByteArray output;
     QString transformError;
     int clearedCells = 0;
@@ -1072,16 +1157,17 @@ TilesetCleanupResult processTmx(const QString &fileName,
                       << "missing-used" << result.missingUsed;
     return result;
 }
-
 TilesetCleanupResult processTbx(const QString &fileName,
                                 const QString &scanRoot,
                                 bool apply,
                                 const QString &backupRoot)
 {
+    Q_UNUSED(scanRoot)
+    Q_UNUSED(apply)
+    Q_UNUSED(backupRoot)
     TilesetCleanupResult result;
     result.fileName = fileName;
     result.type = QStringLiteral("TBX");
-
     QFile source(fileName);
     if (!source.open(QIODevice::ReadOnly)) {
         result.error = source.errorString();
@@ -1089,26 +1175,18 @@ TilesetCleanupResult processTbx(const QString &fileName,
     }
     const QByteArray input = source.readAll();
     source.close();
-
     QString rawStatsError;
     const TbxStats rawStats = readTbxStats(input, &rawStatsError);
     if (!rawStatsError.isEmpty()) {
         result.error = rawStatsError;
         return result;
     }
-
     BuildingReader reader;
     QScopedPointer<Building> building(reader.read(fileName));
     if (!building) {
         result.error = reader.errorString();
         return result;
     }
-
-    // TBX tile_entry, furniture and user_tiles elements are ordered ID tables.
-    // Never remove XML elements directly: deserialize every numeric reference
-    // to an object first, then let BuildingWriter rebuild all tables and remap
-    // every reference exactly as a normal BuildingEd save does.
-    reader.fix(building.data());
     QStringList tilesetNames = building->tilesetNames();
     tilesetNames.removeDuplicates();
     tilesetNames.sort(Qt::CaseInsensitive);
@@ -1118,107 +1196,21 @@ TilesetCleanupResult processTbx(const QString &fileName,
             result.missingNames += name;
         }
     }
-
-    QTemporaryDir canonicalDirectory;
-    if (!canonicalDirectory.isValid()) {
-        result.error = QStringLiteral(
-                    "Could not create the temporary TBX output directory.");
-        return result;
-    }
-    const QString canonicalPath = QDir(canonicalDirectory.path())
-            .filePath(QFileInfo(fileName).fileName());
-    BuildingWriter writer;
-    if (!writer.write(building.data(), canonicalPath)) {
-        result.error = writer.errorString();
-        return result;
-    }
-    QFile canonicalFile(canonicalPath);
-    if (!canonicalFile.open(QIODevice::ReadOnly)) {
-        result.error = canonicalFile.errorString();
-        return result;
-    }
-    const QByteArray canonical = canonicalFile.readAll();
-    canonicalFile.close();
-
-    // Prove that the regenerated ID tables are stable before offering them
-    // for application. A second normal BuildingEd load/save must produce the
-    // same bytes; otherwise an index/reference was not fully represented.
-    BuildingReader verificationReader;
-    QScopedPointer<Building> verificationBuilding(
-                verificationReader.read(canonicalPath));
-    if (!verificationBuilding) {
-        result.error = QStringLiteral(
-                    "The regenerated TBX could not be read: %1")
-                .arg(verificationReader.errorString());
-        return result;
-    }
-    verificationReader.fix(verificationBuilding.data());
-    const QString verificationPath = QDir(canonicalDirectory.path())
-            .filePath(QStringLiteral("verified-")
-                      + QFileInfo(fileName).fileName());
-    BuildingWriter verificationWriter;
-    if (!verificationWriter.write(
-                verificationBuilding.data(), verificationPath)) {
-        result.error = verificationWriter.errorString();
-        return result;
-    }
-    QFile verificationFile(verificationPath);
-    if (!verificationFile.open(QIODevice::ReadOnly)) {
-        result.error = verificationFile.errorString();
-        return result;
-    }
-    const QByteArray verifiedCanonical = verificationFile.readAll();
-    verificationFile.close();
-    if (canonical != verifiedCanonical) {
-        result.error = QStringLiteral(
-                    "TBX ID-table remapping was not stable; no changes "
-                    "were written.");
-        return result;
-    }
-
-    QString canonicalStatsError;
-    const TbxStats canonicalStats =
-            readTbxStats(canonical, &canonicalStatsError);
-    if (!canonicalStatsError.isEmpty()) {
-        result.error = canonicalStatsError;
-        return result;
-    }
-
     result.declared = rawStats.tileEntries + rawStats.furniture
             + rawStats.userTiles;
-    result.retained = canonicalStats.tileEntries + canonicalStats.furniture
-            + canonicalStats.userTiles;
-    result.unused = qMax(0, result.declared - result.retained);
-    result.normalized = rawStats.nonCanonicalTileNames;
-    result.formatUpdated = rawStats.version != 4;
-    result.changed = result.unused > 0 || result.normalized > 0
-            || result.formatUpdated;
-
-    if (result.unused > 0) {
-        result.removedNames += QStringLiteral(
-                    "%1 unreferenced TBX tile/furniture definition(s)")
-                .arg(result.unused);
+    result.retained = result.declared;
+    result.changed = false;
+    if (rawStats.nonCanonicalTileNames > 0 || rawStats.version != 4) {
+        result.dependencyWarnings += QStringLiteral(
+                    "TBX canonicalization was skipped because semantic "
+                    "equivalence with the original ID tables is not proven.");
     }
-    if (!apply || !result.changed)
-        return result;
-
-    if (!copyBackup(fileName, scanRoot, backupRoot, &result.error))
-        return result;
-    if (!writeAtomic(fileName, canonical, &result.error))
-        return result;
-    result.applied = true;
-    qInfo().noquote() << "Tileset cleanup applied to TBX:" << fileName
-                      << "unreferenced definitions" << result.unused
-                      << "normalized names" << result.normalized
-                      << "missing-used" << result.missingUsed;
     return result;
 }
-
 QString plural(int count, const QString &singular, const QString &pluralText)
 {
     return count == 1 ? singular : pluralText;
 }
-
 QString limitedList(const QStringList &values, int maximum = 25)
 {
     if (values.size() <= maximum)
@@ -1227,9 +1219,7 @@ QString limitedList(const QStringList &values, int maximum = 25)
             + QStringLiteral(", ... (%1 more)")
             .arg(values.size() - maximum);
 }
-
-} // namespace
-
+}
 QStringList TilesetCleanup::filesUnder(const QString &root, bool recursive)
 {
     QStringList files;
@@ -1255,7 +1245,6 @@ QStringList TilesetCleanup::filesUnder(const QString &root, bool recursive)
     files.sort(Qt::CaseInsensitive);
     return files;
 }
-
 TilesetCleanupResult TilesetCleanup::processFile(
         const QString &fileName,
         const QString &scanRoot,
@@ -1271,13 +1260,11 @@ TilesetCleanupResult TilesetCleanup::processFile(
                           Qt::CaseInsensitive)) {
         return processTbx(fileName, scanRoot, apply, backupRoot);
     }
-
     TilesetCleanupResult result;
     result.fileName = fileName;
     result.error = QStringLiteral("Unsupported file extension.");
     return result;
 }
-
 QString TilesetCleanup::report(
         const QList<TilesetCleanupResult> &results,
         const QString &backupRoot)
@@ -1296,7 +1283,6 @@ QString TilesetCleanup::report(
     int missingDependencies = 0;
     int externalDependencies = 0;
     QStringList details;
-
     for (const TilesetCleanupResult &result : results) {
         if (result.changed)
             ++changed;
@@ -1314,14 +1300,12 @@ QString TilesetCleanup::report(
         affectedRuleReferences += result.affectedRuleReferences;
         missingDependencies += result.missingDependencies;
         externalDependencies += result.externalDependencies;
-
         if (!result.changed && result.error.isEmpty()
                 && result.missingUsed == 0
                 && result.missingDependencies == 0
                 && result.externalDependencies == 0) {
             continue;
         }
-
         details += QStringLiteral("%1 [%2]")
                 .arg(result.fileName, result.type);
         if (!result.error.isEmpty()) {
@@ -1386,7 +1370,6 @@ QString TilesetCleanup::report(
                          - warningLimit);
         }
     }
-
     QStringList summary;
     summary += QStringLiteral("Scanned %1 %2.")
             .arg(results.size())
@@ -1427,7 +1410,6 @@ QString TilesetCleanup::report(
     summary += details;
     return summary.join(QLatin1Char('\n'));
 }
-
 bool TilesetCleanup::validate(QString *summary, QString *error)
 {
     QTemporaryDir temporary;
@@ -1436,7 +1418,6 @@ bool TilesetCleanup::validate(QString *summary, QString *error)
             *error = QStringLiteral("Could not create validation directory.");
         return false;
     }
-
     QString usedName;
     QString actualPath;
     for (Tileset *tileset : TileMetaInfoMgr::instance()->tilesets()) {
@@ -1452,7 +1433,6 @@ bool TilesetCleanup::validate(QString *summary, QString *error)
                     "No readable catalogue sheet is available for validation.");
         return false;
     }
-
     const QString tmxPath =
             QDir(temporary.path()).filePath(QStringLiteral("cleanup.tmx"));
     const QString missingUsedName =
@@ -1497,7 +1477,6 @@ bool TilesetCleanup::validate(QString *summary, QString *error)
         "</map>\n").arg(usedName, missingUsedName).toUtf8();
     if (!writeAtomic(tmxPath, tmx, error))
         return false;
-
     TilesetCleanupOptions options;
     TilesetCleanupResult before =
             processFile(tmxPath, temporary.path(), options, false);
@@ -1518,7 +1497,6 @@ bool TilesetCleanup::validate(QString *summary, QString *error)
         }
         return false;
     }
-
     const QString backupRoot =
             QDir(temporary.path()).filePath(
                 QStringLiteral(".pztools-backups/validation"));
@@ -1539,7 +1517,6 @@ bool TilesetCleanup::validate(QString *summary, QString *error)
                     "TMX was not clean after apply: %1").arg(after.error);
         return false;
     }
-
     TilesetCleanupOptions advancedOptions = options;
     advancedOptions.removeUnresolvedTilesets = true;
     TilesetCleanupResult advancedBefore =
@@ -1562,7 +1539,6 @@ bool TilesetCleanup::validate(QString *summary, QString *error)
         }
         return false;
     }
-
     const QString advancedBackupRoot =
             QDir(temporary.path()).filePath(
                 QStringLiteral(".pztools-backups/advanced-validation"));
@@ -1582,7 +1558,6 @@ bool TilesetCleanup::validate(QString *summary, QString *error)
         }
         return false;
     }
-
     QFile advancedFile(tmxPath);
     if (!advancedFile.open(QIODevice::ReadOnly)) {
         if (error)
@@ -1619,7 +1594,6 @@ bool TilesetCleanup::validate(QString *summary, QString *error)
         }
         return false;
     }
-
     Building building(1, 1);
     const QString fixtureSourcePath = QDir(temporary.path())
             .filePath(QStringLiteral("cleanup-source.tbx"));
@@ -1637,7 +1611,6 @@ bool TilesetCleanup::validate(QString *summary, QString *error)
     }
     const QByteArray canonicalTbx = fixtureSource.readAll();
     fixtureSource.close();
-
     QRegularExpression entryExpression(
                 QStringLiteral("<tile_entry\\b[\\s\\S]*?</tile_entry>"));
     const QRegularExpressionMatch entryMatch =
@@ -1656,35 +1629,33 @@ bool TilesetCleanup::validate(QString *summary, QString *error)
             QDir(temporary.path()).filePath(QStringLiteral("cleanup.tbx"));
     if (!writeAtomic(tbxPath, dirtyTbx, error))
         return false;
-
     TilesetCleanupResult tbxBefore =
             processFile(tbxPath, temporary.path(), options, false);
-    if (!tbxBefore.error.isEmpty() || tbxBefore.unused < 1) {
+    if (!tbxBefore.error.isEmpty() || tbxBefore.changed
+            || tbxBefore.applied) {
         if (error) {
             *error = QStringLiteral(
-                    "TBX analysis did not find the unused definition: %1")
+                    "TBX safety analysis unexpectedly offered a rewrite: %1")
                     .arg(tbxBefore.error);
         }
         return false;
     }
     TilesetCleanupResult tbxApplied =
             processFile(tbxPath, temporary.path(), options, true, backupRoot);
-    if (!tbxApplied.applied || !tbxApplied.error.isEmpty()) {
+    if (tbxApplied.applied || tbxApplied.changed
+            || !tbxApplied.error.isEmpty()) {
         if (error)
-            *error = QStringLiteral("TBX apply failed: %1")
+            *error = QStringLiteral("TBX safety gate failed: %1")
                     .arg(tbxApplied.error);
         return false;
     }
-    TilesetCleanupResult tbxAfter =
-            processFile(tbxPath, temporary.path(), options, false);
-    if (!tbxAfter.error.isEmpty() || tbxAfter.unused != 0
-            || tbxAfter.changed) {
+    QFile unchangedTbx(tbxPath);
+    if (!unchangedTbx.open(QIODevice::ReadOnly)
+            || unchangedTbx.readAll() != dirtyTbx) {
         if (error)
-            *error = QStringLiteral(
-                    "TBX was not clean after apply: %1").arg(tbxAfter.error);
+            *error = QStringLiteral("Project Doctor modified a TBX file.");
         return false;
     }
-
     for (const QString &fileName : filesUnder(temporary.path(), true)) {
         if (QDir::fromNativeSeparators(fileName).contains(
                     QLatin1String("/.pztools-backups/"),
@@ -1697,19 +1668,16 @@ bool TilesetCleanup::validate(QString *summary, QString *error)
             return false;
         }
     }
-
     if (summary) {
         *summary = QStringLiteral(
                     "TMX unused declarations, active path normalization, "
                     "default missing-used and missing-TBX preservation, "
                     "explicit unresolved-reference removal, atomic backups, "
-                    "and TBX "
-                    "ordered ID-table remapping and canonical pruning "
+                    "raw-GID preservation, and read-only TBX diagnostics "
                     "passed.");
     }
     return true;
 }
-
 TilesetCleanupDialog::TilesetCleanupDialog(
         const QString &initialRoot,
         const QString &projectFile,
@@ -1719,7 +1687,6 @@ TilesetCleanupDialog::TilesetCleanupDialog(
 {
     setWindowTitle(tr("Project Doctor - Tiles and Paths"));
     resize(1080, 700);
-
     auto *layout = new QVBoxLayout(this);
     auto *description = new QLabel(
                 tr("<b>A plain-language health check for the mapping project.</b> "
@@ -1730,7 +1697,6 @@ TilesetCleanupDialog::TilesetCleanupDialog(
                    "stay hidden unless you need them."), this);
     description->setWordWrap(true);
     layout->addWidget(description);
-
     mStatusTitle = new QLabel(tr("Ready to check"), this);
     mStatusTitle->setStyleSheet(
                 QStringLiteral("font-size: 20px; font-weight: 600; "
@@ -1740,7 +1706,6 @@ TilesetCleanupDialog::TilesetCleanupDialog(
                 tr("Nothing is changed during Check project."), this);
     mStatusDetails->setWordWrap(true);
     layout->addWidget(mStatusDetails);
-
     auto *rootRow = new QHBoxLayout;
     mRootEdit = new QLineEdit(QDir::toNativeSeparators(initialRoot), this);
     auto *browseButton = new QPushButton(tr("Browse..."), this);
@@ -1748,7 +1713,6 @@ TilesetCleanupDialog::TilesetCleanupDialog(
     rootRow->addWidget(mRootEdit, 1);
     rootRow->addWidget(browseButton);
     layout->addLayout(rootRow);
-
     auto *optionsRow = new QHBoxLayout;
     mRecursiveCheck = new QCheckBox(
                 tr("Check every map and building (recommended)"), this);
@@ -1761,7 +1725,6 @@ TilesetCleanupDialog::TilesetCleanupDialog(
     optionsRow->addWidget(mNormalizeCheck);
     optionsRow->addStretch();
     layout->addLayout(optionsRow);
-
     mRemoveUnresolvedCheck = new QCheckBox(
                 tr("Remove referenced tilesets whose PNG cannot be "
                    "resolved (advanced)"), this);
@@ -1773,7 +1736,6 @@ TilesetCleanupDialog::TilesetCleanupDialog(
                    "objects are removed, and Rules/Blends definitions stay "
                    "embedded but inactive. A dated backup is mandatory."));
     layout->addWidget(mRemoveUnresolvedCheck);
-
     auto *safety = new QLabel(
                 tr("Check is read-only. Applying fixes always creates a dated "
                    ".pztools-backups copy first and never changes game files. "
@@ -1781,7 +1743,6 @@ TilesetCleanupDialog::TilesetCleanupDialog(
                 this);
     safety->setWordWrap(true);
     layout->addWidget(safety);
-
     auto *summaryLabel = new QLabel(tr("<b>What the doctor found</b>"), this);
     layout->addWidget(summaryLabel);
     mSummaryTable = new QTableWidget(this);
@@ -1805,14 +1766,12 @@ TilesetCleanupDialog::TilesetCleanupDialog(
     mSummaryTable->horizontalHeader()->setSectionResizeMode(
                 3, QHeaderView::Stretch);
     layout->addWidget(mSummaryTable, 1);
-
     mDetailsButton = new QPushButton(tr("Show support details"), this);
     mDetailsButton->setCheckable(true);
     mDetailsButton->setToolTip(
                 tr("Show the complete technical report to copy when asking "
                    "for support."));
     layout->addWidget(mDetailsButton);
-
     auto *technicalLabel = new QLabel(
                 tr("<b>Technical details</b> - copy this section when "
                    "asking for support."), this);
@@ -1827,14 +1786,12 @@ TilesetCleanupDialog::TilesetCleanupDialog(
                    "asking for help."));
     mTechnicalLabel->hide();
     mReport->hide();
-
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     mAnalyzeButton = buttons->addButton(
                 tr("Check project"), QDialogButtonBox::ActionRole);
     mApplyButton = buttons->addButton(
                 tr("Fix safely..."), QDialogButtonBox::ActionRole);
     layout->addWidget(buttons);
-
     connect(browseButton, &QPushButton::clicked,
             this, &TilesetCleanupDialog::browse);
     connect(mAnalyzeButton, &QPushButton::clicked,
@@ -1867,7 +1824,6 @@ TilesetCleanupDialog::TilesetCleanupDialog(
     updateActions();
     updateStatus();
 }
-
 void TilesetCleanupDialog::browse()
 {
     const QString directory = QFileDialog::getExistingDirectory(
@@ -1878,7 +1834,6 @@ void TilesetCleanupDialog::browse()
         analyze();
     }
 }
-
 TilesetCleanupOptions TilesetCleanupDialog::options() const
 {
     TilesetCleanupOptions value;
@@ -1888,7 +1843,6 @@ TilesetCleanupOptions TilesetCleanupDialog::options() const
             mRemoveUnresolvedCheck->isChecked();
     return value;
 }
-
 QList<TilesetCleanupResult> TilesetCleanupDialog::run(
         bool apply, const QString &backupRoot)
 {
@@ -1896,14 +1850,12 @@ QList<TilesetCleanupResult> TilesetCleanupDialog::run(
     const QStringList files =
             TilesetCleanup::filesUnder(root, mRecursiveCheck->isChecked());
     QList<TilesetCleanupResult> results;
-
     QProgressDialog progress(
                 apply ? tr("Applying tileset cleanup...")
                       : tr("Analyzing tileset references..."),
                 tr("Cancel"), 0, files.size(), this);
     progress.setWindowModality(Qt::WindowModal);
     progress.setMinimumDuration(0);
-
     for (int index = 0; index < files.size(); ++index) {
         progress.setValue(index);
         progress.setLabelText(
@@ -1919,7 +1871,6 @@ QList<TilesetCleanupResult> TilesetCleanupDialog::run(
     progress.setValue(files.size());
     return results;
 }
-
 QStringList TilesetCleanupDialog::projectPathWarnings() const
 {
     QStringList warnings;
@@ -1940,7 +1891,6 @@ QStringList TilesetCleanupDialog::projectPathWarnings() const
         warnings += tr("The project is inside the game installation. Keep "
                        "mapping sources in a separate project folder.");
     }
-
     QString projectFile = mProjectFile;
     if (projectFile.isEmpty()) {
         const QStringList projects = QDir(root).entryList(
@@ -1954,14 +1904,12 @@ QStringList TilesetCleanupDialog::projectPathWarnings() const
                        "check.");
         return warnings;
     }
-
     QFile source(projectFile);
     if (!source.open(QIODevice::ReadOnly)) {
         warnings += tr("The loaded .pzw project could not be read: %1")
                 .arg(QDir::toNativeSeparators(projectFile));
         return warnings;
     }
-
     const QString projectDirectory =
             QFileInfo(projectFile).absolutePath();
     QXmlStreamReader xml(&source);
@@ -1969,7 +1917,6 @@ QStringList TilesetCleanupDialog::projectPathWarnings() const
         xml.readNext();
         if (!xml.isStartElement())
             continue;
-
         QString label;
         QString path;
         bool mustExist = false;
@@ -2009,7 +1956,6 @@ QStringList TilesetCleanupDialog::projectPathWarnings() const
         }
         if (path.isEmpty())
             continue;
-
         const QString portablePath =
                 QDir::fromNativeSeparators(path);
         const QFileInfo pathInfo(portablePath);
@@ -2039,7 +1985,6 @@ QStringList TilesetCleanupDialog::projectPathWarnings() const
     warnings.removeDuplicates();
     return warnings;
 }
-
 QString TilesetCleanupDialog::fullReport(
         const QString &backupRoot) const
 {
@@ -2053,7 +1998,6 @@ QString TilesetCleanupDialog::fullReport(
     sections += TilesetCleanup::report(mResults, backupRoot);
     return sections.join(QLatin1Char('\n'));
 }
-
 void TilesetCleanupDialog::updateStatus()
 {
     updateSummaryTable();
@@ -2067,7 +2011,6 @@ void TilesetCleanupDialog::updateStatus()
                        "click Check project. Nothing will be changed."));
         return;
     }
-
     int errors = 0;
     int changed = 0;
     int missingTilesets = 0;
@@ -2099,7 +2042,6 @@ void TilesetCleanupDialog::updateStatus()
         if (!warning.startsWith(QLatin1String("INFO:")))
             ++projectWarnings;
     }
-
     if (applied > 0) {
         mStatusTitle->setText(
                     unresolvedRemoved > 0
@@ -2162,15 +2104,12 @@ void TilesetCleanupDialog::updateStatus()
                     .arg(tmxFiles).arg(tbxFiles));
     }
 }
-
 void TilesetCleanupDialog::updateSummaryTable()
 {
     mSummaryTable->setRowCount(0);
-
     const QString root =
             QFileInfo(mRootEdit->text()).absoluteFilePath();
     int cleanFiles = 0;
-
     const auto addRow = [this](
             const QString &status, const QColor &color,
             const QString &file, const QString &meaning,
@@ -2191,7 +2130,6 @@ void TilesetCleanupDialog::updateSummaryTable()
             mSummaryTable->setItem(row, column, item);
         }
     };
-
     for (const QString &warning : mProjectWarnings) {
         const bool information =
                 warning.startsWith(QLatin1String("INFO:"));
@@ -2205,7 +2143,6 @@ void TilesetCleanupDialog::updateSummaryTable()
                     : tr("Move or repair this path before sharing or "
                          "updating the project."));
     }
-
     for (const TilesetCleanupResult &result : mResults) {
         QString displayName =
                 QDir(root).relativeFilePath(result.fileName);
@@ -2214,7 +2151,6 @@ void TilesetCleanupDialog::updateSummaryTable()
             displayName = result.fileName;
         }
         displayName = QDir::toNativeSeparators(displayName);
-
         if (!result.error.isEmpty()) {
             addRow(tr("Could not check"), QColor(176, 45, 45),
                    displayName,
@@ -2226,7 +2162,6 @@ void TilesetCleanupDialog::updateSummaryTable()
                              ? tr("BuildingEd") : tr("TileZed")));
             continue;
         }
-
         QStringList manualFindings;
         if (result.missingUsed > 0) {
             manualFindings += tr("%1 used tileset reference(s) cannot be "
@@ -2243,7 +2178,6 @@ void TilesetCleanupDialog::updateSummaryTable()
                                  "the project.")
                     .arg(result.externalDependencies);
         }
-
         QStringList safeFindings;
         if (result.unused > 0) {
             safeFindings += tr("%1 stale unused definition(s) can be removed.")
@@ -2256,7 +2190,6 @@ void TilesetCleanupDialog::updateSummaryTable()
         }
         if (result.formatUpdated)
             safeFindings += tr("The TBX can be upgraded to the current format.");
-
         QStringList advancedFindings;
         if (result.unresolvedRemoved > 0) {
             advancedFindings += tr(
@@ -2270,7 +2203,6 @@ void TilesetCleanupDialog::updateSummaryTable()
                     .arg(result.affectedTileObjects)
                     .arg(result.affectedRuleReferences);
         }
-
         if (result.applied) {
             QStringList appliedFindings = safeFindings;
             appliedFindings += advancedFindings;
@@ -2313,14 +2245,12 @@ void TilesetCleanupDialog::updateSummaryTable()
             ++cleanFiles;
         }
     }
-
     if (cleanFiles > 0) {
         addRow(tr("Looks good"), QColor(38, 115, 77),
                tr("%1 other checked file(s)").arg(cleanFiles),
                tr("No problem or cleanup was found."),
                tr("Nothing to do."));
     }
-
     if (mSummaryTable->rowCount() == 0) {
         addRow(tr("Not checked yet"), QColor(47, 111, 187),
                tr("Project"), tr("No scan has been run."),
@@ -2328,7 +2258,6 @@ void TilesetCleanupDialog::updateSummaryTable()
     }
     mSummaryTable->resizeRowsToContents();
 }
-
 void TilesetCleanupDialog::analyze()
 {
     const QFileInfo root(mRootEdit->text());
@@ -2346,7 +2275,6 @@ void TilesetCleanupDialog::analyze()
     updateStatus();
     updateActions();
 }
-
 int TilesetCleanupDialog::changedFileCount() const
 {
     int count = 0;
@@ -2356,13 +2284,11 @@ int TilesetCleanupDialog::changedFileCount() const
     }
     return count;
 }
-
 void TilesetCleanupDialog::applyCleanup()
 {
     const int count = changedFileCount();
     if (count <= 0)
         return;
-
     int unresolvedRemoved = 0;
     int affectedTileCells = 0;
     int affectedTileObjects = 0;
@@ -2373,7 +2299,6 @@ void TilesetCleanupDialog::applyCleanup()
         affectedTileObjects += result.affectedTileObjects;
         affectedRuleReferences += result.affectedRuleReferences;
     }
-
     QString warning;
     if (unresolvedRemoved > 0) {
         warning = tr(
@@ -2410,7 +2335,6 @@ void TilesetCleanupDialog::applyCleanup()
                              QMessageBox::Cancel) != QMessageBox::Apply) {
         return;
     }
-
     const QString root = QFileInfo(mRootEdit->text()).absoluteFilePath();
     const QString stamp =
             QDateTime::currentDateTime().toString(
@@ -2425,14 +2349,14 @@ void TilesetCleanupDialog::applyCleanup()
                     .arg(QDir::toNativeSeparators(backupRoot)));
         return;
     }
-
+    qInfo().noquote() << "Project Doctor applying fixes under:" << root;
+    qInfo().noquote() << "Project Doctor backup directory:" << backupRoot;
     mResults = run(true, backupRoot);
     mProjectWarnings = projectPathWarnings();
     mReport->setPlainText(fullReport(backupRoot));
     updateStatus();
     updateActions();
 }
-
 void TilesetCleanupDialog::updateActions()
 {
     const QFileInfo root(mRootEdit->text());

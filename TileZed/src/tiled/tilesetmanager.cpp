@@ -238,7 +238,6 @@ void TilesetManager::tilesetDirectoryChanged()
     if (!mWatchedTilesetDirectories.isEmpty())
         mWatcher->removePaths(mWatchedTilesetDirectories);
     mWatchedTilesetDirectories.clear();
-
     QStringList directories = {
         Preferences::instance()->tilesDirectory(),
         Preferences::instance()->tiles2xDirectory()
@@ -259,7 +258,6 @@ void TilesetManager::tilesetDirectoryChanged()
         }
     }
 }
-
 bool TilesetManager::getTilesetFileName(const QString &tilesetName, QString &path1x, QString &path2x)
 {
     QString tiles1xDir = Preferences::instance()->tilesDirectory();
@@ -272,12 +270,9 @@ bool TilesetManager::getTilesetFileName(const QString &tilesetName, QString &pat
     path1x = dir1x.filePath(fileName);
     path2x = dir2x.filePath(fileName);
 
-    // The 2x tree always has priority, regardless of whether the matching
-    // file is at its root or in a custom pack subdirectory.
     if (QImageReader(path2x).size().isValid()) {
         return true;
     }
-
     auto findImage = [&fileName](const QDir &root,
                                  const QString &excludedTree = QString()) {
         QStringList candidates;
@@ -304,7 +299,6 @@ bool TilesetManager::getTilesetFileName(const QString &tilesetName, QString &pat
         candidates.sort(Qt::CaseInsensitive);
         return candidates.isEmpty() ? QString() : candidates.first();
     };
-
     const QString nested2x = findImage(dir2x);
     if (!nested2x.isEmpty()) {
         const QString relative = dir2x.relativeFilePath(nested2x);
@@ -313,7 +307,6 @@ bool TilesetManager::getTilesetFileName(const QString &tilesetName, QString &pat
         return true;
     }
 
-    // Fall back to 1x only when no readable 2x image exists anywhere.
     if (QImageReader(path1x).size().isValid()) {
         return true;
     }
@@ -351,7 +344,6 @@ void TilesetManager::directoryChanged(const QString &path)
     mChangedDirectories.insert(path);
     mChangedFilesTimer.start();
 }
-
 void TilesetManager::fileChangedTimeout()
 {
 #ifdef ZOMBOID
@@ -362,9 +354,6 @@ void TilesetManager::fileChangedTimeout()
                     << "Unable to discover new tilesets:"
                     << TileMetaInfoMgr::instance()->errorString();
         }
-
-        // Deleting a PNG commonly emits only directoryChanged(). Feed missing
-        // cache sources through the normal file invalidation path as well.
         for (Tileset *cached : std::as_const(mTilesetImageCache->mTilesets)) {
             const QString source = cached->imageSource2x().isEmpty()
                     ? cached->imageSource() : cached->imageSource2x();
@@ -374,7 +363,6 @@ void TilesetManager::fileChangedTimeout()
                 mChangedFiles.insert(source);
             }
         }
-
         TileMetaInfoMgr::instance()->resolveTilesets();
         for (Tileset *tileset
              : TileMetaInfoMgr::instance()->tilesets()) {
@@ -384,7 +372,6 @@ void TilesetManager::fileChangedTimeout()
         mChangedDirectories.clear();
         tilesetDirectoryChanged();
     }
-
     qDebug() << "fileChangedTimeout " << mChangedFiles;
     foreach (Tileset *tileset, mTilesetImageCache->mTilesets) {
         QString fileName = tileset->imageSource2x().isEmpty() ? tileset->imageSource() : tileset->imageSource2x();
@@ -514,8 +501,6 @@ void TilesetManager::tilePropertiesChanged()
 
 void TilesetManager::loadTileset(Tileset *tileset, const QString &imageSource_)
 {
-    // Catalog entries keep a relative path until the shared Tiles directory
-    // has been configured.
     if (QDir(imageSource_).isRelative()) {
         TileMetaInfoMgr::instance()->resolveTilesets(
                     QList<Tileset *>() << tileset);
@@ -524,7 +509,6 @@ void TilesetManager::loadTileset(Tileset *tileset, const QString &imageSource_)
             return;
         }
     }
-
     if (tileset->isLoaded())
         return;
 
@@ -600,10 +584,6 @@ void TilesetManager::waitForTilesets(const QList<Tileset *> &tilesets)
             pendingNames += tileset->name();
         }
     }
-    // Many callers perform a batch load first and then call this function as
-    // a readiness barrier. Logging those already-loaded requests as another
-    // "preload" made one decode look like two and flooded BuildingEd logs
-    // while category thumbnails were validated.
     if (loadAttempts > 0 || missing > 0 || pending > 0) {
         qInfo() << "Tileset readiness check:"
                 << "requested" << requested.size()

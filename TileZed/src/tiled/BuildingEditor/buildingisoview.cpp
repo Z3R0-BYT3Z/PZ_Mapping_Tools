@@ -31,7 +31,6 @@
 
 #include "mapcomposite.h"
 #include "mapmanager.h"
-#include "nightpreviewitem.h"
 #include "tilemetainfomgr.h"
 #include "tilesetmanager.h"
 #include "tiledeffile.h"
@@ -70,7 +69,6 @@ using namespace Tiled;
 using namespace Tiled::Internal;
 
 namespace {
-
 QString diagnosticMemoryText(quint64 bytes)
 {
     if (!bytes)
@@ -81,9 +79,7 @@ QString diagnosticMemoryText(quint64 bytes)
     return QObject::tr("%1 MiB").arg(
                 bytes / (1024.0 * 1024.0), 0, 'f', 1);
 }
-
 }
-
 /////
 
 CompositeLayerGroupItem::CompositeLayerGroupItem(CompositeLayerGroup *layerGroup,
@@ -347,9 +343,6 @@ BuildingIsoScene::BuildingIsoScene(QObject *parent) :
     mTileSelectionItem(0),
     mSquarePropertiesItem(nullptr),
     mDarkRectangle(new QGraphicsRectItem),
-    mNightPreviewItem(new NightPreviewItem),
-    mNightPreviewEnabled(false),
-    mDeferredNightPreviewRebuild(false),
     mCurrentTool(0),
     mLayerGroupWithToolTiles(0),
     mToolTiles(QString(), 0, 0, 1, 1),
@@ -372,9 +365,6 @@ BuildingIsoScene::BuildingIsoScene(QObject *parent) :
     mDarkRectangle->setOpacity(0.6);
     mDarkRectangle->setVisible(false);
     addItem(mDarkRectangle);
-    mNightPreviewItem->setZValue(50000);
-    mNightPreviewItem->setVisible(false);
-    addItem(mNightPreviewItem);
 
     connect(BuildingTilesMgr::instance(), &BuildingTilesMgr::tilesetAdded,
             this, &BuildingIsoScene::tilesetAdded);
@@ -440,7 +430,6 @@ void BuildingIsoScene::setDocument(BuildingDocument *doc)
 
     mDocument = doc;
     mDeferredCurrentFloorChange = false;
-    mDeferredNightPreviewRebuild = false;
     mDeferredWholeFloorTileUpdates.clear();
     mDeferredFloorTileUpdates.clear();
     mPendingLayerVisibilityFloors.clear();
@@ -480,8 +469,6 @@ void BuildingIsoScene::setDocument(BuildingDocument *doc)
 
     setSceneRect(mBuildingMap->mapComposite()->boundingRect(mBuildingMap->mapRenderer()));
     mDarkRectangle->setRect(sceneRect());
-    mNightPreviewItem->setBounds(sceneRect());
-    requestNightPreviewRebuild();
 
     calculateUnlitRoomMask();
 
@@ -999,7 +986,6 @@ void BuildingIsoScene::floorEdited(BuildingFloor *floor)
     BuildingBaseScene::floorEdited(floor);
 
     mBuildingMap->floorEdited(floor);
-    requestNightPreviewRebuild();
 }
 
 void BuildingIsoScene::floorTilesChanged(BuildingFloor *floor)
@@ -1010,7 +996,6 @@ void BuildingIsoScene::floorTilesChanged(BuildingFloor *floor)
         return;
     }
     mBuildingMap->floorTilesChanged(floor);
-    requestNightPreviewRebuild();
 }
 
 void BuildingIsoScene::floorTilesChanged(BuildingFloor *floor,
@@ -1023,7 +1008,6 @@ void BuildingIsoScene::floorTilesChanged(BuildingFloor *floor,
         return;
     }
     mBuildingMap->floorTilesChanged(floor, layerName, bounds);
-    requestNightPreviewRebuild();
 }
 
 void BuildingIsoScene::layerOpacityChanged(BuildingFloor *floor,
@@ -1044,7 +1028,6 @@ void BuildingIsoScene::layerVisibilityChanged(BuildingFloor *floor, const QStrin
         QMetaObject::invokeMethod(this, "applyPendingLayerVisibilityChanges",
                                   Qt::QueuedConnection);
 }
-
 bool BuildingIsoScene::hasVisibleView() const
 {
     const QList<QGraphicsView*> sceneViews = views();
@@ -1054,14 +1037,12 @@ bool BuildingIsoScene::hasVisibleView() const
     }
     return false;
 }
-
 void BuildingIsoScene::applyPendingLayerVisibilityChanges()
 {
     if (!mDocument || !mBuildingMap || mPendingLayerVisibilityFloors.isEmpty())
         return;
     if (!hasVisibleView() && !mLoading)
         return;
-
     const QSet<BuildingFloor*> floors = mPendingLayerVisibilityFloors;
     mPendingLayerVisibilityFloors.clear();
     for (BuildingFloor *floor : floors) {
@@ -1086,17 +1067,12 @@ void BuildingIsoScene::applyDeferredUpdates()
 {
     if (!mDocument || !mBuildingMap)
         return;
-
     if (mDeferredCurrentFloorChange)
         currentFloorChanged();
     applyPendingLayerVisibilityChanges();
-    if (mDeferredNightPreviewRebuild)
-        requestNightPreviewRebuild();
-
     if (mDeferredWholeFloorTileUpdates.isEmpty() &&
             mDeferredFloorTileUpdates.isEmpty())
         return;
-
     QElapsedTimer elapsed;
     elapsed.start();
     const QSet<BuildingFloor*> wholeFloors = mDeferredWholeFloorTileUpdates;
@@ -1104,7 +1080,6 @@ void BuildingIsoScene::applyDeferredUpdates()
             mDeferredFloorTileUpdates;
     mDeferredWholeFloorTileUpdates.clear();
     mDeferredFloorTileUpdates.clear();
-
     for (BuildingFloor *floor : wholeFloors)
         mBuildingMap->floorTilesChanged(floor);
     for (auto floorIt = regions.constBegin(); floorIt != regions.constEnd();
@@ -1118,231 +1093,10 @@ void BuildingIsoScene::applyDeferredUpdates()
                             floorIt.key(), layerIt.key(), bounds);
         }
     }
-
-    requestNightPreviewRebuild();
     qInfo() << "BuildingEd applied deferred hidden-view tile updates in"
             << elapsed.elapsed() << "ms for"
             << wholeFloors.size() + regions.size() << "floor(s)";
 }
-
-void BuildingIsoScene::setNightPreviewEnabled(bool enabled)
-{
-    mNightPreviewEnabled = enabled;
-    mNightPreviewItem->setVisible(enabled);
-    if (enabled)
-        requestNightPreviewRebuild();
-    else
-        mDeferredNightPreviewRebuild = false;
-}
-
-void BuildingIsoScene::requestNightPreviewRebuild()
-{
-    if (!mNightPreviewEnabled)
-        return;
-    if (!hasVisibleView()) {
-        mDeferredNightPreviewRebuild = true;
-        return;
-    }
-    rebuildNightPreview();
-}
-
-void BuildingIsoScene::rebuildNightPreview()
-{
-    mDeferredNightPreviewRebuild = false;
-    QVector<NightPreviewLight> lights;
-    QVector<QPolygonF> litRooms;
-    if (!mNightPreviewEnabled || !mDocument || !mBuildingMap) {
-        mNightPreviewItem->setLights(lights);
-        mNightPreviewItem->setLitRooms(litRooms);
-        return;
-    }
-
-    MapComposite *composite = mBuildingMap->mapComposite();
-    MapRenderer *renderer = mBuildingMap->mapRenderer();
-    Map *map = mBuildingMap->map();
-    const int level = currentLevel();
-    CompositeLayerGroup *layerGroup =
-            composite->tileLayersForLevel(level);
-    if (!layerGroup) {
-        mNightPreviewItem->setLights(lights);
-        mNightPreviewItem->setLitRooms(litRooms);
-        return;
-    }
-
-    layerGroup->prepareDrawing2();
-    OrderedCellsTemporaries vars;
-    QVector<const Tiled::Cell*> cells;
-    TileDefWatcher *tileDefWatcher = getTileDefWatcher();
-    tileDefWatcher->check();
-    QSet<Room*> switchedRooms;
-    QSet<QString> lightKeys;
-
-    for (int y = 0; y < map->height(); ++y) {
-        for (int x = 0; x < map->width(); ++x) {
-            if (!layerGroup->orderedCellsAt2(QPoint(x, y), vars, cells))
-                continue;
-            for (const Tiled::Cell *cell : qAsConst(cells)) {
-                if (!cell || !cell->tile)
-                    continue;
-                const Tiled::Tile *tile = cell->tile;
-                TileDefTile *tileDef = tileDefWatcher->tile(
-                            tile->tileset()->name(), tile->id());
-                const auto property = [tile, tileDef](
-                        const QString &name) {
-                    if (tileDef) {
-                        auto exact = tileDef->mProperties.constFind(name);
-                        if (exact != tileDef->mProperties.constEnd())
-                            return exact.value();
-                        for (auto it = tileDef->mProperties.constBegin();
-                             it != tileDef->mProperties.constEnd(); ++it) {
-                            if (it.key().compare(name,
-                                                 Qt::CaseInsensitive) == 0)
-                                return it.value();
-                        }
-                    }
-                    const auto &properties = tile->properties();
-                    auto exact = properties.constFind(name);
-                    if (exact != properties.constEnd())
-                        return exact.value();
-                    for (auto it = properties.constBegin();
-                         it != properties.constEnd(); ++it) {
-                        if (it.key().compare(name,
-                                             Qt::CaseInsensitive) == 0)
-                            return it.value();
-                    }
-                    return QString();
-                };
-                const auto containsProperty = [tile, tileDef](
-                        const QString &name) {
-                    if (tileDef) {
-                        for (auto it = tileDef->mProperties.constBegin();
-                             it != tileDef->mProperties.constEnd(); ++it) {
-                            if (it.key().compare(name,
-                                                 Qt::CaseInsensitive) == 0)
-                                return true;
-                        }
-                    }
-                    const auto &properties = tile->properties();
-                    for (auto it = properties.constBegin();
-                         it != properties.constEnd(); ++it) {
-                        if (it.key().compare(name,
-                                             Qt::CaseInsensitive) == 0)
-                            return true;
-                    }
-                    return false;
-                };
-                const QString tilesetName = tile->tileset()->name();
-                const bool isKnownRoomSwitch =
-                        tilesetName.compare(
-                            QStringLiteral("lighting_indoor_01"),
-                            Qt::CaseInsensitive) == 0 &&
-                        tile->id() >= 0 && tile->id() < 8;
-                const bool isSwitch =
-                        property(QStringLiteral("IsoType")).compare(
-                            QStringLiteral("lightswitch"),
-                            Qt::CaseInsensitive) == 0 ||
-                        containsProperty(
-                            QStringLiteral("lightswitch")) ||
-                        isKnownRoomSwitch;
-                bool redOk = false;
-                bool greenOk = false;
-                bool blueOk = false;
-                int red = property(
-                            QStringLiteral("lightR")).toInt(&redOk);
-                int green = property(
-                            QStringLiteral("lightG")).toInt(&greenOk);
-                int blue = property(
-                            QStringLiteral("lightB")).toInt(&blueOk);
-                bool hasLightColor = redOk && greenOk && blueOk;
-                bool fallbackLight = false;
-                if (!hasLightColor &&
-                        tilesetName.startsWith(
-                            QStringLiteral("lighting_outdoor_"),
-                            Qt::CaseInsensitive) &&
-                        !tilesetName.endsWith(
-                            QStringLiteral("_on"),
-                            Qt::CaseInsensitive)) {
-                    const QColor fallbackColor(
-                                QSettings().value(
-                                    QStringLiteral(
-                                        "NightPreview/FallbackColor"),
-                                    QStringLiteral("#ffdca4")).toString());
-                    red = fallbackColor.isValid()
-                            ? fallbackColor.red() : 255;
-                    green = fallbackColor.isValid()
-                            ? fallbackColor.green() : 220;
-                    blue = fallbackColor.isValid()
-                            ? fallbackColor.blue() : 164;
-                    hasLightColor = true;
-                    fallbackLight = true;
-                }
-                if (!hasLightColor) {
-                    if (!isSwitch)
-                        continue;
-                    if (currentFloor()) {
-                        if (Room *room =
-                                currentFloor()->GetRoomAt(x, y))
-                            switchedRooms.insert(room);
-                    }
-                    continue;
-                }
-
-                const QString key = QStringLiteral("%1:%2:%3:%4")
-                        .arg(x).arg(y)
-                        .arg(tilesetName)
-                        .arg(tile->id());
-                if (lightKeys.contains(key))
-                    continue;
-                lightKeys.insert(key);
-
-                bool radiusOk = false;
-                int radius = property(
-                            QStringLiteral("LightRadius")).toInt(&radiusOk);
-                if (!radiusOk || radius <= 0)
-                    radius = fallbackLight
-                            ? QSettings().value(
-                                  QStringLiteral(
-                                      "NightPreview/FallbackRadius"),
-                                  4).toInt()
-                            : 10;
-                NightPreviewLight light;
-                light.center = renderer->tileToPixelCoords(
-                            QPointF(x + 0.5, y + 0.5), level);
-                light.color = QColor(qBound(0, red, 255),
-                                     qBound(0, green, 255),
-                                     qBound(0, blue, 255));
-                light.radiusX = QLineF(
-                            light.center,
-                            renderer->tileToPixelCoords(
-                                QPointF(x + radius + 0.5,
-                                        y + 0.5), level)).length();
-                light.radiusY = QLineF(
-                            light.center,
-                            renderer->tileToPixelCoords(
-                                QPointF(x + 0.5,
-                                        y + radius + 0.5), level)).length();
-                lights.append(light);
-            }
-        }
-    }
-
-    if (currentFloor()) {
-        for (Room *room : qAsConst(switchedRooms)) {
-            const QVector<QRect> rects =
-                    currentFloor()->roomRegion(room);
-            for (const QRect &rect : rects)
-                litRooms.append(renderer->tileToPixelCoords(rect, level));
-        }
-    }
-
-    mNightPreviewItem->setBounds(sceneRect());
-    mNightPreviewItem->setLights(lights);
-    mNightPreviewItem->setLitRooms(litRooms);
-    qInfo() << "Night preview detected" << lights.size()
-            << "tile light source(s) and" << litRooms.size()
-            << "lit room polygon(s) at level" << level;
-}
-
 void BuildingIsoScene::currentFloorChanged()
 {
     if (!mLoading && !hasVisibleView()) {
@@ -1352,7 +1106,6 @@ void BuildingIsoScene::currentFloorChanged()
     mDeferredCurrentFloorChange = false;
     QElapsedTimer elapsed;
     elapsed.start();
-
     synchObjectItemVisibility();
 
     highlightFloorChanged(prefs()->highlightFloor());
@@ -1372,12 +1125,10 @@ void BuildingIsoScene::currentFloorChanged()
     if (BuildingFloor *floor = building()->floor(mCurrentLevel))
         mBuildingMap->suppressTiles(floor, QRegion());
     mCurrentLevel = currentLevel();
-    requestNightPreviewRebuild();
 
     if ((mLoading == false) && prefs()->showOnlyFloors()) {
         showOnlyFloorsChanged(true);
     }
-
     const qint64 elapsedMs = elapsed.elapsed();
     if (elapsedMs >= 100) {
         qWarning() << "BuildingEd slow floor switch preparation:"
@@ -1412,7 +1163,6 @@ void BuildingIsoScene::currentLayerChanged()
         if (sceneRect != this->sceneRect()) {
             setSceneRect(sceneRect);
             mDarkRectangle->setRect(sceneRect);
-            mNightPreviewItem->setBounds(sceneRect);
         }
     }
 }
@@ -1462,7 +1212,6 @@ void BuildingIsoScene::roomChanged(Room *room)
         mBuildingMap->floorEdited(floor);
         BuildingBaseScene::floorEdited(floor);
     }
-    requestNightPreviewRebuild();
 }
 
 void BuildingIsoScene::floorAdded(BuildingFloor *floor)
@@ -1514,7 +1263,6 @@ void BuildingIsoScene::objectTileChanged(BuildingObject *object)
     BuildingBaseScene::objectTileChanged(object);
 
     mBuildingMap->objectTileChanged(object);
-    requestNightPreviewRebuild();
 }
 
 void BuildingIsoScene::buildingResized()
@@ -1607,9 +1355,6 @@ void BuildingIsoScene::tilesetRemoved(Tileset *tileset)
 
 void BuildingIsoScene::tilesetChanged(Tileset *tileset)
 {
-    // setDocument() assigns mDocument before BuildingToMap() has finished
-    // constructing mBuildingMap. Asynchronous image completion may emit this
-    // signal in that interval.
     if (!mDocument || !mBuildingMap)
         return;
     if (mBuildingMap->isTilesetUsed(tileset))
@@ -1775,7 +1520,6 @@ BuildingIsoView::BuildingIsoView(QWidget *parent) :
     mRenderDiagnosticsLabel->setVisible(mRenderDiagnosticsEnabled);
     mRenderDiagnosticsLabel->raise();
     mDiagnosticsMemoryTimer.start();
-
     // Install an event filter so that we can get key events on behalf of the
     // active tool without having to have the current focus.
     qApp->installEventFilter(this);
@@ -1832,7 +1576,6 @@ void BuildingIsoView::showEvent(QShowEvent *event)
     if (scene())
         scene()->applyDeferredUpdates();
 }
-
 void BuildingIsoView::setRenderDiagnosticsEnabled(bool enabled)
 {
     if (mRenderDiagnosticsEnabled == enabled)
@@ -1849,25 +1592,21 @@ void BuildingIsoView::setRenderDiagnosticsEnabled(bool enabled)
     }
     viewport()->update();
 }
-
 void BuildingIsoView::paintEvent(QPaintEvent *event)
 {
     if (!mRenderDiagnosticsEnabled) {
         QGraphicsView::paintEvent(event);
         return;
     }
-
     ZLevelRenderer::resetRenderedTileCount();
     QElapsedTimer renderTimer;
     renderTimer.start();
     QGraphicsView::paintEvent(event);
-
     const qreal renderMs = qMax<qreal>(
                 0.01, renderTimer.nsecsElapsed() / 1000000.0);
     mDiagnosticsFrameMs = mDiagnosticsFrameMs <= 0.0
             ? renderMs
             : mDiagnosticsFrameMs * 0.75 + renderMs * 0.25;
-
     if (mDiagnosticsPreviousFrame.isValid()) {
         const qint64 elapsed = mDiagnosticsPreviousFrame.restart();
         if (elapsed > 0) {
@@ -1879,7 +1618,6 @@ void BuildingIsoView::paintEvent(QPaintEvent *event)
     } else {
         mDiagnosticsPreviousFrame.start();
     }
-
     mDiagnosticsRenderedTiles = ZLevelRenderer::renderedTileCount();
     if (!mDiagnosticsMemoryTimer.isValid() ||
             mDiagnosticsMemoryTimer.elapsed() >= 1000) {
@@ -1889,13 +1627,11 @@ void BuildingIsoView::paintEvent(QPaintEvent *event)
     }
     updateRenderDiagnosticsLabel();
 }
-
 void BuildingIsoView::resizeEvent(QResizeEvent *event)
 {
     QGraphicsView::resizeEvent(event);
     positionRenderDiagnosticsLabel();
 }
-
 void BuildingIsoView::updateRenderDiagnosticsLabel()
 {
     const bool openGL = qobject_cast<QOpenGLWidget *>(viewport());
@@ -1918,7 +1654,6 @@ void BuildingIsoView::updateRenderDiagnosticsLabel()
     positionRenderDiagnosticsLabel();
     mRenderDiagnosticsLabel->raise();
 }
-
 void BuildingIsoView::positionRenderDiagnosticsLabel()
 {
     if (!mRenderDiagnosticsLabel || !viewport())
@@ -1930,7 +1665,6 @@ void BuildingIsoView::positionRenderDiagnosticsLabel()
                        - mRenderDiagnosticsLabel->height() - 10);
     mRenderDiagnosticsLabel->move(x, y);
 }
-
 void BuildingIsoView::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::MiddleButton) {

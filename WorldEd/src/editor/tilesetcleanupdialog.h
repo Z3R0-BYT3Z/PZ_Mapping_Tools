@@ -6,27 +6,22 @@
  * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  */
-
 #ifndef TILESETCLEANUPDIALOG_H
 #define TILESETCLEANUPDIALOG_H
-
 #include <QDialog>
 #include <QStringList>
-
 class QCheckBox;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
 class QTableWidget;
-
 struct TilesetCleanupOptions
 {
     bool recursive = true;
     bool normalizePaths = true;
     bool removeUnresolvedTilesets = false;
 };
-
 struct TilesetCleanupResult
 {
     QString fileName;
@@ -53,7 +48,6 @@ struct TilesetCleanupResult
     QStringList dependencyWarnings;
     QString error;
 };
-
 class TilesetCleanup
 {
 public:
@@ -68,16 +62,13 @@ public:
                           const QString &backupRoot = QString());
     static bool validate(QString *summary, QString *error);
 };
-
 class TilesetCleanupDialog : public QDialog
 {
     Q_OBJECT
-
 public:
     explicit TilesetCleanupDialog(const QString &initialRoot,
                                   const QString &projectFile = QString(),
                                   QWidget *parent = nullptr);
-
 private slots:
     void browse();
     void analyze();
@@ -85,7 +76,6 @@ private slots:
     void updateActions();
     void updateStatus();
     void updateSummaryTable();
-
 private:
     QList<TilesetCleanupResult> run(bool apply,
                                     const QString &backupRoot = QString());
@@ -93,7 +83,6 @@ private:
     int changedFileCount() const;
     QStringList projectPathWarnings() const;
     QString fullReport(const QString &backupRoot = QString()) const;
-
     QLineEdit *mRootEdit = nullptr;
     QCheckBox *mRecursiveCheck = nullptr;
     QCheckBox *mNormalizeCheck = nullptr;
@@ -110,5 +99,4 @@ private:
     QString mProjectFile;
     QStringList mProjectWarnings;
 };
-
-#endif // TILESETCLEANUPDIALOG_H
+#endif

@@ -271,22 +271,6 @@ Static modules are order-sensitive because the runtime uses the first module
 that contains a square. Review the final `WorldGenOverride.lua` when several
 modules overlap.
 
-## Regression commands
-
-Maintainers can exercise the same deployed-code paths without saving user
-data:
-
-```text
-PZWorldEd.exe --validate-worldgen-preview=<game-or-WorldGen-path>
-PZWorldEd.exe --validate-worldgen-prefab-import=<source.tmx-or-tbx>
-PZWorldEd.exe --render-worldgen-prefab-window=<game-or-WorldGen-path> --worldgen-preview-output=<capture.png>
-PZWorldEd.exe --render-worldgen-prefab=<game-or-WorldGen-path> --worldgen-preview-output=<capture.png>
-```
-
-The import validator reports dimensions, unique tile count, placements, and
-conversion warnings. The renderer captures the isometric prefab editor after
-the complete Tiles catalogue is ready.
-
 ## Preview scope
 
 The deterministic preview is intended to answer “what do these current biome
@@ -299,6 +283,3 @@ The preview does not claim exact parity for:
 - every `$subbiome` marker expansion;
 - roads;
 - erosion.
-
-Road WorldGen is deliberately excluded while that runtime system is still
-being completed. Erosion is treated as a potential separate editor/module.

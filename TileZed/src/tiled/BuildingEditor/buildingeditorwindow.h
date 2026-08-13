@@ -46,6 +46,7 @@ class Tile;
 class Tileset;
 namespace Internal {
 class TileDefFile;
+class TileSelectionScope;
 class Zoomable;
 }
 }
@@ -230,6 +231,8 @@ public:
 
     Ui::BuildingEditorWindow *actionIface() { return ui; }
     QToolBar *createCommonToolBar();
+    void setTileSelectionScope(Tiled::Internal::TileSelectionScope *scope)
+    { mTileSelectionScope = scope; }
 
     void documentTabCloseRequested(int index);
 
@@ -359,7 +362,7 @@ private:
     QAction *mRedoAction;
     QAction *mRunLuaScriptAction = nullptr;
     QAction *mLuaConsoleAction = nullptr;
-    QAction *mNightPreviewAction = nullptr;
+    Tiled::Internal::TileSelectionScope *mTileSelectionScope = nullptr;
     QSettings &mSettings;
     QString mError;
     QString mLuaScriptFile;

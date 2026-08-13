@@ -69,7 +69,6 @@ static int baseGameTileDefFileNumber(const QString &fileName)
     QString name = QFileInfo(fileName).fileName().toLower();
     if (name.endsWith(QLatin1String(".txt")))
         name.chop(4);
-
     if (name == QLatin1String("newtiledefinitions.tiles"))
         return 1;
     if (name == QLatin1String("tiledefinitions_erosion.tiles"))
@@ -84,7 +83,6 @@ static int baseGameTileDefFileNumber(const QString &fileName)
         return 8;
     return -1;
 }
-
 static qint64 baseGameSpriteId(int fileNumber, int tilesetId, int tileId)
 {
     if (fileNumber == 1)
@@ -94,7 +92,6 @@ static qint64 baseGameSpriteId(int fileNumber, int tilesetId, int tileId)
             + qint64(tilesetId - 1) * 512
             + tileId;
 }
-
 class MyProxyStyle : public QProxyStyle
 {
 public:
@@ -359,7 +356,6 @@ TileDefDialog::TileDefDialog(QWidget *parent) :
     targetGroup->addAction(mBaseGameTargetAction);
     mModTargetAction->setChecked(true);
     ui->menuFile->insertMenu(ui->actionReassignTilesetIDs, targetMenu);
-
     mSplitForB42ModsAction = new QAction(
                 tr("Repair / Split for B42 Mods..."), this);
     mSplitForB42ModsAction->setToolTip(tr(
@@ -373,7 +369,6 @@ TileDefDialog::TileDefDialog(QWidget *parent) :
             this, [this]() { setBaseGameTarget(true); });
     connect(mSplitForB42ModsAction, &QAction::triggered,
             this, &TileDefDialog::splitForB42Mods);
-
     QProxyStyle* style = new MyProxyStyle(qApp->style());
 
     ui->statusbar->hide();
@@ -670,7 +665,6 @@ void TileDefDialog::addTileset()
                     .arg(maximumTilesetID()));
         return;
     }
-
     AddTilesetsDialog dialog(tilesDir(),
                              mTileDefFile->tilesetNames(),
                              false,
@@ -738,11 +732,9 @@ void TileDefDialog::removeTilesets()
     dialog.setTilesets(mTilesetByName.keys());
     if (dialog.exec() != QDialog::Accepted)
         return;
-
     const QStringList tilesets = dialog.tilesetsToRemove();
     if (tilesets.isEmpty())
         return;
-
     mUndoStack->beginMacro(tr("Remove Tilesets"));
     int removed = 0;
     for (const QString &tilesetName : tilesets) {
@@ -758,7 +750,6 @@ void TileDefDialog::removeTilesets()
                 this, tr("Remove Tilesets"),
                 tr("Removed %1 tilesets.").arg(removed));
 }
-
 #ifdef TDEF_TILES_DIR
 void TileDefDialog::chooseTilesDirectory()
 {
@@ -922,7 +913,7 @@ void TileDefDialog::openRecentFile()
 }
 
 bool TileDefDialog::fileSave()
-{    
+{
     if (mTileDefFile->fileName().length())
         return fileSave(mTileDefFile->fileName());
     else
@@ -1300,7 +1291,6 @@ void TileDefDialog::tilesetChanged(Tileset *tileset)
 {
     if (!tileset || !mTileDefFile)
         return;
-
     if (TileDefTileset *defTileset =
             mTileDefFile->tileset(tileset->name())) {
         const int columns = tileset->columnCount();
@@ -1312,8 +1302,6 @@ void TileDefDialog::tilesetChanged(Tileset *tileset)
                     || rows != defTileset->mRows)) {
             const QSize oldSize(defTileset->mColumns, defTileset->mRows);
             defTileset->resize(columns, rows);
-            // An external PNG/catalogue change is not an undoable property
-            // edit, but the resized geometry must still be saved to def.tiles.
             mUndoStack->resetClean();
             updateWindowTitle();
             qInfo() << "Updated open tile-definition geometry:"
@@ -1322,7 +1310,6 @@ void TileDefDialog::tilesetChanged(Tileset *tileset)
                     << "(properties preserved by tile coordinates)";
         }
     }
-
     if (tileset == mCurrentTileset)
         setTilesList();
 }
@@ -1533,7 +1520,6 @@ void TileDefDialog::splitForB42Mods()
 {
     if (!mTileDefFile)
         return;
-
     QString suggested = mTileDefFile->fileName();
     if (suggested.isEmpty())
         suggested = QDir(tilesDir()).filePath(
@@ -1548,7 +1534,6 @@ void TileDefDialog::splitForB42Mods()
                            Qt::CaseInsensitive)) {
         fileName += QLatin1String(".tiles");
     }
-
     const QStringList outputs = mTileDefFile->modSeriesFileNames(fileName);
     QStringList existing;
     for (const QString &output : outputs) {
@@ -1569,7 +1554,6 @@ void TileDefDialog::splitForB42Mods()
         if (overwrite != QMessageBox::Yes)
             return;
     }
-
     QStringList written;
     if (!mTileDefFile->writeModSeries(fileName, &written)) {
         QMessageBox::critical(
@@ -1577,11 +1561,9 @@ void TileDefDialog::splitForB42Mods()
                     mTileDefFile->errorString());
         return;
     }
-
     QSettings settings;
     settings.setValue(QLatin1String("TileDefDialog/LastOpenPath"),
                       QFileInfo(written.first()).absolutePath());
-
     QStringList nativeNames;
     for (const QString &output : std::as_const(written))
         nativeNames += QDir::toNativeSeparators(output);
@@ -1594,7 +1576,6 @@ void TileDefDialog::splitForB42Mods()
                 .arg(written.size())
                 .arg(nativeNames.join(QLatin1Char('\n'))));
 }
-
 void TileDefDialog::updateUI()
 {
     mSynching = true;
@@ -1736,7 +1717,6 @@ void TileDefDialog::fileOpen(const QString &fileName)
     mTilesDirectory.clear();
 #endif
     tilesDirChanged();
-
     QString validationError;
     if (!validateCurrentTarget(&validationError)) {
         QMessageBox::warning(
@@ -1764,7 +1744,6 @@ bool TileDefDialog::fileSave(const QString &fileName)
                     .arg(validationError));
         return false;
     }
-
     const TileDefFile::TargetFormat target = mBaseGameTarget
             ? TileDefFile::BaseGameFormat
             : TileDefFile::ModFormat;
@@ -1921,7 +1900,6 @@ void TileDefDialog::setToolTipEtc(int tileID)
             .arg(defTile->tileset()->mName)
             .arg(defTile->id());
     tooltip += QLatin1String("");
-
     for (UIProperties::UIProperty *p : defTile->mPropertyUI.nonDefaultProperties()) {
         tooltip += tr("%1 = %2").arg(p->mName).arg(p->valueAsString());
     }
@@ -1976,10 +1954,8 @@ void TileDefDialog::setToolTipEtc(int tileID)
     if (!tooltip.isEmpty()) {
         tooltip += QLatin1String("");
     }
-
     tooltip += tr("Tileset ID: %1").arg(defTile->tileset()->mID);
     tooltip += tr("Tile index: %1").arg(defTile->id());
-
     QString definitionName =
             QFileInfo(mTileDefFile->fileName()).fileName().toLower();
     if (definitionName.endsWith(QLatin1String(".txt")))
@@ -2318,18 +2294,13 @@ void TileDefDialog::tilesDirChanged()
         QString imageSource2x;
         TilesetManager::instance()->getTilesetFileName(
                     tsDef->mName, imageSource, imageSource2x);
-
-        // Keep the historical per-def.tiles directory fallback, but prefer
-        // the shared resolver because it knows about 1x/2x and .pack folders.
         if (!QImageReader(imageSource).size().isValid())
             imageSource = dir.filePath(tsDef->mImageSource);
         if (!QImageReader(imageSource2x).size().isValid())
             imageSource2x = dir2x.filePath(tsDef->mImageSource);
-
         const QSize customSize = CustomTileSize::forTileset(tsDef->mName);
         const QSize tileSize = customSize.isEmpty()
                 ? QSize(64, 128) : customSize;
-
         if (QImageReader(imageSource2x).size().isValid()) {
             imageSource2x = QFileInfo(imageSource2x).canonicalFilePath();
             QImageReader ir(imageSource2x);
@@ -2406,11 +2377,8 @@ void TileDefDialog::tilesDirChanged()
     }
 
     if (resized.size()) {
-        // Make sure closing the editor prompts to persist the new matrix even
-        // when no tile property was edited.
         mUndoStack->resetClean();
         updateWindowTitle();
-
         QStringList sl;
         for (const ResizedTileset& rt : std::as_const(resized)) {
             bool smaller = rt.oldSize.width() > rt.newSize.width() ||
@@ -2552,7 +2520,6 @@ int TileDefDialog::maximumTilesetID() const
                 ? TileDefFile::BaseGameFormat
                 : TileDefFile::ModFormat);
 }
-
 int TileDefDialog::maximumTilesPerTileset() const
 {
     return TileDefFile::maximumTilesPerTileset(
@@ -2560,7 +2527,6 @@ int TileDefDialog::maximumTilesPerTileset() const
                 ? TileDefFile::BaseGameFormat
                 : TileDefFile::ModFormat);
 }
-
 void TileDefDialog::setBaseGameTarget(bool baseGame)
 {
     mBaseGameTarget = baseGame;
@@ -2570,7 +2536,6 @@ void TileDefDialog::setBaseGameTarget(bool baseGame)
         mModTargetAction->setChecked(!baseGame);
     updateUI();
 }
-
 bool TileDefDialog::validateCurrentTarget(QString *error) const
 {
     if (!mTileDefFile) {
@@ -2584,7 +2549,6 @@ bool TileDefDialog::validateCurrentTarget(QString *error) const
                 : TileDefFile::ModFormat,
                 error);
 }
-
 void TileDefDialog::saveSplitterSizes(QSplitter *splitter)
 {
     QSettings settings;

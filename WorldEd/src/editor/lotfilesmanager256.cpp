@@ -17,6 +17,7 @@
 
 #include "lotfilesmanager256.h"
 
+#include "../portablesettings.h"
 #include "exportlotsprogressdialog.h"
 #include "generatelotsfailuredialog.h"
 #include "mainwindow.h"
@@ -33,6 +34,7 @@
 #include "worlddocument.h"
 
 #include "BuildingEditor/buildingfloor.h"
+#include "BuildingEditor/buildingtiles.h"
 #include "BuildingEditor/roofhiding.h"
 
 #include "InGameMap/clipper.hpp"
@@ -45,9 +47,12 @@
 #include "tileset.h"
 
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QMessageBox>
+#include <QQueue>
 #include <QRandomGenerator>
+#include <QThread>
 
 using namespace Tiled;
 
@@ -76,6 +81,20 @@ static void SaveString(QDataStream& out, const QString& str)
     out << quint8('\n');
 }
 
+static QRect chunkAlignedBounds(const QRect &bounds, int chunkSize)
+{
+    if (bounds.isEmpty() || chunkSize <= 0)
+        return QRect();
+    const int left = int(std::floor(
+            bounds.left() / double(chunkSize))) * chunkSize;
+    const int top = int(std::floor(
+            bounds.top() / double(chunkSize))) * chunkSize;
+    const int right = int(std::ceil(
+            (bounds.right() + 1) / double(chunkSize))) * chunkSize;
+    const int bottom = int(std::ceil(
+            (bounds.bottom() + 1) / double(chunkSize))) * chunkSize;
+    return QRect(left, top, right - left, bottom - top);
+}
 /////
 
 LotFilesManager256 *LotFilesManager256::mInstance = nullptr;
@@ -111,6 +130,12 @@ LotFilesManager256::~LotFilesManager256()
     //    stopThreads();
 }
 
+void LotFilesManager256::setHoleFillMode(HoleFillMode mode,
+                                         const QString &tileName)
+{
+    mHoleFillMode = mode;
+    mHoleFillTileName = tileName.trimmed();
+}
 void LotFilesManager256::collectLotsOverlappingCellBounds()
 {
     mLotsOverlappingCellBounds.clear();
@@ -131,6 +156,11 @@ void LotFilesManager256::startThreads(int numberOfThreads)
 {
     stopThreads();
 
+    const int maximumWorkers = qMin(qMax(1, QThread::idealThreadCount()), 16);
+    numberOfThreads = qBound(1, numberOfThreads, maximumWorkers);
+    qInfo() << "Lot generation workers:" << numberOfThreads
+            << "for" << qMax(1, QThread::idealThreadCount())
+            << "logical processors, maximum" << maximumWorkers;
     mWorkerThreads.resize(numberOfThreads);
     mWorkers.resize(numberOfThreads);
     for (int i = 0; i < numberOfThreads; i++) {
@@ -179,7 +209,6 @@ bool LotFilesManager256::generateWorld(WorldDocument *worldDoc, GenerateMode mod
     mWorldDoc = worldDoc;
     const GenerateLotsSettings &lotSettings = mWorldDoc->world()->getGenerateLotsSettings();
     const WorldGridFormat gridFormat = mWorldDoc->world()->gridFormat();
-
     mCellBounds256 = CombinedCellMaps::outputCellRect(
             gridFormat,
             QRect(lotSettings.worldOrigin, QSize(mWorldDoc->world()->size())));
@@ -189,6 +218,19 @@ bool LotFilesManager256::generateWorld(WorldDocument *worldDoc, GenerateMode mod
             << "world-origin" << lotSettings.worldOrigin
             << "world-size" << mWorldDoc->world()->size()
             << "output-cell-bounds" << mCellBounds256;
+    int populatedSourceCells = 0;
+    int placedTbxLots = 0;
+    for (int y = 0; y < mWorldDoc->world()->height(); ++y) {
+        for (int x = 0; x < mWorldDoc->world()->width(); ++x) {
+            WorldCell *sourceCell = mWorldDoc->world()->cellAt(x, y);
+            if (!sourceCell->mapFilePath().isEmpty())
+                ++populatedSourceCells;
+            placedTbxLots += sourceCell->lots().size();
+        }
+    }
+    qInfo() << "LOT export inputs:"
+            << "source TMX cells" << populatedSourceCells
+            << "placed TBX lots" << placedTbxLots;
 
     mDialog = new ExportLotsProgressDialog(MainWindow::instance());
     ExportLotsProgressDialog& progress = *mDialog;
@@ -244,13 +286,12 @@ bool LotFilesManager256::generateWorld(WorldDocument *worldDoc, GenerateMode mod
 #endif
 
     mStats.reset();
+    mAutoFilledHoleCount.storeRelease(0);
 
     progress.setPrompt(QLatin1String("Generating .lot files"));
 
     World *world = worldDoc->world();
 
-    // Legacy 300x300 cells may overlap several 256x256 output cells.
-    // Native 256x256 cells map directly to one output cell.
     mDoneCells256.clear();
     mCell256Queue.clear();
 
@@ -363,6 +404,13 @@ bool LotFilesManager256::generateWorld(WorldDocument *worldDoc, GenerateMode mod
             .arg(mStats.numRooms)
             .arg(mStats.numRoomRects)
             .arg(mStats.numRoomObjects);
+    const int autoFilledHoles = mAutoFilledHoleCount.loadAcquire();
+    if (autoFilledHoles > 0) {
+        stats += tr("\nHoles filled in generated LOT files: %1")
+                .arg(autoFilledHoles);
+        qInfo() << "LOT export automatically filled" << autoFilledHoles
+                << "hole coordinate(s) without modifying source maps";
+    }
     QMessageBox::information(MainWindow::instance(),
                              tr("Generate Lot Files"), stats);
 #endif
@@ -436,7 +484,7 @@ void LotFilesManager256::updateWorkers()
         if (worker == nullptr) {
             continue; // thread exited
         }
-        if (worker->mStatus == LotFilesWorker256::Status::Idle) {
+        if (worker->status() == LotFilesWorker256::Status::Idle) {
             if (mCell256Queue.isEmpty()) {
                 // if all workers are idle, we are finished
             } else {
@@ -452,40 +500,86 @@ void LotFilesManager256::updateWorkers()
                 }
             }
         }
-        if (worker->mStatus == LotFilesWorker256::Status::LoadingMaps) {
+        if (worker->status() == LotFilesWorker256::Status::LoadingMaps) {
             int loadStatus = worker->mCombinedCellMaps->checkLoading(mWorldDoc);
             if (loadStatus == -1) {
+                worker->mError = worker->mCombinedCellMaps->mError;
+                qWarning().noquote()
+                        << QStringLiteral(
+                               "LOT output cell %1,%2 failed while loading source cell %3,%4: %5")
+                           .arg(worker->mCombinedCellMaps->mCell256X)
+                           .arg(worker->mCombinedCellMaps->mCell256Y)
+                           .arg(worker->mCell->x()).arg(worker->mCell->y())
+                           .arg(worker->mError);
                 mFailures += GenerateCellFailure(worker->mCell, worker->mError);
                 mProgressDialog->setCellStatus(worker->mCombinedCellMaps->mCell256X - mCellBounds256.left(),
                                                worker->mCombinedCellMaps->mCell256Y - mCellBounds256.top(),
                                                ExportLotsProgressDialog::CellStatus::Failed);
                 delete worker->mCombinedCellMaps;
                 worker->mCombinedCellMaps = nullptr;
-                worker->mStatus = LotFilesWorker256::Status::Idle;
+                worker->setStatus(LotFilesWorker256::Status::Idle);
             }
             if (loadStatus == 1) {
                 if (mCancel) {
                     delete worker->mCombinedCellMaps;
                     worker->mCombinedCellMaps = nullptr;
-                    worker->mStatus = LotFilesWorker256::Status::Idle;
+                    worker->setStatus(LotFilesWorker256::Status::Idle);
                     continue;
                 }
                 qApp->processEvents(QEventLoop::ProcessEventsFlag::AllEvents); // handle any pending signal-to-slot before moving threads
                 worker->mCombinedCellMaps->moveToThread(worker->mCombinedCellMaps->mMapComposite, mWorkerThreads[i]);
-                worker->mStatus = LotFilesWorker256::Status::Working;
+                worker->setStatus(LotFilesWorker256::Status::Working);
                 QMetaObject::invokeMethod(worker, "addJob", Qt::QueuedConnection);
             }
         }
-        if (worker->mStatus == LotFilesWorker256::Status::Error) {
+        if (worker->status() == LotFilesWorker256::Status::Error) {
+            qWarning().noquote()
+                    << QStringLiteral(
+                           "LOT output cell %1,%2 generation failed for source cell %3,%4: %5")
+                       .arg(worker->mCombinedCellMaps->mCell256X)
+                       .arg(worker->mCombinedCellMaps->mCell256Y)
+                       .arg(worker->mCell->x()).arg(worker->mCell->y())
+                       .arg(worker->mError);
             mFailures += GenerateCellFailure(worker->mCell, worker->mError);
             mProgressDialog->setCellStatus(worker->mCombinedCellMaps->mCell256X - mCellBounds256.left(),
                                            worker->mCombinedCellMaps->mCell256Y - mCellBounds256.top(),
                                            ExportLotsProgressDialog::CellStatus::Failed);
             delete worker->mCombinedCellMaps;
             worker->mCombinedCellMaps = nullptr;
-            worker->mStatus = LotFilesWorker256::Status::Idle;
+            worker->setStatus(LotFilesWorker256::Status::Idle);
         }
-        if (worker->mStatus == LotFilesWorker256::Status::Finished) {
+        if (worker->status() == LotFilesWorker256::Status::Finished) {
+            int directLots = 0;
+            for (WorldCell *sourceCell
+                 : qAsConst(worker->mCombinedCellMaps->mCells)) {
+                directLots += sourceCell->lots().size();
+            }
+            const int crossCellLots =
+                    worker->mCombinedCellMaps
+                    ->mLotsOverlappingCellBounds.size();
+            if (directLots > 0 || crossCellLots > 0
+                    || worker->mStats.numBuildings > 0) {
+                qInfo().noquote()
+                        << QStringLiteral(
+                               "LOT output cell %1,%2 complete: direct TBX %3, cross-cell TBX %4, input room rects %5, exported buildings %6, rooms %7, room rects %8, north-west-owned buildings excluded %9")
+                           .arg(worker->mCombinedCellMaps->mCell256X)
+                           .arg(worker->mCombinedCellMaps->mCell256Y)
+                           .arg(directLots).arg(crossCellLots)
+                           .arg(worker->mInputRoomRectCount)
+                           .arg(worker->mStats.numBuildings)
+                           .arg(worker->mStats.numRooms)
+                           .arg(worker->mStats.numRoomRects)
+                           .arg(worker->mRemovedBuildingCount);
+                if (directLots + crossCellLots > 0
+                        && worker->mInputRoomRectCount == 0) {
+                    qWarning().noquote()
+                            << QStringLiteral(
+                                   "LOT output cell %1,%2 loaded %3 TBX lot(s), but none contained a usable RoomDefs rectangle. Tiles can still export, but the lotheader will contain no building definition for them.")
+                               .arg(worker->mCombinedCellMaps->mCell256X)
+                               .arg(worker->mCombinedCellMaps->mCell256Y)
+                               .arg(directLots + crossCellLots);
+                }
+            }
             if (!worker->mHoleInFloor.isEmpty()) {
                 const int sampleLimit = 24;
                 QStringList samples;
@@ -509,13 +603,18 @@ void LotFilesManager256::updateWorkers()
                 }
                 mFailures += GenerateCellFailure(
                             worker->mCell, message);
+                qWarning().noquote()
+                        << QStringLiteral("LOT output cell %1,%2: %3")
+                           .arg(worker->mCombinedCellMaps->mCell256X)
+                           .arg(worker->mCombinedCellMaps->mCell256Y)
+                           .arg(message);
             }
             mProgressDialog->setCellStatus(worker->mCombinedCellMaps->mCell256X - mCellBounds256.left(),
                                            worker->mCombinedCellMaps->mCell256Y - mCellBounds256.top(),
                                            ExportLotsProgressDialog::CellStatus::Exported);
             delete worker->mCombinedCellMaps;
             worker->mCombinedCellMaps = nullptr;
-            worker->mStatus = LotFilesWorker256::Status::Idle;
+            worker->setStatus(LotFilesWorker256::Status::Idle);
             mStats.combine(worker->mStats);
         }
     }
@@ -571,6 +670,20 @@ void LotFilesManager256::updateWorkers()
             .arg(mStats.numRooms)
             .arg(mStats.numRoomRects)
             .arg(mStats.numRoomObjects);
+    const int autoFilledHoles = mAutoFilledHoleCount.loadAcquire();
+    if (autoFilledHoles > 0) {
+        stats += tr("\nHoles filled in generated LOT files: %1")
+                .arg(autoFilledHoles);
+        qInfo() << "LOT export automatically filled" << autoFilledHoles
+                << "hole coordinate(s) without modifying source maps";
+    }
+    qInfo().noquote()
+            << QStringLiteral(
+                   "LOT export complete: output cells %1, buildings %2, rooms %3, room rects %4, room objects %5, reported issues %6")
+               .arg(mDoneCells256.size())
+               .arg(mStats.numBuildings).arg(mStats.numRooms)
+               .arg(mStats.numRoomRects).arg(mStats.numRoomObjects)
+               .arg(mFailures.size());
     QMessageBox::information(MainWindow::instance(),
                              tr("Generate Lot Files"), stats);
 }
@@ -582,7 +695,7 @@ LotFilesWorker256 *LotFilesManager256::getFirstWorkerWithStatus(LotFilesWorker25
         if (worker == nullptr) {
             continue; // thread exited
         }
-        if (worker->mStatus == status) {
+        if (worker->status() == status) {
             return worker;
         }
     }
@@ -601,7 +714,7 @@ LotFilesWorker256 *LotFilesManager256::getBusyWorker()
         if (worker == nullptr) {
             continue; // thread exited
         }
-        if (worker->mStatus != LotFilesWorker256::Status::Idle) {
+        if (worker->status() != LotFilesWorker256::Status::Idle) {
             return worker;
         }
     }
@@ -636,7 +749,7 @@ bool LotFilesManager256::generateCell(LotFilesWorker256 *worker, WorldCell *cell
     worker->mCombinedCellMaps = combinedMaps;
     worker->mCell = cell;
     worker->mHoleInFloor.clear();
-    worker->mStatus = LotFilesWorker256::Status::LoadingMaps;
+    worker->setStatus(LotFilesWorker256::Status::LoadingMaps);
     return true;
 }
 
@@ -679,8 +792,6 @@ bool LotFilesManager256::overwriteSpawnMap(WorldDocument *worldDoc, GenerateMode
 
     progress.setPrompt(QLatin1String("Running..."));
 
-    // Legacy 300x300 cells may overlap several 256x256 output cells.
-    // Native 256x256 cells map directly to one output cell.
     mDoneCells256.clear();
 
     if (mode == GenerateMode::GenerateAll) {
@@ -885,9 +996,6 @@ void LotFilesManager256::writeZombieIntensity(QDataStream &out, int cell256X, in
 {
     const GenerateLotsSettings &lotSettings = mWorldDoc->world()->getGenerateLotsSettings();
 
-    // Native-256 projects already have the exact 32x32 samples expected by
-    // the game for each output cell.  Keep the stored raw red-channel values;
-    // the B42 x40 factor is a renderer/debug-preview amplification only.
     if (mWorldDoc->world()->gridFormat() == WorldGridFormat::Native256) {
         const int imageCellX = cell256X - lotSettings.worldOrigin.x();
         const int imageCellY = cell256Y - lotSettings.worldOrigin.y();
@@ -906,7 +1014,6 @@ void LotFilesManager256::writeZombieIntensity(QDataStream &out, int cell256X, in
         }
         return;
     }
-
     QRect cellBounds300 = CombinedCellMaps::toCellRect300(QRect(cell256X, cell256Y, 1, 1));
 
     // Set the zombie intensity on each square using the spawn image.
@@ -999,16 +1106,16 @@ bool LotFilesWorker256::generateCell()
             } else {
                 mError = tr("Some tilesets are missing in a map in cell %1,%2:\n%3\n%4").arg(cell256X).arg(cell256Y).arg(mc->mapInfo()->path()).arg(missingTilesetsString(mc->map()));
             }
-            mStatus = Status::Error;
 //            qApp->processEvents(QEventLoop::ProcessEventsFlag::ExcludeUserInputEvents); // handle any pending signal-to-slot before moving threads
             mCombinedCellMaps->moveToThread(mCombinedCellMaps->mMapComposite, qApp->thread());
+            setStatus(Status::Error);
             return false;
         }
     }
 
     if (generateHeader(combinedMaps, mapComposite) == false) {
-        mStatus = Status::Error;
         mCombinedCellMaps->moveToThread(mCombinedCellMaps->mMapComposite, qApp->thread());
+        setStatus(Status::Error);
         return false;
     }
 
@@ -1019,8 +1126,8 @@ bool LotFilesWorker256::generateCell()
         }
         generateChunkData();
         clearRemovedBuildingsList();
-        mStatus = Status::Finished;
         mCombinedCellMaps->moveToThread(mCombinedCellMaps->mMapComposite, qApp->thread());
+        setStatus(Status::Finished);
         return true;
     }
 
@@ -1078,6 +1185,7 @@ bool LotFilesWorker256::generateCell()
     }
 
     checkHolesOnLevelZero();
+    fillHolesInGeneratedLot();
 
     if (mMinLevel == 10000) {
         mMinLevel = mMaxLevel = 0;
@@ -1085,8 +1193,6 @@ bool LotFilesWorker256::generateCell()
 
     generateBuildingObjects(mapWidth, mapHeight);
 
-    // Native B42 maps use WorldGen + biomemap definitions for jumbo trees.
-    // Keep the fake-jumbo randomizer only for legacy 300x300 projects.
     if (mWorldDoc->world()->gridFormat() != WorldGridFormat::Native256)
         generateJumboTrees(combinedMaps);
 
@@ -1104,8 +1210,8 @@ bool LotFilesWorker256::generateCell()
     QFile file(lotsDirectory + QLatin1Char('/') + fileName);
     if (!file.open(QIODevice::WriteOnly /*| QIODevice::Text*/)) {
         mError = tr("Could not open file for writing.");
-        mStatus = Status::Error;
         mCombinedCellMaps->moveToThread(mCombinedCellMaps->mMapComposite, qApp->thread());
+        setStatus(Status::Error);
         return false;
     }
 
@@ -1134,8 +1240,8 @@ bool LotFilesWorker256::generateCell()
                     - combinedMaps.mMinSourceCellY * combinedMaps.mSourceCellSize
                     + y * CHUNK_SIZE_256;
             if (generateChunk(out, chunkX, chunkY) == false) {
-                mStatus = Status::Error;
                 mCombinedCellMaps->moveToThread(mCombinedCellMaps->mMapComposite, qApp->thread());
+                setStatus(Status::Error);
                 return false;
             }
         }
@@ -1152,8 +1258,8 @@ bool LotFilesWorker256::generateCell()
 
     clearRemovedBuildingsList();
 
-    mStatus = Status::Finished;
     mCombinedCellMaps->moveToThread(mCombinedCellMaps->mMapComposite, qApp->thread());
+    setStatus(Status::Finished);
     return true;
 }
 
@@ -1216,6 +1322,138 @@ void LotFilesWorker256::checkHolesOnLevelZero() {
     }
 }
 
+int LotFilesWorker256::fillHolesInGeneratedLot()
+{
+    if (mHoleInFloor.isEmpty()
+            || mManager->mHoleFillMode == LotFilesManager256::ReportHoles) {
+        return 0;
+    }
+    CombinedCellMaps &combinedMaps = *mCombinedCellMaps;
+    const QPoint worldOrigin =
+            mWorldDoc->world()->getGenerateLotsSettings().worldOrigin;
+    const int boundsX =
+            (mCell->x() + worldOrigin.x() - combinedMaps.mMinSourceCellX)
+            * combinedMaps.mSourceCellSize;
+    const int boundsY =
+            (mCell->y() + worldOrigin.y() - combinedMaps.mMinSourceCellY)
+            * combinedMaps.mSourceCellSize;
+    QRect repairBounds(boundsX, boundsY,
+                       combinedMaps.mSourceCellSize,
+                       combinedMaps.mSourceCellSize);
+    repairBounds &= QRect(
+                combinedMaps.mCell256X * CELL_SIZE_256
+                    - combinedMaps.mMinSourceCellX
+                        * combinedMaps.mSourceCellSize,
+                combinedMaps.mCell256Y * CELL_SIZE_256
+                    - combinedMaps.mMinSourceCellY
+                        * combinedMaps.mSourceCellSize,
+                CELL_SIZE_256, CELL_SIZE_256);
+    if (repairBounds.isEmpty())
+        return 0;
+    const int levelIndex = -MIN_WORLD_LEVEL;
+    uint specificGid = 0;
+    if (mManager->mHoleFillMode
+            == LotFilesManager256::FillHolesWithSpecificTile) {
+        QString tilesetName;
+        int tileIndex = -1;
+        if (BuildingEditor::BuildingTilesMgr::parseTileName(
+                    mManager->mHoleFillTileName,
+                    tilesetName, tileIndex)) {
+            const uint firstGid =
+                    mTilesetNameToFirstGid.value(tilesetName, 0);
+            if (firstGid > 0 && tileIndex >= 0
+                    && TileMap.contains(firstGid + uint(tileIndex))) {
+                specificGid = firstGid + uint(tileIndex);
+            }
+        }
+    }
+    const int width = repairBounds.width();
+    const int height = repairBounds.height();
+    QVector<int> nearest(width * height, -1);
+    QQueue<int> queue;
+    if (mManager->mHoleFillMode
+            == LotFilesManager256::FillHolesWithNearestTile) {
+        for (int localY = 0; localY < height; ++localY) {
+            for (int localX = 0; localX < width; ++localX) {
+                const int gridX = repairBounds.left() + localX;
+                const int gridY = repairBounds.top() + localY;
+                if (mGridData[gridX][gridY][levelIndex].Entries.isEmpty())
+                    continue;
+                const int index = localX + localY * width;
+                nearest[index] = index;
+                queue.enqueue(index);
+            }
+        }
+        static const QPoint neighbours[] = {
+            QPoint(-1, 0), QPoint(1, 0),
+            QPoint(0, -1), QPoint(0, 1)
+        };
+        while (!queue.isEmpty()) {
+            const int index = queue.dequeue();
+            const int x = index % width;
+            const int y = index / width;
+            for (const QPoint &offset : neighbours) {
+                const int nx = x + offset.x();
+                const int ny = y + offset.y();
+                if (nx < 0 || ny < 0 || nx >= width || ny >= height)
+                    continue;
+                const int next = nx + ny * width;
+                if (nearest[next] >= 0)
+                    continue;
+                nearest[next] = nearest[index];
+                queue.enqueue(next);
+            }
+        }
+    }
+    int repaired = 0;
+    QVector<QPoint> unresolved;
+    unresolved.reserve(mHoleInFloor.size());
+    for (const QPoint &hole : std::as_const(mHoleInFloor)) {
+        const int gridX = boundsX + hole.x();
+        const int gridY = boundsY + hole.y();
+        if (!repairBounds.contains(gridX, gridY)) {
+            unresolved += hole;
+            continue;
+        }
+        uint gid = specificGid;
+        if (mManager->mHoleFillMode
+                == LotFilesManager256::FillHolesWithNearestTile) {
+            const int localX = gridX - repairBounds.left();
+            const int localY = gridY - repairBounds.top();
+            const int sourceIndex = nearest.at(localX + localY * width);
+            if (sourceIndex >= 0) {
+                const int sourceX =
+                        repairBounds.left() + sourceIndex % width;
+                const int sourceY =
+                        repairBounds.top() + sourceIndex / width;
+                const QList<LotFile::Entry *> &entries =
+                        mGridData[sourceX][sourceY][levelIndex].Entries;
+                if (!entries.isEmpty())
+                    gid = entries.first()->gid;
+            }
+        }
+        if (gid == 0 || !TileMap.contains(gid)) {
+            unresolved += hole;
+            continue;
+        }
+        mGridData[gridX][gridY][levelIndex].Entries.append(
+                    new LotFile::Entry(gid));
+        if (LotFile::Tile *tile = TileMap.value(gid, nullptr))
+            tile->used = true;
+        mMinLevel = std::min(mMinLevel, 0);
+        mMaxLevel = std::max(mMaxLevel, 0);
+        ++repaired;
+    }
+    mHoleInFloor = unresolved;
+    if (repaired > 0) {
+        mManager->mAutoFilledHoleCount.fetchAndAddRelaxed(repaired);
+        qInfo() << "LOT output cell" << combinedMaps.mCell256X
+                << combinedMaps.mCell256Y << "filled" << repaired
+                << "hole coordinate(s) on the fly, unresolved"
+                << unresolved.size();
+    }
+    return repaired;
+}
 LotFilesWorker256::LotFilesWorker256(LotFilesManager256 *manager, InterruptibleThread *thread) :
     BaseWorker(thread),
     mManager(manager),
@@ -1242,12 +1480,27 @@ bool LotFilesWorker256::generateHeader(CombinedCellMaps& combinedMaps, MapCompos
     mRoomRectByLevel.clear();
     roomList.clear();
     buildingList.clear();
+    mInputRoomRectCount = 0;
+    mRemovedBuildingCount = 0;
 
     // Create the set of all tilesets used by the map and its sub-maps.
     QList<Tileset*> tilesets;
     for (MapComposite *mc : mapComposite->maps())
         tilesets += mc->map()->tilesets();
 
+    if (mManager->mHoleFillMode
+            == LotFilesManager256::FillHolesWithSpecificTile) {
+        QString tilesetName;
+        int tileIndex = -1;
+        if (BuildingEditor::BuildingTilesMgr::parseTileName(
+                    mManager->mHoleFillTileName,
+                    tilesetName, tileIndex)) {
+            if (Tileset *fillTileset =
+                    TileMetaInfoMgr::instance()->tileset(tilesetName)) {
+                tilesets += fillTileset;
+            }
+        }
+    }
     mJumboTreeTileset = nullptr;
     if (mJumboTreeTileset == nullptr) {
         mJumboTreeTileset = new Tiled::Tileset(QLatin1String("jumbo_tree_01"), 64, 128);
@@ -1273,6 +1526,7 @@ bool LotFilesWorker256::generateHeader(CombinedCellMaps& combinedMaps, MapCompos
     if (processObjectGroups(combinedMaps, mapComposite) == false) {
         return false;
     }
+    mInputRoomRectCount = mRoomRects.size();
 #if 0
     for (WorldCell *cell : combinedMaps.mCells) {
         for (MapComposite *subMap : mapComposite->subMaps()) {
@@ -1304,14 +1558,36 @@ bool LotFilesWorker256::generateHeader(CombinedCellMaps& combinedMaps, MapCompos
             -(combinedMaps.mCell256Y * CELL_SIZE_256
               - combinedMaps.mMinSourceCellY
                       * combinedMaps.mSourceCellSize));
+    QRect boundsOfAllRoomRects;
+    for (LotFile::RoomRect *roomRect : qAsConst(mRoomRects)) {
+        if (boundsOfAllRoomRects.isEmpty())
+            boundsOfAllRoomRects = roomRect->bounds();
+        else
+            boundsOfAllRoomRects = boundsOfAllRoomRects.united(
+                        roomRect->bounds());
+    }
+    QRect roomLookupBounds = chunkAlignedBounds(
+                boundsOfAllRoomRects, combinedMaps.mSourceChunkSize);
+    if (roomLookupBounds.isEmpty()) {
+        roomLookupBounds = QRect(
+                    relativeToCell256,
+                    QSize(combinedMaps.mCellsWidth
+                          * combinedMaps.mSourceCellSize,
+                          combinedMaps.mCellsHeight
+                          * combinedMaps.mSourceCellSize));
+    }
+    const int roomLookupWidthInChunks = qMax(
+                1, roomLookupBounds.width()
+                / combinedMaps.mSourceChunkSize);
+    const int roomLookupHeightInChunks = qMax(
+                1, roomLookupBounds.height()
+                / combinedMaps.mSourceChunkSize);
     for (int level : mRoomRectByLevel.keys()) {
         QList<LotFile::RoomRect*> rrList = mRoomRectByLevel[level];
         // Use spatial partitioning to speed up the code below.
-        mRoomRectLookup.clear(relativeToCell256.x(), relativeToCell256.y(),
-                              combinedMaps.mCellsWidth
-                                      * combinedMaps.mSourceChunksPerCell,
-                              combinedMaps.mCellsHeight
-                                      * combinedMaps.mSourceChunksPerCell,
+        mRoomRectLookup.clear(roomLookupBounds.x(), roomLookupBounds.y(),
+                              roomLookupWidthInChunks,
+                              roomLookupHeightInChunks,
                               combinedMaps.mSourceChunkSize);
         for (LotFile::RoomRect *rr : rrList) {
             mRoomRectLookup.add(rr, rr->bounds());
@@ -1357,11 +1633,9 @@ bool LotFilesWorker256::generateHeader(CombinedCellMaps& combinedMaps, MapCompos
         }
     }
 
-    mRoomLookup.clear(relativeToCell256.x(), relativeToCell256.y(),
-                      combinedMaps.mCellsWidth
-                              * combinedMaps.mSourceChunksPerCell,
-                      combinedMaps.mCellsHeight
-                              * combinedMaps.mSourceChunksPerCell,
+    mRoomLookup.clear(roomLookupBounds.x(), roomLookupBounds.y(),
+                      roomLookupWidthInChunks,
+                      roomLookupHeightInChunks,
                       combinedMaps.mSourceChunkSize);
     for (LotFile::Room *r : qAsConst(roomList)) {
         r->mBounds = r->calculateBounds();
@@ -1438,6 +1712,7 @@ bool LotFilesWorker256::generateHeader(CombinedCellMaps& combinedMaps, MapCompos
 //        delete building;
         mRemovedBuildingList += building;
     }
+    mRemovedBuildingCount = mRemovedBuildingList.size();
 
     for (int i = 0; i < roomList.size(); i++) {
         roomList[i]->ID = i;
@@ -1545,7 +1820,6 @@ bool LotFilesWorker256::generateHeaderAux(int cell256X, int cell256Y)
         file.close();
         return true;
     }
-
     const int MAX_300x300_CELLS = 3;
     quint8 ZombieIntensity[MAX_300x300_CELLS * CELL_WIDTH][MAX_300x300_CELLS * CELL_HEIGHT] = {};
     const QImage& ZombieSpawnMap = mManager->ZombieSpawnMap;
@@ -2211,7 +2485,6 @@ bool CombinedCellMaps::startLoading(WorldDocument *worldDoc, int cell256X, int c
     mSourceCellSize = geometry.cellSize;
     mSourceChunksPerCell = geometry.chunksPerCell;
     mSourceChunkSize = geometry.chunkSize;
-
     const QRect sourceBounds = sourceCellRect(
             geometry.format, QRect(cell256X, cell256Y, 1, 1));
     const int minSourceCellX = sourceBounds.x();
@@ -2284,6 +2557,22 @@ int CombinedCellMaps::checkLoading(WorldDocument *worldDoc)
         mError = mLoader.errorString();
         return -1;
     }
+    if (mMapComposite != nullptr) {
+        if (mMapComposite->waitingForMapsToLoad()) {
+            if (!mLoggedPendingSubMaps) {
+                qInfo() << "LOT output cell" << mCell256X << mCell256Y
+                        << "waiting for referenced TMX/TBX sub-maps";
+                mLoggedPendingSubMaps = true;
+            }
+            return 0;
+        }
+        mMapComposite->synch();
+        if (mLoggedPendingSubMaps) {
+            qInfo() << "LOT output cell" << mCell256X << mCell256Y
+                    << "finished loading referenced TMX/TBX sub-maps";
+        }
+        return 1;
+    }
     World *world = worldDoc->world();
     const GenerateLotsSettings &lotSettings = world->getGenerateLotsSettings();
     MapInfo* mapInfo = getCombinedMap();
@@ -2349,6 +2638,12 @@ int CombinedCellMaps::checkLoading(WorldDocument *worldDoc)
     }
 #endif
     mMapComposite->synch(); //
+    if (mMapComposite->waitingForMapsToLoad()) {
+        qInfo() << "LOT output cell" << mCell256X << mCell256Y
+                << "waiting for referenced TMX/TBX sub-maps";
+        mLoggedPendingSubMaps = true;
+        return 0;
+    }
     return 1;
 }
 
@@ -2388,14 +2683,10 @@ bool CombinedCellMaps::lotOverlaps(WorldCellLot *lot, int cell256X, int cell256Y
 QRect CombinedCellMaps::outputCellRect(
         WorldGridFormat format, const QRect &sourceCellRect)
 {
-    // Native256 LOT export is deliberately one source cell to one output
-    // cell. Do not route it through the legacy 300-to-256 converter.
-    // Bug reported by шакалоблок.
     if (WorldGeometry::forFormat(format).directLotExport)
         return sourceCellRect;
     return toCellRect256(sourceCellRect);
 }
-
 QRect CombinedCellMaps::sourceCellRect(
         WorldGridFormat format, const QRect &outputCellRect)
 {
@@ -2403,7 +2694,6 @@ QRect CombinedCellMaps::sourceCellRect(
         return outputCellRect;
     return toCellRect300(outputCellRect);
 }
-
 QRect CombinedCellMaps::toCellRect256(const QRect &cellRect300)
 {
     int minCell256X = std::floor(cellRect300.x() * CELL_WIDTH / float(CELL_SIZE_256));
@@ -2421,12 +2711,10 @@ QRect CombinedCellMaps::toCellRect300(const QRect &cellRect256)
     int maxCell300Y = std::ceil(((cellRect256.bottom() + 1) * CELL_SIZE_256 - 1) / float(CELL_HEIGHT));
     return QRect(minCell300X, minCell300Y, maxCell300X - minCell300X, maxCell300Y - minCell300Y);
 }
-
 bool LotFilesManager256::validateNative256Geometry(QString *error)
 {
     if (error)
         error->clear();
-
     const WorldGeometry geometry =
             WorldGeometry::forFormat(WorldGridFormat::Native256);
     if (!geometry.directLotExport
@@ -2440,7 +2728,6 @@ bool LotFilesManager256::validateNative256Geometry(QString *error)
         }
         return false;
     }
-
     const QList<QRect> worldRects = {
         QRect(0, 0, 1, 1),
         QRect(27, 39, 8, 6),
@@ -2461,7 +2748,6 @@ bool LotFilesManager256::validateNative256Geometry(QString *error)
             }
             return false;
         }
-
         for (int y = worldRect.top(); y <= worldRect.bottom(); ++y) {
             for (int x = worldRect.left(); x <= worldRect.right(); ++x) {
                 const QRect sourceCell(x, y, 1, 1);
@@ -2480,7 +2766,6 @@ bool LotFilesManager256::validateNative256Geometry(QString *error)
             }
         }
     }
-
     const QList<int> origins = { 0, 27, -5 };
     const QList<int> cellOffsets = { 0, 1, 31 };
     const QList<int> localSquares = { 0, 1, 7, 8, 127, 255 };
@@ -2512,7 +2797,24 @@ bool LotFilesManager256::validateNative256Geometry(QString *error)
             }
         }
     }
-
+    QVector<QPoint> rowMajorCells;
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 32; ++x)
+            rowMajorCells += QPoint(x, y);
+    }
+    if (rowMajorCells.size() != 1024
+            || rowMajorCells.at(31) != QPoint(31, 0)
+            || rowMajorCells.at(32) != QPoint(0, 1)
+            || rowMajorCells.last() != QPoint(31, 31)
+            || rowMajorCells.at(31).x() * CELL_SIZE_256 + 255 != 8191
+            || rowMajorCells.at(32).y() * CELL_SIZE_256 != 256) {
+        if (error) {
+            *error = QStringLiteral(
+                        "Native256 32x32 row transition changed coordinates "
+                        "when X wrapped from 31 to 0.");
+        }
+        return false;
+    }
     const int lotSourceCell = 27;
     const int lotLocalX = 250;
     const int lotWidth = 20;
@@ -2529,7 +2831,18 @@ bool LotFilesManager256::validateNative256Geometry(QString *error)
         }
         return false;
     }
-
+    const QRect crossCellRoomBounds(-20, -12, 600, 540);
+    const QRect alignedRoomBounds = chunkAlignedBounds(
+                crossCellRoomBounds, CHUNK_SIZE_256);
+    if (alignedRoomBounds != QRect(-24, -16, 608, 544)
+            || !alignedRoomBounds.contains(crossCellRoomBounds)) {
+        if (error) {
+            *error = QStringLiteral(
+                    "Cross-cell RoomDef lookup bounds were clipped to the "
+                    "base TMX cell range.");
+        }
+        return false;
+    }
     const QRect legacyCell(0, 0, 1, 1);
     if (CombinedCellMaps::outputCellRect(
                 WorldGridFormat::Legacy300, legacyCell)
@@ -2541,6 +2854,112 @@ bool LotFilesManager256::validateNative256Geometry(QString *error)
         }
         return false;
     }
-
+    return true;
+}
+bool LotFilesManager256::validateReferencedRoomDefs(
+        const QString &tmxPath, QString *summary, QString *error)
+{
+    if (summary)
+        summary->clear();
+    if (error)
+        error->clear();
+    const QFileInfo sourceInfo(tmxPath);
+    if (!sourceInfo.isFile()) {
+        if (error) {
+            *error = QCoreApplication::translate(
+                        "LotFilesManager256",
+                        "The TMX test file does not exist: %1")
+                    .arg(tmxPath);
+        }
+        return false;
+    }
+    MapInfo *mapInfo = MapManager::instance()->loadMap(
+                sourceInfo.absoluteFilePath(), QString(), false,
+                MapManager::PriorityMedium);
+    if (mapInfo == nullptr || mapInfo->map() == nullptr) {
+        if (error) {
+            *error = QCoreApplication::translate(
+                        "LotFilesManager256",
+                        "Could not load the TMX test file: %1")
+                    .arg(MapManager::instance()->errorString());
+        }
+        return false;
+    }
+    int lotReferenceCount = 0;
+    for (ObjectGroup *objectGroup : mapInfo->map()->objectGroups()) {
+        for (const MapObject *object : objectGroup->objects()) {
+            if (object->name() == QLatin1String("lot")
+                    && !object->type().isEmpty()) {
+                ++lotReferenceCount;
+            }
+        }
+    }
+    MapComposite composite(mapInfo);
+    QElapsedTimer timer;
+    timer.start();
+    while (composite.waitingForMapsToLoad()) {
+        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+        if (timer.elapsed() > 120000) {
+            if (error) {
+                *error = QCoreApplication::translate(
+                            "LotFilesManager256",
+                            "Timed out while loading referenced TBX files for %1")
+                        .arg(sourceInfo.fileName());
+            }
+            return false;
+        }
+        QThread::msleep(1);
+    }
+    composite.synch();
+    int loadedTbxCount = 0;
+    int roomDefGroupCount = 0;
+    int roomRectCount = 0;
+    int highestRoomLevel = 0;
+    for (MapComposite *subMap : composite.maps()) {
+        if (subMap->mapInfo()->path().endsWith(
+                    QLatin1String(".tbx"), Qt::CaseInsensitive)) {
+            ++loadedTbxCount;
+        }
+        for (ObjectGroup *objectGroup : subMap->map()->objectGroups()) {
+            if (!objectGroup->name().contains(QLatin1String("RoomDefs")))
+                continue;
+            ++roomDefGroupCount;
+            highestRoomLevel = qMax(
+                        highestRoomLevel,
+                        subMap->levelRecursive() + objectGroup->level());
+            for (const MapObject *object : objectGroup->objects()) {
+                if (object->width() > 0 && object->height() > 0)
+                    ++roomRectCount;
+            }
+        }
+    }
+    if (loadedTbxCount != lotReferenceCount) {
+        if (error) {
+            *error = QCoreApplication::translate(
+                        "LotFilesManager256",
+                        "The TMX references %1 TBX lot(s), but only %2 finished loading.")
+                    .arg(lotReferenceCount)
+                    .arg(loadedTbxCount);
+        }
+        return false;
+    }
+    if (lotReferenceCount > 0 && roomRectCount == 0) {
+        if (error) {
+            *error = QCoreApplication::translate(
+                        "LotFilesManager256",
+                        "%1 TBX lot(s) loaded, but none exposed a usable RoomDefs rectangle.")
+                    .arg(loadedTbxCount);
+        }
+        return false;
+    }
+    if (summary) {
+        *summary = QCoreApplication::translate(
+                    "LotFilesManager256",
+                    "%1 TBX lot(s), %2 RoomDefs layer(s), %3 room rectangle(s), highest room level %4")
+                .arg(loadedTbxCount)
+                .arg(roomDefGroupCount)
+                .arg(roomRectCount)
+                .arg(highestRoomLevel);
+    }
     return true;
 }

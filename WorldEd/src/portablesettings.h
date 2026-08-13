@@ -1,23 +1,25 @@
 #ifndef PORTABLESETTINGS_H
 #define PORTABLESETTINGS_H
-
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QScreen>
 #include <QSettings>
+#include <QSize>
 #include <QStringList>
 #include <QSysInfo>
 #include <QThread>
-
+#include <QWidget>
+#include <QWindow>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
-
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -34,22 +36,17 @@
 #include <mach/mach.h>
 #include <sys/sysctl.h>
 #endif
-
 namespace PortableSettings {
-
 static const int SETTINGS_SCHEMA_VERSION = 2;
-
 inline QString executableDirectoryPath()
 {
     return QDir(QCoreApplication::applicationDirPath()).absolutePath();
 }
-
 inline bool usesBinLayout()
 {
     return QDir(executableDirectoryPath()).dirName().compare(
                 QLatin1String("bin"), Qt::CaseInsensitive) == 0;
 }
-
 inline QString installRootPath()
 {
     QDir directory(executableDirectoryPath());
@@ -57,12 +54,10 @@ inline QString installRootPath()
         directory.cdUp();
     return directory.absolutePath();
 }
-
 inline QString installPath(const QString &relativePath)
 {
     return QDir(installRootPath()).filePath(relativePath);
 }
-
 inline QString applicationConfigPath()
 {
     const QString configDirectory = installPath(QLatin1String("config"));
@@ -70,25 +65,19 @@ inline QString applicationConfigPath()
         return configDirectory;
     return executableDirectoryPath();
 }
-
 inline QString rootPath()
 {
     return installPath(QLatin1String("settings"));
 }
-
 inline bool containsConfigurationCatalogs(const QString &candidate)
 {
     const QFileInfo directoryInfo(candidate);
     if (!directoryInfo.exists() || !directoryInfo.isDir())
         return false;
-
-    // Portable settings are never a configuration-catalog directory, even if
-    // an early preview copied stale catalogs there.
     if (directoryInfo.fileName().compare(
                 QLatin1String("settings"), Qt::CaseInsensitive) == 0) {
         return false;
     }
-
     const QDir directory(candidate);
     const QStringList requiredCatalogs = {
         QLatin1String("Tilesets.txt"),
@@ -103,29 +92,24 @@ inline bool containsConfigurationCatalogs(const QString &candidate)
     }
     return true;
 }
-
 inline QString normalizedConfigurationPath(const QString &candidate)
 {
     if (candidate.trimmed().isEmpty())
         return QString();
-
     const QString cleaned = QDir::cleanPath(candidate);
     if (containsConfigurationCatalogs(cleaned))
         return cleaned;
-
     const QString nested =
             QDir(cleaned).filePath(QLatin1String("config"));
     if (containsConfigurationCatalogs(nested))
         return QDir::cleanPath(nested);
     return cleaned;
 }
-
 inline bool isConfigurationPath(const QString &candidate)
 {
     return containsConfigurationCatalogs(
                 normalizedConfigurationPath(candidate));
 }
-
 inline QString validatedConfigurationPath(const QString &candidate)
 {
     const QString cleaned = normalizedConfigurationPath(candidate);
@@ -133,12 +117,10 @@ inline QString validatedConfigurationPath(const QString &candidate)
         return cleaned;
     return QDir::cleanPath(applicationConfigPath());
 }
-
 inline QString sharedSettingsFilePath()
 {
     return QDir(rootPath()).filePath(QLatin1String("PZTools.ini"));
 }
-
 inline bool syncThemeAcrossApplications()
 {
     QSettings shared(sharedSettingsFilePath(), QSettings::IniFormat);
@@ -146,19 +128,16 @@ inline bool syncThemeAcrossApplications()
                 QLatin1String("Interface/SyncThemeAcrossApplications"),
                 false).toBool();
 }
-
 inline QString sharedTheme(const QString &fallback = QStringLiteral("Default"))
 {
     QSettings shared(sharedSettingsFilePath(), QSettings::IniFormat);
     return shared.value(QLatin1String("Interface/Theme"), fallback).toString();
 }
-
 inline void setThemeForAllApplications(const QString &theme)
 {
     QSettings shared(sharedSettingsFilePath(), QSettings::IniFormat);
     shared.setValue(QLatin1String("Interface/Theme"), theme);
     shared.sync();
-
     const QStringList applicationNames = {
         QLatin1String("TileZed"),
         QLatin1String("BuildingEd"),
@@ -171,7 +150,6 @@ inline void setThemeForAllApplications(const QString &theme)
         settings.sync();
     }
 }
-
 inline void setSyncThemeAcrossApplications(bool enabled,
                                            const QString &currentTheme = QString())
 {
@@ -182,7 +160,66 @@ inline void setSyncThemeAcrossApplications(bool enabled,
     if (enabled && !currentTheme.isEmpty())
         setThemeForAllApplications(currentTheme);
 }
-
+inline int recommendedWorkerCount(int maximum = 16, int reserved = 1)
+{
+    const int logicalProcessors = qMax(1, QThread::idealThreadCount());
+    return qBound(1, logicalProcessors - qMax(0, reserved),
+                  qMax(1, maximum));
+}
+inline QSize oneShotMainWindowSizeFromEnvironment()
+{
+    const QString text = QString::fromLatin1(
+                qgetenv("PZTOOLS_ONESHOT_WINDOW_SIZE")).trimmed().toLower();
+    const int separator = text.indexOf(QLatin1Char('x'));
+    if (separator <= 0)
+        return QSize();
+    bool widthOk = false;
+    bool heightOk = false;
+    const int width = text.left(separator).toInt(&widthOk);
+    const int height = text.mid(separator + 1).toInt(&heightOk);
+    if (!widthOk || !heightOk || width < 1 || height < 1)
+        return QSize();
+    return QSize(width, height);
+}
+inline QSize applyOneShotMainWindowGeometry(
+        QWidget *window, const QSize &requestedSize = QSize())
+{
+    if (!window)
+        return QSize();
+    const QSize requested = requestedSize.isValid()
+            ? requestedSize : oneShotMainWindowSizeFromEnvironment();
+    if (!requested.isValid())
+        return QSize();
+    QScreen *screen = QGuiApplication::primaryScreen();
+    if (!screen || !screen->availableGeometry().isValid())
+        return QSize();
+    const QRect available = screen->availableGeometry();
+    const QSize applied(qMin(requested.width(), available.width()),
+                        qMin(requested.height(), available.height()));
+    QRect geometry(QPoint(), applied);
+    geometry.moveCenter(available.center());
+    if (!window->property("PZToolsOneShotWindowGeometry").toBool()) {
+        QSettings settings;
+        settings.beginGroup(QLatin1String("MainWindow"));
+        settings.setValue(QLatin1String("geometry"), window->saveGeometry());
+        settings.endGroup();
+        settings.sync();
+    }
+    if (window->isMaximized() || window->isFullScreen())
+        window->showNormal();
+    window->setProperty("PZToolsOneShotWindowGeometry", true);
+    window->setGeometry(geometry);
+    qInfo() << "One-shot main-window geometry applied:"
+            << requested << "requested," << applied << "available-screen fit,"
+            << "centered on" << screen->name()
+            << "without persistent geometry propagation";
+    return applied;
+}
+inline bool shouldPersistMainWindowGeometry(const QWidget *window)
+{
+    return !window ||
+            !window->property("PZToolsOneShotWindowGeometry").toBool();
+}
 inline QString sharedConfigurationPath()
 {
     QSettings shared(sharedSettingsFilePath(), QSettings::IniFormat);
@@ -200,7 +237,6 @@ inline QString sharedConfigurationPath()
     shared.setValue(QLatin1String("Paths/ConfigDirectory"), validated);
     return validated;
 }
-
 inline void setSharedConfigurationPath(const QString &directory)
 {
     QSettings shared(sharedSettingsFilePath(), QSettings::IniFormat);
@@ -208,10 +244,118 @@ inline void setSharedConfigurationPath(const QString &directory)
                     normalizedConfigurationPath(directory));
     shared.sync();
 }
-
+inline QString normalizedGamePath(const QString &candidate)
+{
+    if (candidate.trimmed().isEmpty())
+        return QString();
+    QDir directory(QDir::cleanPath(
+                       QDir::fromNativeSeparators(candidate.trimmed())));
+    if (directory.dirName().compare(
+                QLatin1String("media"), Qt::CaseInsensitive) == 0) {
+        directory.cdUp();
+    }
+    const QDir media(directory.filePath(QLatin1String("media")));
+    if (!media.exists())
+        return QString();
+    const bool hasTileDefinitions = QFileInfo(media.filePath(
+                QLatin1String("newtiledefinitions.tiles"))).isFile();
+    const bool hasLua = QDir(media.filePath(
+                QLatin1String("lua"))).exists();
+    const bool hasPacks = QDir(media.filePath(
+                QLatin1String("texturepacks"))).exists();
+    if (!hasTileDefinitions && !hasLua && !hasPacks)
+        return QString();
+    return QDir::cleanPath(directory.absolutePath());
+}
+inline bool isGamePath(const QString &candidate)
+{
+    return !normalizedGamePath(candidate).isEmpty();
+}
+inline QString detectGamePath()
+{
+    QStringList candidates;
+#ifdef Q_OS_WIN
+    candidates << QStringLiteral(
+                      "C:/Program Files (x86)/Steam/steamapps/common/ProjectZomboid")
+               << QStringLiteral(
+                      "C:/Program Files/Steam/steamapps/common/ProjectZomboid");
+#elif defined(Q_OS_MAC)
+    candidates << QStringLiteral(
+                      "/Applications/Project Zomboid.app/Contents/Resources")
+               << QDir::home().filePath(QStringLiteral(
+                      "Library/Application Support/Steam/steamapps/common/"
+                      "ProjectZomboid/Project Zomboid.app/Contents/Resources"));
+#else
+    candidates << QDir::home().filePath(QStringLiteral(
+                      ".steam/steam/steamapps/common/ProjectZomboid"))
+               << QDir::home().filePath(QStringLiteral(
+                      ".local/share/Steam/steamapps/common/ProjectZomboid"));
+#endif
+    for (const QString &candidate : candidates) {
+        const QString normalized = normalizedGamePath(candidate);
+        if (!normalized.isEmpty())
+            return normalized;
+    }
+    return QString();
+}
+inline QString sharedGamePath()
+{
+    QSettings shared(sharedSettingsFilePath(), QSettings::IniFormat);
+    const QString key =
+            QLatin1String("Paths/ProjectZomboidDirectory");
+    QString configured = normalizedGamePath(shared.value(key).toString());
+    if (configured.isEmpty() && !shared.contains(key))
+        configured = detectGamePath();
+    if (!configured.isEmpty())
+        shared.setValue(key, configured);
+    return configured;
+}
+inline void setSharedGamePath(const QString &directory)
+{
+    QSettings shared(sharedSettingsFilePath(), QSettings::IniFormat);
+    const QString normalized = normalizedGamePath(directory);
+    if (directory.trimmed().isEmpty())
+        shared.setValue(QLatin1String("Paths/ProjectZomboidDirectory"),
+                        QString());
+    else
+        shared.setValue(QLatin1String("Paths/ProjectZomboidDirectory"),
+                        normalized);
+    shared.sync();
+}
+inline QString gamePath(const QString &relativePath = QString())
+{
+    const QString root = sharedGamePath();
+    return root.isEmpty() || relativePath.isEmpty()
+            ? root : QDir(root).filePath(relativePath);
+}
+inline QString gameMediaPath(const QString &relativePath = QString())
+{
+    const QString media = gamePath(QLatin1String("media"));
+    return media.isEmpty() || relativePath.isEmpty()
+            ? media : QDir(media).filePath(relativePath);
+}
+inline QString gameTexturePacksPath()
+{
+    return gameMediaPath(QLatin1String("texturepacks"));
+}
+inline QString gameWorldGenPath()
+{
+    return gameMediaPath(QLatin1String("lua/server/WorldGen"));
+}
+inline QString gameLootDefinitionsPath()
+{
+    return gameMediaPath(QLatin1String("lua/server/Items"));
+}
+inline QString basementSourcePath()
+{
+    return installPath(QLatin1String("pzby_tbx/basement_access"));
+}
+inline QString basementBinMapPath()
+{
+    return installPath(QLatin1String("pzby_tbx/binmap"));
+}
 inline QString normalizedTilesPath(const QString &candidate);
 inline bool isTilesPath(const QString &candidate);
-
 inline QString detectTilesPath()
 {
     QStringList candidates;
@@ -220,7 +364,6 @@ inline QString detectTilesPath()
                 QLatin1String("../Tiles"));
     candidates += QDir(installRootPath()).absoluteFilePath(
                 QLatin1String("../../Tiles"));
-
     for (const QString &candidate : candidates) {
         const QFileInfo info(candidate);
         if (info.exists() && info.isDir() && isTilesPath(candidate))
@@ -228,7 +371,6 @@ inline QString detectTilesPath()
     }
     return QString();
 }
-
 inline QString normalizedTilesPath(const QString &candidate)
 {
     if (candidate.trimmed().isEmpty())
@@ -241,7 +383,6 @@ inline QString normalizedTilesPath(const QString &candidate)
             || name.compare(QLatin1String("custom"), Qt::CaseInsensitive) == 0;
     if (scaleDirectory)
         directory.cdUp();
-
     const QStringList filters = { QLatin1String("*.png") };
     auto containsTiles = [&filters](const QDir &root) {
         if (!root.entryList(filters, QDir::Files).isEmpty())
@@ -258,7 +399,6 @@ inline QString normalizedTilesPath(const QString &candidate)
         }
         return false;
     };
-
     if (!containsTiles(directory)) {
         const QDir nested(directory.filePath(QLatin1String("Tiles")));
         if (nested.exists() && containsTiles(nested))
@@ -266,7 +406,6 @@ inline QString normalizedTilesPath(const QString &candidate)
     }
     return QDir::cleanPath(directory.absolutePath());
 }
-
 inline bool isTilesPath(const QString &candidate)
 {
     const QDir directory(normalizedTilesPath(candidate));
@@ -286,7 +425,6 @@ inline bool isTilesPath(const QString &candidate)
     }
     return !directory.entryList(filters, QDir::Files).isEmpty();
 }
-
 inline QString sharedTilesPath()
 {
     QSettings shared(sharedSettingsFilePath(), QSettings::IniFormat);
@@ -300,7 +438,6 @@ inline QString sharedTilesPath()
         shared.setValue(QLatin1String("Paths/TilesDirectory"), configured);
     return configured;
 }
-
 inline void setSharedTilesPath(const QString &directory)
 {
     QSettings shared(sharedSettingsFilePath(), QSettings::IniFormat);
@@ -308,7 +445,6 @@ inline void setSharedTilesPath(const QString &directory)
                     normalizedTilesPath(directory));
     shared.sync();
 }
-
 inline void prepareNamedApplicationSettings(const QString &applicationName)
 {
     QSettings settings(QSettings::IniFormat, QSettings::UserScope,
@@ -322,23 +458,19 @@ inline void prepareNamedApplicationSettings(const QString &applicationName)
         settings.sync();
     }
 }
-
 inline void migrateLegacySharedPaths()
 {
     QSettings shared(sharedSettingsFilePath(), QSettings::IniFormat);
-
     QString configuration =
             shared.value(QLatin1String("Paths/ConfigDirectory")).toString();
     QString tiles =
             shared.value(QLatin1String("Paths/TilesDirectory")).toString();
-
     QSettings tileZed(QSettings::IniFormat, QSettings::UserScope,
                       QLatin1String("TheIndieStone"),
                       QLatin1String("TileZed"));
     QSettings worldEd(QSettings::IniFormat, QSettings::UserScope,
                       QLatin1String("TheIndieStone"),
                       QLatin1String("PZWorldEd"));
-
     if (!isConfigurationPath(configuration)) {
         const QString candidates[] = {
             tileZed.value(QLatin1String("ConfigDirectory")).toString(),
@@ -353,7 +485,6 @@ inline void migrateLegacySharedPaths()
             }
         }
     }
-
     if (!isTilesPath(tiles)) {
         const QString candidates[] = {
             tileZed.value(
@@ -371,19 +502,19 @@ inline void migrateLegacySharedPaths()
     }
     shared.sync();
 }
-
 inline void prepareVersionedSettings()
 {
-    // Reset only application-specific state when the schema changes. Shared
-    // paths live in PZTools.ini and are preserved independently.
     migrateLegacySharedPaths();
     prepareNamedApplicationSettings(QCoreApplication::applicationName());
-
     QSettings shared(sharedSettingsFilePath(), QSettings::IniFormat);
     const QString configPath =
             shared.value(QLatin1String("Paths/ConfigDirectory")).toString();
     const QString tilesPath =
             shared.value(QLatin1String("Paths/TilesDirectory")).toString();
+    const bool hasGamePath = shared.contains(
+                QLatin1String("Paths/ProjectZomboidDirectory"));
+    const QString gamePath = shared.value(
+                QLatin1String("Paths/ProjectZomboidDirectory")).toString();
     const int storedVersion =
             shared.value(QLatin1String("General/SettingsSchema"), 0).toInt();
     if (storedVersion != SETTINGS_SCHEMA_VERSION) {
@@ -392,17 +523,19 @@ inline void prepareVersionedSettings()
             shared.setValue(QLatin1String("Paths/ConfigDirectory"), configPath);
         if (!tilesPath.isEmpty())
             shared.setValue(QLatin1String("Paths/TilesDirectory"), tilesPath);
+        if (hasGamePath)
+            shared.setValue(
+                        QLatin1String("Paths/ProjectZomboidDirectory"),
+                        gamePath);
         shared.setValue(QLatin1String("General/SettingsSchema"),
                         SETTINGS_SCHEMA_VERSION);
         shared.sync();
     }
 }
-
 inline QString path(const QString &relativePath)
 {
     return QDir(rootPath()).filePath(relativePath);
 }
-
 inline void configure()
 {
     const QString path = rootPath();
@@ -411,7 +544,6 @@ inline void configure()
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, path);
     QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, path);
 }
-
 inline QString cpuDescription()
 {
 #ifdef Q_OS_WIN
@@ -455,7 +587,6 @@ inline QString cpuDescription()
 #endif
     return QSysInfo::currentCpuArchitecture();
 }
-
 inline quint64 totalPhysicalMemoryBytes()
 {
 #ifdef Q_OS_WIN
@@ -475,7 +606,6 @@ inline quint64 totalPhysicalMemoryBytes()
 #endif
     return 0;
 }
-
 inline quint64 availablePhysicalMemoryBytes()
 {
 #ifdef Q_OS_WIN
@@ -498,7 +628,6 @@ inline quint64 availablePhysicalMemoryBytes()
 #endif
     return 0;
 }
-
 inline QStringList graphicsAdapterDescriptions()
 {
     QStringList adapters;
@@ -558,7 +687,6 @@ inline QStringList graphicsAdapterDescriptions()
 #endif
     return adapters;
 }
-
 inline QString gibibytes(quint64 bytes)
 {
     return bytes == 0
@@ -566,7 +694,6 @@ inline QString gibibytes(quint64 bytes)
             : QStringLiteral("%1 GiB").arg(
                   double(bytes) / (1024.0 * 1024.0 * 1024.0), 0, 'f', 1);
 }
-
 inline quint64 currentProcessMemoryBytes()
 {
 #ifdef Q_OS_WIN
@@ -578,7 +705,6 @@ inline quint64 currentProcessMemoryBytes()
                                "K32GetProcessMemoryInfo"));
     if (!queryMemory)
         return 0;
-
     PROCESS_MEMORY_COUNTERS_EX counters = {};
     counters.cb = sizeof(counters);
     if (!queryMemory(GetCurrentProcess(),
@@ -611,7 +737,6 @@ inline quint64 currentProcessMemoryBytes()
     return 0;
 #endif
 }
-
 inline void logMachineDiagnostics()
 {
     qInfo().noquote()
@@ -622,13 +747,11 @@ inline void logMachineDiagnostics()
     qInfo().noquote()
             << "Machine CPU:" << cpuDescription()
             << "| logical processors:" << QThread::idealThreadCount();
-
     const quint64 totalMemory = totalPhysicalMemoryBytes();
     const quint64 availableMemory = availablePhysicalMemoryBytes();
     qInfo().noquote()
             << "Machine RAM: total" << gibibytes(totalMemory)
             << "| available at startup:" << gibibytes(availableMemory);
-
     const QStringList adapters = graphicsAdapterDescriptions();
     qInfo().noquote()
             << "Machine GPU/display adapters:"
@@ -640,19 +763,16 @@ inline void logMachineDiagnostics()
             << "| Qt build ABI:" << QSysInfo::buildAbi()
             << "| process:" << (sizeof(void *) * 8) << "bit";
 }
-
 inline QFile &messageLogFile()
 {
     static QFile file;
     return file;
 }
-
 inline QMutex &messageLogMutex()
 {
     static QMutex mutex;
     return mutex;
 }
-
 inline const char *messageTypeName(QtMsgType type)
 {
     switch (type) {
@@ -664,7 +784,6 @@ inline const char *messageTypeName(QtMsgType type)
     }
     return "UNKNOWN";
 }
-
 inline void messageHandler(QtMsgType type,
                            const QMessageLogContext &context,
                            const QString &message)
@@ -673,7 +792,6 @@ inline void messageHandler(QtMsgType type,
             message == QStringLiteral(
                 "libpng warning: iCCP: known incorrect sRGB profile"))
         return;
-
     const QString source = context.file
             ? QStringLiteral(" (%1:%2)")
               .arg(QString::fromUtf8(context.file))
@@ -691,7 +809,6 @@ inline void messageHandler(QtMsgType type,
             .arg(reinterpret_cast<quintptr>(QThread::currentThreadId()), 0, 16)
             .arg(threadLabel, message, source);
     const QByteArray encoded = line.toUtf8();
-
     {
         QMutexLocker locker(&messageLogMutex());
         QFile &file = messageLogFile();
@@ -700,14 +817,11 @@ inline void messageHandler(QtMsgType type,
             file.flush();
         }
     }
-
     std::fwrite(encoded.constData(), 1, size_t(encoded.size()), stderr);
     std::fflush(stderr);
-
     if (type == QtFatalMsg)
         std::abort();
 }
-
 #ifdef Q_OS_WIN
 inline LONG WINAPI unhandledExceptionLogger(EXCEPTION_POINTERS *exceptionInfo)
 {
@@ -746,19 +860,16 @@ inline LONG WINAPI unhandledExceptionLogger(EXCEPTION_POINTERS *exceptionInfo)
     return EXCEPTION_CONTINUE_SEARCH;
 }
 #endif
-
 inline void terminateLogger()
 {
     qCritical() << "Unhandled C++ exception or std::terminate()";
     std::abort();
 }
-
 inline QString installLogging()
 {
     const QString logDirectory = path(QStringLiteral("logs"));
     if (!QDir().mkpath(logDirectory))
         return QString();
-
     QString applicationName = QCoreApplication::applicationName();
     for (int i = 0; i < applicationName.size(); ++i) {
         const QChar c = applicationName.at(i);
@@ -767,7 +878,6 @@ inline QString installLogging()
     }
     if (applicationName.isEmpty())
         applicationName = QStringLiteral("application");
-
     QDir logs(logDirectory);
     const QFileInfoList previousLogs = logs.entryInfoList(
                 QStringList() << QStringLiteral("%1-*.log").arg(applicationName),
@@ -777,19 +887,16 @@ inline QString installLogging()
          index < previousLogs.size(); ++index) {
         QFile::remove(previousLogs.at(index).absoluteFilePath());
     }
-
     const QString fileName = QStringLiteral("%1-%2-%3.log")
             .arg(applicationName)
             .arg(QDateTime::currentDateTime().toString(
                      QStringLiteral("yyyyMMdd-HHmmss-zzz")))
             .arg(QCoreApplication::applicationPid());
     const QString filePath = QDir(logDirectory).filePath(fileName);
-
     QFile &file = messageLogFile();
     file.setFileName(filePath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
         return QString();
-
     qInstallMessageHandler(messageHandler);
 #ifdef Q_OS_WIN
     SetUnhandledExceptionFilter(unhandledExceptionLogger);
@@ -803,7 +910,5 @@ inline QString installLogging()
     logMachineDiagnostics();
     return filePath;
 }
-
-} // namespace PortableSettings
-
-#endif // PORTABLESETTINGS_H
+}
+#endif

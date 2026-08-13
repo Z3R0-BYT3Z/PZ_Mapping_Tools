@@ -554,7 +554,7 @@ bool FenceFile::read(const QString &fileName)
                 SimpleFileKeyValue value;
                 if (!block.keyValue(key, value)
                         || value.value.trimmed().isEmpty()) {
-                    continue; // Gate pieces are optional.
+                    continue;
                 }
                 QString detail;
                 if (!BuildingEditor::BuildingTilesMgr::validateTileName(
@@ -569,7 +569,6 @@ bool FenceFile::read(const QString &fileName)
                     return false;
                 }
             }
-
             mFences += fence;
         } else {
             mError = tr("Line %1: Unknown block name '%2'.\n%3")

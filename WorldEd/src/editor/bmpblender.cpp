@@ -400,9 +400,6 @@ void BmpBlender::fromMap()
                 }
             }
             if (wholeSheet) {
-                // This selector represents every tile in the named sheet.
-                // Keep the numeric sheet suffix out of tile-name
-                // normalization (foo_01 is not tile 1 of sheet foo).
                 blend->exclude2[i] = wholeSheet->name();
             } else if (BuildingEditor::BuildingTilesMgr::legalTileName(tileName)) {
                 tileNames += tileName;
@@ -559,7 +556,6 @@ void BmpBlender::initTiles()
         if (!mBlendLayers.contains(blendW->mBlend->targetLayer))
             mBlendLayers += blendW->mBlend->targetLayer;
     }
-
     if (mInactiveRuleCount || mInactiveBlendCount) {
         qInfo() << "BMP unavailable-tileset filtering skipped"
                 << mInactiveRuleCount << "of" << mRules.size()
@@ -847,7 +843,6 @@ void BmpBlender::updateWarnings()
             warnings += tr("Map is missing \"%1\" tileset.").arg(tilesetName);
         }
     }
-
     if (mInactiveRuleCount) {
         warnings += tr(
                     "Skipped %1 BMP rule(s) because none of their tile "
@@ -920,7 +915,6 @@ void BmpBlender::updateWarnings()
         else if (ruleW->mRule->bitmapIndex == 1)
             vegetationRuleColors += ruleW->mRule->color;
     }
-
     QMap<QRgb, int> unknownGroundCounts;
     QMap<QRgb, int> unknownVegetationCounts;
     QMap<QRgb, QPoint> firstGroundPixels;
@@ -968,7 +962,6 @@ void BmpBlender::updateWarnings()
                         firstGroundPixels);
     appendColorWarnings(tr("Vegetation image"), 1,
                         unknownVegetationCounts, firstVegetationPixels);
-
     if (warnings != mWarnings) {
         mWarnings = warnings;
         emit warningsChanged();
@@ -1617,9 +1610,6 @@ missingKV:
                     if (aliasToName.contains(tileName)) {
                         exclude2 += tileName;
                     } else if (wholeSheet) {
-                        // exclude2 accepts a complete sheet selector.
-                        // Preserve it verbatim instead of interpreting its
-                        // numeric suffix as a tile index.
                         exclude2 += wholeSheet->name();
                     } else {
                         if (!BuildingEditor::BuildingTilesMgr::legalTileName(tileName)) {
@@ -1696,7 +1686,6 @@ QString BmpBlendsFile::unpaddedTileName(const QString &tileName)
 {
     if (TileMetaInfoMgr::instance()->tileset(tileName))
         return tileName;
-
     for (Tileset *tileset : TileMetaInfoMgr::instance()->tilesets()) {
         if (tileset && BuildingEditor::BuildingTilesMgr::
                 normalizeTileName(tileset->name()).compare(
@@ -1704,7 +1693,6 @@ QString BmpBlendsFile::unpaddedTileName(const QString &tileName)
             return tileset->name();
         }
     }
-
     if (!mAliasNames.contains(tileName)) {
         QString tilesetName;
         int tileID;

@@ -73,7 +73,6 @@ QString tileFileName(const Tile *tile)
     return fileName;
 }
 #endif
-
 /**
  * The delegate for drawing tile items in the tileset view.
  */
@@ -143,10 +142,7 @@ void TileDelegate::paint(QPainter *painter,
                           option.palette.highlight());
         painter->setOpacity(opacity);
     }
-
 #ifdef ZOMBOID
-    // PZ tile names are <tileset>_<local id>. Keep the local ID visible in
-    // every palette, independently from the automatic-layer-name setting.
     if (tile) {
         const QString idText = QLatin1Char('_') + QString::number(tile->id());
         const QFontMetrics fm = painter->fontMetrics();
@@ -486,7 +482,6 @@ void TilesetView::contextMenuEvent(QContextMenuEvent *event)
                     this, tr("Export Selected Tiles"), initialDirectory);
         if (outputPath.isEmpty())
             return;
-
         settings->setValue(settingsKey, outputPath);
         const QDir outputDirectory(outputPath);
         QStringList failures;
@@ -505,7 +500,6 @@ void TilesetView::contextMenuEvent(QContextMenuEvent *event)
                                  tr("Could not export:\n%1").arg(failures.join(QLatin1Char('\n'))));
         }
     }
-
     else if (action && layerActions.contains(action)) {
         int index = layerActions.indexOf(action);
         QString layerName = index ? layerNames[index - 1] : QString();

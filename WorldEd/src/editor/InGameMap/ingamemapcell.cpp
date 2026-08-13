@@ -18,12 +18,9 @@
 #include "ingamemapcell.h"
 
 #include <QtMath>
-
 #include <cmath>
 #include <limits>
-
 namespace {
-
 bool normalizeCoordinates(const InGameMapCoordinates &source,
                           InGameMapCoordinates &result,
                           bool polygon,
@@ -35,7 +32,6 @@ bool normalizeCoordinates(const InGameMapCoordinates &source,
             error = QStringLiteral("contains a non-finite coordinate");
             return false;
         }
-
         const qint64 x = qRound64(point.x);
         const qint64 y = qRound64(point.y);
         if (x < std::numeric_limits<qint16>::min() ||
@@ -45,15 +41,12 @@ bool normalizeCoordinates(const InGameMapCoordinates &source,
             error = QStringLiteral("contains a coordinate outside the signed 16-bit game format");
             return false;
         }
-
         InGameMapPoint normalized(x, y);
         if (result.isEmpty() || result.last() != normalized)
             result += normalized;
     }
-
     if (polygon && result.size() > 1 && result.first() == result.last())
         result.removeLast();
-
     if (polygon) {
         bool removed = true;
         while (removed && result.size() >= 3) {
@@ -72,12 +65,10 @@ bool normalizeCoordinates(const InGameMapCoordinates &source,
                 }
             }
         }
-
         if (result.size() < 3) {
             error = QStringLiteral("has fewer than 3 distinct non-collinear vertices");
             return false;
         }
-
         qint64 twiceArea = 0;
         for (int i = 0; i < result.size(); ++i) {
             const InGameMapPoint &a = result.at(i);
@@ -89,12 +80,9 @@ bool normalizeCoordinates(const InGameMapCoordinates &source,
             return false;
         }
     }
-
     return true;
 }
-
-} // namespace
-
+}
 bool sanitizeInGameMapGeometryForExport(const InGameMapGeometry &source,
                                         InGameMapGeometry &result,
                                         QStringList &diagnostics)
@@ -102,7 +90,6 @@ bool sanitizeInGameMapGeometryForExport(const InGameMapGeometry &source,
     result.mType = source.mType;
     result.mCoordinates.clear();
     diagnostics.clear();
-
     const bool polygon = source.isPolygon();
     const int minimumPoints = polygon ? 3 : (source.isLineString() ? 2 : 1);
     if (!polygon && !source.isLineString() && !source.isPoint()) {
@@ -113,7 +100,6 @@ bool sanitizeInGameMapGeometryForExport(const InGameMapGeometry &source,
         diagnostics += QStringLiteral("geometry contains no coordinate list");
         return false;
     }
-
     for (int index = 0; index < source.mCoordinates.size(); ++index) {
         InGameMapCoordinates normalized;
         QString error;
@@ -135,7 +121,5 @@ bool sanitizeInGameMapGeometryForExport(const InGameMapGeometry &source,
                     .arg(normalized.size());
         result.mCoordinates += normalized;
     }
-
     return !result.mCoordinates.isEmpty();
 }
-

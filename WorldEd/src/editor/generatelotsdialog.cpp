@@ -1,7 +1,11 @@
 #include "generatelotsdialog.h"
 #include "ui_generatelotsdialog.h"
 
+#include "../portablesettings.h"
 #include "preferences.h"
+#include "BuildingEditor/buildingtiles.h"
+#include "tilemetainfomgr.h"
+#include "tileset.h"
 #include "world.h"
 #include "worlddocument.h"
 
@@ -26,6 +30,9 @@ static const QString KEY_MOD_NAME = QStringLiteral("GenerateLotsDialog/ModName")
 static const QString KEY_MAP_NAME = QStringLiteral("GenerateLotsDialog/MapName");
 static const QString KEY_MOD_POSTER = QStringLiteral("GenerateLotsDialog/ModPoster");
 static const QString KEY_MOD_42 = QStringLiteral("GenerateLotsDialog/Mod42");
+static const QString KEY_AUTO_FILL_HOLES = QStringLiteral("GenerateLotsDialog/AutoFillHoles");
+static const QString KEY_HOLE_FILL_MODE = QStringLiteral("GenerateLotsDialog/HoleFillMode");
+static const QString KEY_HOLE_FILL_TILE = QStringLiteral("GenerateLotsDialog/HoleFillTile");
 
 static bool writeTextFileIfMissing(const QString &fileName, const QString &text,
                                    QString *error)
@@ -89,6 +96,16 @@ GenerateLotsDialog::GenerateLotsDialog(WorldDocument *worldDoc, QWidget *parent)
 
     // TileDef folder
     mTileDefFolder = QDir::toNativeSeparators(settings.tileDefFolder);
+    if (mTileDefFolder.isEmpty()) {
+        const QString gameRoot =
+                Preferences::instance()->projectZomboidDirectory();
+        if (!gameRoot.isEmpty()
+                && QFileInfo(QDir(gameRoot).filePath(
+                    QLatin1String("media/newtiledefinitions.tiles"))).isFile()) {
+            mTileDefFolder = QDir::toNativeSeparators(
+                        QDir(gameRoot).filePath(QLatin1String("media")));
+        }
+    }
     if (mTileDefFolder.isEmpty() == false) {
         addComboItemIfAbsent(ui->tiledefEdit, mTileDefFolder);
         ui->tiledefEdit->setCurrentText(mTileDefFolder);
@@ -101,9 +118,18 @@ GenerateLotsDialog::GenerateLotsDialog(WorldDocument *worldDoc, QWidget *parent)
     ui->yOrigin->setValue(settings.worldOrigin.y());
 
     // Number of threads
+    const int logicalProcessors = qMax(1, QThread::idealThreadCount());
+    const int maximumWorkers = qMin(logicalProcessors, 16);
+    const int recommendedWorkers =
+            PortableSettings::recommendedWorkerCount(16, 1);
     ui->numThreadsSlider->setMinimum(1);
-    ui->numThreadsSlider->setMaximum(10);
-    ui->numThreadsSlider->setValue(settings.numberOfThreads);
+    ui->numThreadsSlider->setMaximum(maximumWorkers);
+    ui->numThreadsSlider->setValue(
+                qBound(1, settings.numberOfThreads, maximumWorkers));
+    ui->label_6->setText(tr(
+        "Detected %1 logical processors. Recommended: %2 workers. "
+        "More workers use more memory.")
+        .arg(logicalProcessors).arg(recommendedWorkers));
 
     ui->modRootEdit->setText(qSettings.value(KEY_MOD_ROOT).toString());
     ui->modIdEdit->setText(qSettings.value(KEY_MOD_ID).toString());
@@ -111,6 +137,28 @@ GenerateLotsDialog::GenerateLotsDialog(WorldDocument *worldDoc, QWidget *parent)
     ui->mapNameEdit->setText(qSettings.value(KEY_MAP_NAME).toString());
     ui->posterEdit->setText(qSettings.value(KEY_MOD_POSTER).toString());
     ui->create42Folder->setChecked(qSettings.value(KEY_MOD_42, true).toBool());
+    ui->autoFillHoles->setChecked(
+                qSettings.value(KEY_AUTO_FILL_HOLES, false).toBool());
+    ui->holeFillMode->setCurrentIndex(
+                qBound(0, qSettings.value(KEY_HOLE_FILL_MODE, 0).toInt(), 1));
+    ui->holeFillTile->setText(
+                qSettings.value(KEY_HOLE_FILL_TILE,
+                                QStringLiteral("blends_natural_01_0"))
+                .toString());
+    const auto updateHoleControls = [this]() {
+        const bool enabled = ui->autoFillHoles->isChecked();
+        const bool specificTile = ui->holeFillMode->currentIndex() == 1;
+        ui->holeFillModeLabel->setEnabled(enabled);
+        ui->holeFillMode->setEnabled(enabled);
+        ui->holeFillTileLabel->setEnabled(enabled && specificTile);
+        ui->holeFillTile->setEnabled(enabled && specificTile);
+    };
+    connect(ui->autoFillHoles, &QCheckBox::toggled,
+            this, updateHoleControls);
+    connect(ui->holeFillMode,
+            QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, updateHoleControls);
+    updateHoleControls();
     connect(ui->modRootBrowse, &QAbstractButton::clicked,
             this, &GenerateLotsDialog::modRootBrowse);
     connect(ui->posterBrowse, &QAbstractButton::clicked,
@@ -131,6 +179,21 @@ GenerateLotsDialog::~GenerateLotsDialog()
 bool GenerateLotsDialog::exportAsMod() const
 {
     return ui->exportModGroup->isChecked();
+}
+
+bool GenerateLotsDialog::fillHolesDuringExport() const
+{
+    return ui->autoFillHoles->isChecked();
+}
+
+bool GenerateLotsDialog::fillHolesWithNearestTile() const
+{
+    return ui->holeFillMode->currentIndex() == 0;
+}
+
+QString GenerateLotsDialog::holeFillTileName() const
+{
+    return ui->holeFillTile->text().trimmed();
 }
 
 void GenerateLotsDialog::setExportAsMod(bool enabled)
@@ -331,6 +394,9 @@ void GenerateLotsDialog::accept()
     qSettings.setValue(KEY_MAP_NAME, ui->mapNameEdit->text().trimmed());
     qSettings.setValue(KEY_MOD_POSTER, ui->posterEdit->text().trimmed());
     qSettings.setValue(KEY_MOD_42, ui->create42Folder->isChecked());
+    qSettings.setValue(KEY_AUTO_FILL_HOLES, ui->autoFillHoles->isChecked());
+    qSettings.setValue(KEY_HOLE_FILL_MODE, ui->holeFillMode->currentIndex());
+    qSettings.setValue(KEY_HOLE_FILL_TILE, ui->holeFillTile->text().trimmed());
 
     QDialog::accept();
 }
@@ -359,6 +425,9 @@ void GenerateLotsDialog::apply()
     qSettings.setValue(KEY_EXPORT_DIRECTORIES, comboboxStringList(ui->exportEdit));
     qSettings.setValue(KEY_SPAWNMAP_DIRECTORIES, comboboxStringList(ui->spawnEdit));
     qSettings.setValue(KEY_TILEDEF_DIRECTORIES, comboboxStringList(ui->tiledefEdit));
+    qSettings.setValue(KEY_AUTO_FILL_HOLES, ui->autoFillHoles->isChecked());
+    qSettings.setValue(KEY_HOLE_FILL_MODE, ui->holeFillMode->currentIndex());
+    qSettings.setValue(KEY_HOLE_FILL_TILE, ui->holeFillTile->text().trimmed());
 
     QDialog::reject();
 }
@@ -382,6 +451,29 @@ QStringList GenerateLotsDialog::comboboxStringList(QComboBox *comboBox) const
 
 bool GenerateLotsDialog::validate()
 {
+    if (ui->autoFillHoles->isChecked()
+            && ui->holeFillMode->currentIndex() == 1) {
+        QString tilesetName;
+        int tileIndex = -1;
+        const QString tileName = ui->holeFillTile->text().trimmed();
+        if (!BuildingEditor::BuildingTilesMgr::parseTileName(
+                    tileName, tilesetName, tileIndex)) {
+            QMessageBox::warning(
+                        this, tr("Invalid Hole Fill Tile"),
+                        tr("Enter a complete tile name such as "
+                           "blends_natural_01_0."));
+            return false;
+        }
+        Tiled::Tileset *tileset =
+                Tiled::TileMetaInfoMgr::instance()->tileset(tilesetName);
+        if (!tileset || tileIndex < 0 || tileIndex >= tileset->tileCount()) {
+            QMessageBox::warning(
+                        this, tr("Invalid Hole Fill Tile"),
+                        tr("The tile '%1' is not available in the configured "
+                           "Tiles directory.").arg(tileName));
+            return false;
+        }
+    }
     QDir dir(mExportDir);
     if (!exportAsMod() && (mExportDir.isEmpty() || !dir.exists())) {
         QMessageBox::warning(this, tr("Lot Generation Error"),

@@ -17,6 +17,7 @@
 
 #include "world.h"
 
+#include "../portablesettings.h"
 #include "bmptotmx.h" // FIXME: remove from this file
 #include "worldcell.h"
 
@@ -29,6 +30,8 @@ World::World(int width, int height, WorldGridFormat gridFormat)
     , mNullObjectType(new ObjectType())
     , mNullObjectGroup(new WorldObjectGroup(this))
 {
+    mGenerateLotsSettings.numberOfThreads =
+            PortableSettings::recommendedWorkerCount(16, 1);
     mCells.resize(mWidth * mHeight);
 
     for (int y = 0; y < mHeight; y++) {

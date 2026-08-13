@@ -355,7 +355,6 @@ QStringList BuildingMap::loadNeededTilesets(Building *building)
                 unresolved += tilesetName;
                 continue;
             }
-
             const QString source =
                     QFileInfo(source2x).isFile() ? source2x : source1x;
             tileset = TileMetaInfoMgr::instance()->loadTileset(source);
@@ -372,7 +371,6 @@ QStringList BuildingMap::loadNeededTilesets(Building *building)
         if (tileset)
             neededTilesets += tileset;
     }
-
     const QList<Tileset *> needed = neededTilesets.values();
     int decodeRequired = 0;
     for (Tileset *tileset : needed) {
@@ -383,7 +381,6 @@ QStringList BuildingMap::loadNeededTilesets(Building *building)
         TileMetaInfoMgr::instance()->loadTilesets(needed, true);
         TilesetManager::instance()->waitForTilesets(needed);
     }
-
     int loadedCount = 0;
     for (Tileset *tileset : needed) {
         if (!tileset->isLoaded() || tileset->isMissing())
@@ -393,7 +390,6 @@ QStringList BuildingMap::loadNeededTilesets(Building *building)
     }
     unresolved.removeDuplicates();
     unresolved.sort();
-
     qInfo() << "Building tileset resolution:"
             << requestedNames.count() << "requested,"
             << decodeRequired << "needed decoding,"
@@ -401,7 +397,6 @@ QStringList BuildingMap::loadNeededTilesets(Building *building)
             << unresolved.count() << "unresolved";
     if (!unresolved.isEmpty())
         qWarning() << "Unresolved building tilesets:" << unresolved;
-
     return unresolved;
 }
 
@@ -682,8 +677,6 @@ int BuildingMap::defaultOrientation()
 
 bool BuildingMap::isTilesetUsed(Tileset *tileset)
 {
-    // Signals can still arrive while a BuildingMap is replacing its two maps,
-    // so do not dereference either map until it exists.
     return (mMap && mMap->isTilesetUsed(tileset)) ||
             (mBlendMap && mBlendMap->isTilesetUsed(tileset));
 }
@@ -1227,7 +1220,6 @@ void BuildingMap::handlePending()
                    << "user-tile floors" << userTileFloorCount
                    << "updated levels" << updatedLevels.size();
     }
-
     pending = false;
     pendingRecreateAll = false;
     pendingBuildingResized = false;
