@@ -109,8 +109,11 @@ void TileDelegate::paint(QPainter *painter,
 #endif
         return;
     }
-    if (m->showEmptyTilesAsMissing() && tile->image().isNull())
-        tile = TilesetManager::instance()->missingTile();
+    if (m->showEmptyTilesAsMissing() && tile->image().isNull()) {
+        const Tileset *tileset = tile->tileset();
+        if (!tileset || tileset->isMissing() || !tileset->isLoaded())
+            tile = TilesetManager::instance()->missingTile();
+    }
 
     const int extra = 2;
 

@@ -1,3 +1,28 @@
+# PZTools Modernized v1.0.2
+
+## Transparent-tile rendering and validation
+
+- BuildingEd and WorldEd now distinguish a valid fully transparent tile cell
+  from a tileset image that is missing or failed to load.
+- Valid transparent cells no longer render as red missing-tile placeholders in
+  building, furniture, category, mixed-tileset, or WorldEd previews.
+- BuildingEd template and furniture validation now accepts valid transparent
+  cells while continuing to fail for unresolved tilesets.
+- BuildingEd validation logs report the number of transparent cells found in
+  each template.
+
+## New Building dialog
+
+- The Building Template, Width, and Height controls remain visible under the
+  Breeze Dark theme on Qt 5.14.2.
+
+## Validation
+
+- The Windows x64 release was rebuilt with Qt 5.14.2 and Visual Studio 2026.
+- BuildingEd all-template and category validation passes with the tested
+  Project Zomboid Build 42.20 tile extraction.
+- WorldEd environment-preview overlay validation passes.
+
 # Changes since the BuildingEd room-floor hotfix
 
 This release note starts after the August 10, 2026 BuildingEd hotfix that

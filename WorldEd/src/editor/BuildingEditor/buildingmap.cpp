@@ -141,7 +141,12 @@ QString BuildingMap::buildingTileAt(int x, int y, const QList<bool> visibleLevel
                             test = TilesetManager::instance()->invisibleTile();
                         }
                         if (test->image().isNull()) {
-                            test = TilesetManager::instance()->missingTile();
+                            Tileset *tileset = test->tileset();
+                            if (!tileset || tileset->isMissing()
+                                    || !tileset->isLoaded())
+                                test = TilesetManager::instance()->missingTile();
+                            else
+                                continue;
                         }
                         QRect imageBox(test->offset(), test->image().size());
                         QPoint p = QPoint(x, y) - (tileBox.bottomLeft().toPoint() - QPoint(0, test->height()));

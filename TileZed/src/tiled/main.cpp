@@ -157,6 +157,7 @@ static bool validateBuildingTemplateTiles(BuildingEditor::Building *building,
                                           QString *errorString)
 {
     QSet<BuildingEditor::BuildingTile *> buildingTiles;
+    int transparentTileCount = 0;
     for (BuildingEditor::BuildingTileEntry *entry : building->tiles())
         addEntryTiles(buildingTiles, entry);
     for (BuildingEditor::Room *room : building->rooms()) {
@@ -202,16 +203,18 @@ static bool validateBuildingTemplateTiles(BuildingEditor::Building *building,
             return false;
         }
         Tiled::Tile *tile = tileset->tileAt(buildingTile->mIndex);
-        if (!tile || tile == TilesetManager::instance()->missingTile()
-                || tile->image().isNull()) {
-            *errorString = QStringLiteral("Template tile has no image: %1")
+        if (BuildingEditor::BuildingTilesMgr::isUnavailableTile(tile)) {
+            *errorString = QStringLiteral("Template tile could not be resolved: %1")
                     .arg(buildingTile->name());
             return false;
         }
+        if (tile->image().isNull())
+            ++transparentTileCount;
     }
 
     qInfo() << "Validated building template:"
-            << buildingTiles.count() << "tile references";
+            << buildingTiles.count() << "tile references,"
+            << transparentTileCount << "transparent cells";
     return true;
 }
 
