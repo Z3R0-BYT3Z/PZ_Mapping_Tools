@@ -895,6 +895,7 @@ public:
 
     Tiled::Tile *tileFor(const QString &tileName);
     Tiled::Tile *tileFor(BuildingTile *tile, int offset = 0);
+    static bool isUnavailableTile(const Tiled::Tile *tile);
 
     BuildingTile *fromTiledTile(Tiled::Tile *tile);
 

@@ -624,8 +624,12 @@ void ZLevelRenderer::drawTileLayerGroup(QPainter *painter, ZTileLayerGroup *laye
 
                         }
                         if (tile->image().isNull()) {
-                            if (Tile *placeholder = placeholderTile(false))
-                                tile = placeholder;
+                            Tileset *tileset = tile->tileset();
+                            if (!tileset || tileset->isMissing()
+                                    || !tileset->isLoaded()) {
+                                if (Tile *placeholder = placeholderTile(false))
+                                    tile = placeholder;
+                            }
                         }
                         QImage img = tile->image();
                         const QPoint offset = tile->tileset()->tileOffset() + tile->offset();

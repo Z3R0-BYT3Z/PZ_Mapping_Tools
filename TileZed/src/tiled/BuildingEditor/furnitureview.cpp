@@ -148,7 +148,7 @@ void FurnitureTileDelegate::paint(QPainter *painter,
                     QPointF p1 = tileToPixelCoords(mapWidth, mapHeight, x, y) + tileMargins + r.topLeft();
                     QRect r((p1 - QPointF(tileWidth/2, imageHeight - tileHeight)).toPoint(),
                             QSize(tileWidth, imageHeight));
-                    if (tile->image().isNull())
+                    if (BuildingTilesMgr::isUnavailableTile(tile))
                         tile = TilesetManager::instance()->missingTile();
                     const QMargins margins = tile->drawMargins(scale);
                     painter->drawImage(r.adjusted(margins.left(), margins.top(), -margins.right(), -margins.bottom()), tile->image());

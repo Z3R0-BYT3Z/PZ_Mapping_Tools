@@ -495,14 +495,18 @@ void ZLevelRenderer::drawTileLayerGroup(QPainter *painter, ZTileLayerGroup *laye
 
                         }
                         if (tile->image().isNull()) {
-                            if (g_missing_tile == nullptr) {
-                                Tileset *ts = new Tileset(QLatin1String("MISSING"), 64, 128);
-                                if (ts->loadFromImage(QImage(QLatin1String(":/images/missing-tile.png")), QLatin1String(":/images/missing-tile.png"))) {
-                                    g_missing_tile = ts->tileAt(0);
+                            Tileset *tileset = tile->tileset();
+                            if (!tileset || tileset->isMissing()
+                                    || !tileset->isLoaded()) {
+                                if (g_missing_tile == nullptr) {
+                                    Tileset *ts = new Tileset(QLatin1String("MISSING"), 64, 128);
+                                    if (ts->loadFromImage(QImage(QLatin1String(":/images/missing-tile.png")), QLatin1String(":/images/missing-tile.png"))) {
+                                        g_missing_tile = ts->tileAt(0);
+                                    }
                                 }
+                                if (g_missing_tile)
+                                    tile = g_missing_tile;
                             }
-                            if (g_missing_tile)
-                                tile = g_missing_tile;
                         }
                         QImage img = layerGroup->useImageBlack(columnItr.x(), columnItr.y()) ? tile->imageBlack() : tile->image();
                         const QPoint offset = tile->tileset()->tileOffset() + tile->offset();

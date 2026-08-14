@@ -530,6 +530,18 @@ Tile *BuildingTilesMgr::tileFor(BuildingTile *tile, int offset)
     return tileset->tileAt(tile->mIndex + offset);
 }
 
+bool BuildingTilesMgr::isUnavailableTile(const Tiled::Tile *tile)
+{
+    if (!tile)
+        return true;
+
+    // Tile::setImage() intentionally leaves image() null for a fully
+    // transparent cell. The owning tileset state distinguishes that valid
+    // blank cell from an image sheet that could not be loaded.
+    const Tileset *tileset = tile->tileset();
+    return !tileset || tileset->isMissing() || !tileset->isLoaded();
+}
+
 BuildingTile *BuildingTilesMgr::fromTiledTile(Tile *tile)
 {
     if (tile == mNoneTiledTile)

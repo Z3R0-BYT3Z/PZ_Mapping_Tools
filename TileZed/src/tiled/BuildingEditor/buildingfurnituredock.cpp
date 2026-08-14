@@ -198,10 +198,7 @@ bool BuildingFurnitureDock::validateFurnitureCatalog(QString *errorString)
                     continue;
                 Tiled::Tile *tile =
                         BuildingTilesMgr::instance()->tileFor(buildingTile);
-                if (!tile
-                        || tile == Tiled::Internal::TilesetManager::instance()
-                           ->missingTile()
-                        || tile->image().isNull()) {
+                if (BuildingTilesMgr::isUnavailableTile(tile)) {
                     *errorString = tr("Furniture tile could not be loaded: %1")
                             .arg(buildingTile->name());
                     return false;

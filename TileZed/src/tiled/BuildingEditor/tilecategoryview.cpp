@@ -173,7 +173,7 @@ void BuildingEntryDelegate::paint(QPainter *painter,
                 QPointF p1 = tileToPixelCoords(offset.x(), offset.y()) + tileMargins + r.topLeft();
                 QRect target((p1 - QPointF(tileWidth/2, imageHeight - tileHeight)).toPoint(),
                         QSize(tileWidth, imageHeight));
-                if (tile->image().isNull()) {
+                if (BuildingTilesMgr::isUnavailableTile(tile)) {
                     tile = TilesetManager::instance()->missingTile();
                 }
                 QImage image = tile->image();
