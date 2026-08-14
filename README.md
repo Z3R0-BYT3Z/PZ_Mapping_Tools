@@ -41,7 +41,7 @@ This is an independently maintained community modernization. Credit for the
 original applications and upstream development remains with their respective
 authors and contributors.
 
-[![PZTools Modernized — WorldEd, TileZed, and BuildingEd](docs/images/pztools-modernized-flyer.png)](https://github.com/z3r0x92-dev/PZ_Mapping_Tools/releases/latest)
+[![PZTools Modernized — WorldEd, TileZed, and BuildingEd](tilezmock.png)](https://github.com/z3r0x92-dev/PZ_Mapping_Tools/releases/latest)
 The automatically generated GitHub **Source code** archives do not contain the
 Windows executables.
 
