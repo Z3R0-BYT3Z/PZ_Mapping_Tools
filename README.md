@@ -13,23 +13,33 @@ mapping automation, stability fixes, and current Project Zomboid data support.
 This is a community project. It is not an official The Indie Stone release.
 Project Zomboid game assets are not included.
 
-## About this fork
+## Modernized version and project history
 
-This repository is a fork of
+The original WorldEd and TileZed tools were created by **Tim Baker**. This
+version is based on the later community-maintained work in
 [Unjammer/PZ_Mapping_Tools](https://github.com/Unjammer/PZ_Mapping_Tools) and
-retains the features and documentation developed there. The releases in this
-fork add the following compatibility, rendering, and interface improvements:
+retains the features, fixes, and documentation developed there. This repository
+adds a modernized interface and further compatibility, rendering, validation,
+and usability improvements for current Project Zomboid mapping workflows.
 
-- fully transparent tile cells are treated as valid blank tiles instead of
-  red missing-tile placeholders;
-- BuildingEd template and furniture validation now distinguishes transparent
-  cells from genuinely missing or unloaded tilesets;
-- BuildingEd asset previews, category and furniture views, map rendering, and
-  hit-testing use the corrected tile-availability checks;
-- WorldEd applies the same corrected handling while rendering and selecting
+### Modernized UI and additional changes
+
+- refreshed BuildingEd interface behavior for current Qt 5 workflows;
+- a larger **New Building** dialog that keeps the template, width, and height
+  controls visible, including with Breeze Dark and Qt 5.14.2;
+- corrected transparent-tile rendering so fully transparent cells appear as
+  valid blank tiles instead of red missing-tile placeholders;
+- improved BuildingEd template and furniture validation that distinguishes
+  transparent cells from genuinely missing or unloaded tilesets;
+- corrected BuildingEd asset previews, category and furniture views, map
+  rendering, and hit-testing;
+- matching transparent-tile handling in WorldEd when rendering and selecting
   building tiles; and
-- BuildingEd's **New Building** dialog is larger and keeps the template,
-  width, and height controls visible when using Breeze Dark with Qt 5.14.2.
+- a portable Windows x64 release with the required executables and Qt runtime.
+
+This is an independently maintained community modernization. Credit for the
+original applications and upstream development remains with their respective
+authors and contributors.
 
 Download the latest compiled Windows x64 package from
 [Releases](https://github.com/z3r0x92-dev/PZ_Mapping_Tools/releases/latest).
