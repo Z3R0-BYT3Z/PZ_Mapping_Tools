@@ -13,6 +13,29 @@ mapping automation, stability fixes, and current Project Zomboid data support.
 This is a community project. It is not an official The Indie Stone release.
 Project Zomboid game assets are not included.
 
+## About this fork
+
+This repository is a fork of
+[Unjammer/PZ_Mapping_Tools](https://github.com/Unjammer/PZ_Mapping_Tools) and
+retains the features and documentation developed there. The releases in this
+fork add the following compatibility, rendering, and interface improvements:
+
+- fully transparent tile cells are treated as valid blank tiles instead of
+  red missing-tile placeholders;
+- BuildingEd template and furniture validation now distinguishes transparent
+  cells from genuinely missing or unloaded tilesets;
+- BuildingEd asset previews, category and furniture views, map rendering, and
+  hit-testing use the corrected tile-availability checks;
+- WorldEd applies the same corrected handling while rendering and selecting
+  building tiles; and
+- BuildingEd's **New Building** dialog is larger and keeps the template,
+  width, and height controls visible when using Breeze Dark with Qt 5.14.2.
+
+Download the latest compiled Windows x64 package from
+[Releases](https://github.com/z3r0x92-dev/PZ_Mapping_Tools/releases/latest).
+The automatically generated GitHub **Source code** archives do not contain the
+Windows executables.
+
 Current release documentation: [August 8, 2026 changes](RELEASE_CHANGELOG.md),
 [feature reference](docs/Feature-Reference.md), and
 [logs/diagnostics](docs/Diagnostics-and-Logs.md).
