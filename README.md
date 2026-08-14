@@ -32,7 +32,7 @@ fork add the following compatibility, rendering, and interface improvements:
   width, and height controls visible when using Breeze Dark with Qt 5.14.2.
 
 Download the latest compiled Windows x64 package from
-[Releases](https://github.com/z3r0x92-dev/PZ_Mapping_Tools-Final/releases/latest).
+[Releases](https://github.com/z3r0x92-dev/PZ_Mapping_Tools/releases/latest).
 The automatically generated GitHub **Source code** archives do not contain the
 Windows executables.
 
