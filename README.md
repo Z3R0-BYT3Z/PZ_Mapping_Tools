@@ -39,11 +39,11 @@ and usability improvements for current Project Zomboid mapping workflows.
 
 This is an independently maintained community modernization. Credit for the
 original applications and upstream development remains with their respective
-authors and contributors.
+authors and contributors. The automatically generated GitHub **Source code** archives do not contain the
+Windows executables.
 
 [![PZTools Modernized — WorldEd, TileZed, and BuildingEd](tilezmock.png)](https://github.com/z3r0x92-dev/PZ_Mapping_Tools/releases/latest)
-The automatically generated GitHub **Source code** archives do not contain the
-Windows executables.
+
 
 Current release documentation: [August 8, 2026 changes](RELEASE_CHANGELOG.md),
 [feature reference](docs/Feature-Reference.md), and
