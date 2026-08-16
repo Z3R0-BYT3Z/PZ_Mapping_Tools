@@ -28,7 +28,7 @@ See [configuration files](PZTools-Configuration-Files.md),
 | New 300 or 256 world | File > New World | PZW project with the selected native grid |
 | OpenStreetMap project | Terrain & Environment | New project with terrain, vegetation, roads, buildings, streets, and zones |
 | Terrain and vegetation editor | Terrain & Environment | Atomic Map and vegetation PNG editing |
-| BMP to TMX | Conversion & Export | Project-sized TMX cells with validation and repair |
+| BMP to TMX | Conversion & Export | Project-sized TMX cells with validation, repair, and metadata-only Rules/Blends synchronization |
 | Project Doctor | Project Utilities | Read-only health report and backed-up project corrections |
 | WorldGen biome editor | WorldGen | Project biome and feature Lua |
 | WorldGen prefab editor | WorldGen | Static prefab Lua from supported sources |
@@ -92,7 +92,7 @@ Detailed references:
 | Lua automation | Building menu and console | Transactional building changes with Undo |
 | Autosave | Automatic | Recoverable copy of modified building data |
 
-The [BuildingEd manual](../TileZed/src/tiled/BuildingEditor/manual/index.html) documents its editing
+The [BuildingEd manual](BuildingEd/index.html) documents its editing
 modes and tools.
 
 ## File ownership

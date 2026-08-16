@@ -25,8 +25,10 @@
 #include <QGraphicsItem>
 #include <QImage>
 #include <QPair>
+#include <QPicture>
 #include <QPointer>
 #include <QPolygonF>
+#include <QVector>
 
 class BaseWorldSceneTool;
 class MapImage;
@@ -39,6 +41,34 @@ class WorldBMP;
 class WorldCellTool;
 class WorldDocument;
 class WorldScene;
+
+class WorldMapOverlayItem : public QGraphicsItem
+{
+public:
+    WorldMapOverlayItem(WorldScene *scene, bool forest);
+
+    QRectF boundingRect() const override;
+    void paint(QPainter *painter,
+               const QStyleOptionGraphicsItem *option,
+               QWidget *widget = nullptr) override;
+
+    bool load(const QString &fileName, QString *error);
+    QString fileName() const { return mFileName; }
+    int featureCount() const { return mFeatureCount; }
+
+private:
+    struct Batch {
+        QRectF bounds;
+        QPicture picture;
+    };
+
+    WorldScene *mScene;
+    bool mForest;
+    QRectF mBoundingRect;
+    QVector<Batch> mBatches;
+    QString mFileName;
+    int mFeatureCount = 0;
+};
 
 #define GRID_WIDTH (512)
 #define GRID_HEIGHT (256)
@@ -538,6 +568,14 @@ public:
 
     void cancelLoadingThumbnails();
 
+    bool loadWorldMapOverlay(const QString &fileName, bool forest,
+                             QString *error);
+    bool hasWorldMapOverlay(bool forest) const;
+    bool worldMapOverlayVisible(bool forest) const;
+    int worldMapOverlayFeatureCount(bool forest) const;
+    void setWorldMapOverlayVisible(bool forest, bool visible);
+    void clearWorldMapOverlays();
+
 signals:
     
 public slots:
@@ -620,6 +658,8 @@ private:
     QString mDragBMPError;
     ZombieSpawnImageItem *mZombieSpawnImageItem;
     BiomeMapItem *mBiomeMapItem;
+    WorldMapOverlayItem *mWorldMapOverlayItem = nullptr;
+    WorldMapOverlayItem *mWorldMapForestOverlayItem = nullptr;
     bool mBMPToolActive;
     bool mDoubleClick;
 

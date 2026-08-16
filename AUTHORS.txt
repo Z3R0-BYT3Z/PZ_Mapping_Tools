@@ -7,7 +7,7 @@ Upstream foundation
 Tim Baker for the original WorldEd and TileZed work that remains the upstream
 foundation of these tools.
 
-Original TileD developer and maintainer
+Original Tiled developer and maintainer
 
 Thorbjorn Lindeijer <thorbjorn@lindeijer.nl>
 
@@ -19,7 +19,7 @@ Petro, Pabbiqo [pq], Dane, Cacador, Kyber, шакалоблок, and the Project
 mapping and modding community for reproducible reports, project files,
 screenshots, logs, and practical workflow feedback.
 
-TileD contributors
+Tiled contributors
 
 Andrew G. Crowell
 Christian Henz
@@ -31,7 +31,7 @@ Roderic Morris
 Stefan Beller
 Alexander Kuhrt <alex@qrt.de>
 
-TileD translators
+Tiled translators
 
 Alexander Komarnitsky
 Antonio Ricci
@@ -50,5 +50,6 @@ Thorbjorn Lindeijer
 Yohann Ferreira
 Zhao Sting
 
-Additional attribution remains in THIRD_PARTY_NOTICES.txt, UPSTREAM-HISTORY.md,
-the bundled license notices, and the upstream source headers.
+Additional attribution remains in THIRD_PARTY_NOTICES.txt,
+FEATURE_PROVENANCE.md, UPSTREAM-HISTORY.md, the bundled license notices, and
+the upstream source headers.

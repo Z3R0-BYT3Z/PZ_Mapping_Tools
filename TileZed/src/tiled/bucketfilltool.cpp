@@ -29,6 +29,7 @@
 #include "tile.h"
 #include "mapscene.h"
 #include "mapdocument.h"
+#include "tilesetmanager.h"
 
 #include <QApplication>
 
@@ -54,6 +55,7 @@ BucketFillTool::~BucketFillTool()
 {
     delete mStamp;
     delete mFillOverlay;
+    TilesetManager::instance()->removeReferences(mTilesetReferences);
 }
 
 void BucketFillTool::activate(MapScene *scene)
@@ -226,10 +228,17 @@ void BucketFillTool::mapDocumentChanged(MapDocument *oldDocument,
 
 void BucketFillTool::setStamp(TileLayer *stamp)
 {
+    const QList<Tileset *> tilesets = stamp
+            ? stamp->usedTilesets().values()
+            : QList<Tileset *>();
+    TilesetManager::instance()->addReferences(tilesets);
+
     // Clear any overlay that we presently have with an old stamp
     clearOverlay();
 
     delete mStamp;
+    TilesetManager::instance()->removeReferences(mTilesetReferences);
+    mTilesetReferences = tilesets;
     mStamp = stamp;
 
     if (mIsRandom)

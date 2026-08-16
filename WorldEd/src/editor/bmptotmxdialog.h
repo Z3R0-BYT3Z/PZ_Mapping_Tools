@@ -40,6 +40,7 @@ private slots:
     void blendsBrowse();
     void mapbaseBrowse();
     void repairUnknownColorsToggled(bool enabled);
+    void operationChanged();
     void accept();
     void apply();
 

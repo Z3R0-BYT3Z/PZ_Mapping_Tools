@@ -27,7 +27,7 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 
-#include "aboutdialog.h"
+#include "pztoolsabout.h"
 #include "addremovemapobject.h"
 #include "changemapobject.h"
 #include "changeobjectgroupproperties.h"
@@ -144,6 +144,7 @@
 #include <QCloseEvent>
 #include <QBoxLayout>
 #include <QComboBox>
+#include <QLabel>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QMimeData>
@@ -168,7 +169,6 @@ using namespace Tiled::Internal;
 using namespace Tiled::Utils;
 
 #ifdef ZOMBOID
-#include "BuildingEditor/buildingeditorwindow.h"
 #include "BuildingEditor/buildingpreferences.h"
 #include "BuildingEditor/buildingtiles.h"
 #include "BuildingEditor/buildingtemplates.h"
@@ -285,7 +285,6 @@ MainWindow::MainWindow(QWidget *parent, Qt::WindowFlags flags)
     , mClipboardManager(new ClipboardManager(this))
     , mDocumentManager(DocumentManager::instance())
 #ifdef ZOMBOID
-    , mBuildingEditor(nullptr)
     , mTileDefDialog(nullptr)
     , mContainerOverlayDialog(nullptr)
 #endif
@@ -295,6 +294,63 @@ MainWindow::MainWindow(QWidget *parent, Qt::WindowFlags flags)
 #endif
     mUi->setupUi(this);
 #ifdef ZOMBOID
+    mPartialChunksMenu = new QMenu(tr("Partial Chunks"), this);
+    mUi->menuBar->insertMenu(mUi->menuHelp->menuAction(),
+                             mPartialChunksMenu);
+    mPartialChunksAction = mPartialChunksMenu->addAction(
+                tr("Enable Partial Chunks"));
+    mPartialChunksAction->setCheckable(true);
+    mPartialChunksAction->setIcon(QIcon(
+                QLatin1String(":/images/22x22/stock-tool-rect-select.png")));
+    mPartialChunksAction->setToolTip(tr(
+                "Enable or disable Partial Chunks"));
+    mPartialChunksAction->setStatusTip(tr(
+                "Enable the Native256 8 x 8-square chunk export mask"));
+    mSelectAllPartialChunksAction = mPartialChunksMenu->addAction(
+                tr("Select All Chunks"));
+    mSelectAllPartialChunksAction->setIcon(QIcon(
+                QLatin1String(":/images/22x22/tool-select-objects.png")));
+    mSelectAllPartialChunksAction->setToolTip(tr(
+                "Select all chunks (Ctrl+A)"));
+    mSelectAllPartialChunksAction->setStatusTip(tr(
+                "Include all 1024 chunks in the current cell"));
+    mClearPartialChunksAction = mPartialChunksMenu->addAction(
+                tr("Clear Chunk Selection"));
+    mClearPartialChunksAction->setIcon(QIcon(
+                QLatin1String(":/images/24x24/edit-clear.png")));
+    mClearPartialChunksAction->setToolTip(tr(
+                "Clear the chunk selection"));
+    mClearPartialChunksAction->setStatusTip(tr(
+                "Omit all chunks from the current cell export"));
+    mPartialChunksMenu->addSeparator();
+    QAction *partialChunksHelpAction = mPartialChunksMenu->addAction(
+                tr("How Partial Chunks Works..."));
+    connect(mPartialChunksAction, &QAction::toggled, this, [this](bool enabled) {
+        if (MapScene *scene = mDocumentManager->currentMapScene())
+            scene->setPartialChunksEnabled(enabled);
+    });
+    connect(mSelectAllPartialChunksAction, &QAction::triggered, this, [this]() {
+        if (MapScene *scene = mDocumentManager->currentMapScene())
+            scene->selectAllPartialChunks();
+    });
+    connect(mClearPartialChunksAction, &QAction::triggered, this, [this]() {
+        if (MapScene *scene = mDocumentManager->currentMapScene())
+            scene->clearPartialChunks();
+    });
+    connect(partialChunksHelpAction, &QAction::triggered, this, [this]() {
+        QMessageBox::information(this, tr("Partial Chunks"), tr(
+                    "Partial Chunks is a Native256 LOT export mask. The TMX remains a normal 256 x 256 editing canvas.\n\n"
+                    "Enable it from the Partial Chunks menu or its toolbar. The overlay is a 32 x 32 grid. Each grid square is one complete 8 x 8-square game chunk. Click a chunk to include or omit it. Drag across the grid to select or clear a rectangular group. The starting chunk determines whether the group is included or omitted. Included chunks use a light tint and omitted chunks are darkened. The line and tint color follows the Grid color in Preferences.\n\n"
+                    "Chunk selection does not select, delete, or modify TMX tiles. Ctrl+A selects all 1024 chunks while the mode is active. Select All Chunks and Clear Chunk Selection change the export mask for the complete cell.\n\n"
+                    "The mask is saved beside the map as map-name.tmx.pzchunks. While the mode is enabled, Hole Detection and automatic hole filling are bypassed. Generate Lots writes selected chunks and encodes omitted chunks as absent LOT data and null navigation chunks. Legacy 300-square maps are not supported."));
+    });
+    mPartialChunksToolBar = addToolBar(tr("Partial Chunks"));
+    mPartialChunksToolBar->setObjectName(
+                QLatin1String("PartialChunksToolBar"));
+    mPartialChunksToolBar->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    mPartialChunksToolBar->addAction(mPartialChunksAction);
+    mPartialChunksToolBar->addAction(mSelectAllPartialChunksAction);
+    mPartialChunksToolBar->addAction(mClearPartialChunksAction);
     mMainSplitter->setObjectName(QLatin1String("mainSplitter"));
     mMainSplitter->setOrientation(Qt::Horizontal);
     mMainSplitter->setChildrenCollapsible(false);
@@ -915,8 +971,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
     writeSettings();
     if (confirmAllSave() &&
             TileDefDialog::closeYerself() &&
-            (!mContainerOverlayDialog || mContainerOverlayDialog->close()) &&
-            (!mBuildingEditor || mBuildingEditor->closeYerself())) {
+            (!mContainerOverlayDialog || mContainerOverlayDialog->close())) {
 
         if (mKeyboardShortcutWindow != nullptr) {
             mKeyboardShortcutWindow->close();
@@ -1004,12 +1059,30 @@ bool MainWindow::openFile(const QString &fileName,
     if (fileName.isEmpty())
         return false;
 
-#ifdef BUILDINGED
+#ifdef ZOMBOID
     if (fileName.endsWith(QLatin1String(".tbx"))) {
-        showBuildingEditor();
-        if (mBuildingEditor)
-            return mBuildingEditor->openFile(fileName);
-        return false;
+        const QString program = QDir(QCoreApplication::applicationDirPath())
+                .filePath(
+#ifdef Q_OS_WIN
+                    QLatin1String("BuildingEd.exe")
+#else
+                    QLatin1String("BuildingEd")
+#endif
+                    );
+        if (!QFileInfo::exists(program)) {
+            QMessageBox::warning(this, tr("BuildingEd Not Found"),
+                                 tr("BuildingEd could not be found beside TileZed:\n%1")
+                                 .arg(QDir::toNativeSeparators(program)));
+            return false;
+        }
+        const bool started = QProcess::startDetached(
+                    program, QStringList() << QFileInfo(fileName).absoluteFilePath(),
+                    QCoreApplication::applicationDirPath());
+        if (!started) {
+            QMessageBox::warning(this, tr("BuildingEd Launch Failed"),
+                                 tr("BuildingEd could not be started."));
+        }
+        return started;
     }
 #endif
 
@@ -1609,7 +1682,20 @@ void MainWindow::cut()
     const QRegion &tileSelection = mMapDocument->tileSelection();
     const QList<MapObject*> &selectedObjects = mMapDocument->selectedObjects();
 
-    copy();
+    checkpointDocumentAutoSave();
+    beginDocumentTransaction();
+    bool copiedTileSelection = false;
+#ifdef ZOMBOID
+    if (ToolManager::instance()->isBmpToolSelected()) {
+        mBmpClipboard->copySelection(mMapDocument);
+    } else {
+        copiedTileSelection = mClipboardManager->copySelection(
+                    mMapDocument, mTileSelectionScope);
+    }
+#else
+    copiedTileSelection = mClipboardManager->copySelection(
+                mMapDocument, mTileSelectionScope);
+#endif
 
     QUndoStack *stack = mMapDocument->undoStack();
     stack->beginMacro(tr("Cut"));
@@ -1642,6 +1728,9 @@ void MainWindow::cut()
     mActionHandler->selectNone();
 
     stack->endMacro();
+    if (copiedTileSelection)
+        paste();
+    endDocumentTransaction();
 }
 
 void MainWindow::copy()
@@ -1649,6 +1738,7 @@ void MainWindow::copy()
     if (!mMapDocument)
         return;
 
+    checkpointDocumentAutoSave();
 #ifdef ZOMBOID
     if (ToolManager::instance()->isBmpToolSelected()) {
         mBmpClipboard->copySelection(mMapDocument);
@@ -1657,7 +1747,10 @@ void MainWindow::copy()
     }
 #endif
 
-    mClipboardManager->copySelection(mMapDocument, mTileSelectionScope);
+    if (mClipboardManager->copySelection(
+                mMapDocument, mTileSelectionScope)) {
+        paste();
+    }
 }
 
 void MainWindow::paste()
@@ -1667,7 +1760,9 @@ void MainWindow::paste()
 
 #ifdef ZOMBOID
     if (ToolManager::instance()->isBmpToolSelected()) {
+        beginDocumentTransaction();
         mBmpClipboard->pasteSelection(mMapDocument);
+        endDocumentTransaction();
         return;
     }
 #endif
@@ -1686,59 +1781,23 @@ void MainWindow::paste()
     if (multiLayerSelection) {
         TilesetManager *tilesetManager = TilesetManager::instance();
         tilesetManager->addReferences(map->tilesets());
+        beginDocumentTransaction();
         mMapDocument->unifyTilesets(map);
         const int anchorLevel = map->property(
                     QStringLiteral("pz.selection.anchorLevel")).toInt();
-        QPoint insertPos = mMapDocument->tileSelection().boundingRect()
-                .topLeft();
-        if (mMapDocument->tileSelection().isEmpty()) {
-            const MapView *view = mDocumentManager->currentMapView();
-            QPoint viewPos;
-            if (view->underMouse())
-                viewPos = view->mapFromGlobal(QCursor::pos());
-            else
-                viewPos = QPoint(view->width() / 2, view->height() / 2);
-            const QPointF scenePos = view->mapToScene(viewPos);
-            insertPos = mMapDocument->renderer()
-                    ->pixelToTileCoords(scenePos).toPoint();
-            if (map->width() > 1 || map->height() > 1)
-                insertPos -= QPoint(map->width() / 2,
-                                    map->height() / 2);
-        }
-        QUndoStack *undoStack = mMapDocument->undoStack();
-        undoStack->beginMacro(tr("Paste Tile Selection"));
-        int pastedLayerCount = 0;
+        QList<TileLayer *> stamps;
         for (TileLayer *source : map->tileLayers()) {
-            const int targetLevel = mMapDocument->currentLevel() +
-                    source->level() - anchorLevel;
-            MapLevel *level = mMapDocument->map()
-                    ->mapLevelForZ(targetLevel);
-            if (!level)
-                continue;
-            TileLayer *target = nullptr;
-            for (TileLayer *candidate : level->tileLayers()) {
-                if (candidate->name() == source->name()) {
-                    target = candidate;
-                    break;
-                }
-            }
-            if (!target)
-                continue;
-            const QRegion pasteRegion(QRect(
-                    insertPos, QSize(source->width(), source->height())));
-            undoStack->push(new PaintTileLayer(
-                    mMapDocument, target,
-                    insertPos.x(), insertPos.y(), source,
-                    pasteRegion, false));
-            ++pastedLayerCount;
+            stamps.append(static_cast<TileLayer *>(source->clone()));
         }
-        undoStack->endMacro();
+        mActionHandler->selectNone();
+        mStampBrush->setLayerStamps(stamps, anchorLevel);
+        ToolManager::instance()->selectTool(mStampBrush);
         statusBar()->showMessage(
-                    tr("Pasted %1 tile layer(s) at %2,%3")
-                    .arg(pastedLayerCount)
-                    .arg(insertPos.x()).arg(insertPos.y()), 5000);
+                    tr("%1 copied tile layer(s) follow the pointer. Left-click to place.")
+                    .arg(stamps.size()), 5000);
         tilesetManager->removeReferences(map->tilesets());
         delete map;
+        endDocumentTransaction();
         return;
     }
     if (map->layerCount() != 1) {
@@ -1751,6 +1810,7 @@ void MainWindow::paste()
     TilesetManager *tilesetManager = TilesetManager::instance();
     tilesetManager->addReferences(map->tilesets());
 
+    beginDocumentTransaction();
     mMapDocument->unifyTilesets(map);
     Layer *layer = map->layerAt(0);
 
@@ -1802,6 +1862,7 @@ void MainWindow::paste()
 
     tilesetManager->removeReferences(map->tilesets());
     delete map;
+    endDocumentTransaction();
 }
 
 void MainWindow::delete_()
@@ -2050,8 +2111,11 @@ void MainWindow::resizeMap()
     if (resizeDialog.exec()) {
         const QSize &newSize = resizeDialog.newSize();
         const QPoint &offset = resizeDialog.offset();
-        if (newSize != map->size() || !offset.isNull())
+        if (newSize != map->size() || !offset.isNull()) {
+            beginDocumentTransaction();
             mMapDocument->resizeMap(newSize, offset);
+            endDocumentTransaction();
+        }
     }
 }
 
@@ -2112,23 +2176,25 @@ void MainWindow::tilePicked(Tile *tile)
 
 void MainWindow::showBuildingEditor()
 {
-    if (!mBuildingEditor) {
-        mBuildingEditor = new BuildingEditor::BuildingEditorWindow();
-        mBuildingEditor->show();
-        if (!mBuildingEditor->Startup()) {
-            delete mBuildingEditor;
-            mBuildingEditor = 0;
-            return;
-        }
-
-        connect(mBuildingEditor, &BuildingEditorWindow::tilePicked,
-                this, &MainWindow::buildingTilePicked);
+    const QString program = QDir(QCoreApplication::applicationDirPath())
+            .filePath(
+#ifdef Q_OS_WIN
+                QLatin1String("BuildingEd.exe")
+#else
+                QLatin1String("BuildingEd")
+#endif
+                );
+    if (!QFileInfo::exists(program)) {
+        QMessageBox::warning(this, tr("BuildingEd Not Found"),
+                             tr("BuildingEd could not be found beside TileZed:\n%1")
+                             .arg(QDir::toNativeSeparators(program)));
+        return;
     }
-
-    mBuildingEditor->show();
-    mBuildingEditor->setWindowState(mBuildingEditor->windowState() & ~Qt::WindowMinimized);
-    mBuildingEditor->raise();
-    mBuildingEditor->activateWindow();
+    if (!QProcess::startDetached(program, QStringList(),
+                                 QCoreApplication::applicationDirPath())) {
+        QMessageBox::warning(this, tr("BuildingEd Launch Failed"),
+                             tr("BuildingEd could not be started."));
+    }
 }
 
 void MainWindow::checkBuildings()
@@ -2141,12 +2207,6 @@ void MainWindow::checkMaps()
 {
     CheckMapsWindow *d = new CheckMapsWindow(this);
     d->show();
-}
-
-void MainWindow::buildingTilePicked(const QString &tileName)
-{
-    if (mTileDefDialog && TileDefDialog::instance()->isVisible())
-        TileDefDialog::instance()->displayTile(tileName);
 }
 
 void MainWindow::tilesetMetaInfoDialog()
@@ -3429,6 +3489,26 @@ void MainWindow::updateActions()
 #endif
     }
 
+#ifdef ZOMBOID
+    MapScene *partialScene = mDocumentManager->currentMapScene();
+    const bool partialSupported = partialScene
+            && partialScene->supportsPartialChunks();
+    const bool partialEnabled = partialSupported
+            && partialScene->partialChunksEnabled();
+    mPartialChunksMenu->setEnabled(partialSupported);
+    mPartialChunksToolBar->setEnabled(partialSupported);
+    {
+        QSignalBlocker blocker(mPartialChunksAction);
+        mPartialChunksAction->setChecked(partialEnabled);
+    }
+    mSelectAllPartialChunksAction->setEnabled(partialEnabled);
+    mClearPartialChunksAction->setEnabled(partialEnabled);
+    mPartialChunksMenu->setTitle(partialEnabled
+            ? tr("Partial Chunks (%1 selected)")
+                .arg(partialScene->selectedPartialChunkCount())
+            : tr("Partial Chunks"));
+#endif
+
     const bool canCopy = (tileLayerSelected && !selection.isEmpty())
             || objectsSelected;
     mUi->actionSave->setEnabled(map);
@@ -3796,7 +3876,7 @@ void MainWindow::updateDocumentAutoSaveTimer()
     if (!timer)
         return;
     const int minutes = Preferences::instance()->autoSaveIntervalMinutes();
-    if (minutes <= 0) {
+    if (minutes <= 0 || mDocumentTransactionDepth > 0) {
         timer->stop();
         return;
     }
@@ -3805,7 +3885,11 @@ void MainWindow::updateDocumentAutoSaveTimer()
 
 void MainWindow::autoSaveCurrentDocument()
 {
-    if (!mMapDocument || QApplication::activeModalWidget() ||
+    if (!mMapDocument || mDocumentTransactionDepth > 0 ||
+            QApplication::activeModalWidget() ||
+#ifdef ZOMBOID
+            ZProgressManager::instance()->isActive() ||
+#endif
             !mMapDocument->isModified())
         return;
     const QString fileName = mMapDocument->fileName();
@@ -3814,6 +3898,37 @@ void MainWindow::autoSaveCurrentDocument()
     if (saveFile(fileName))
         qInfo().noquote() << "TileZed auto-saved"
                           << QDir::toNativeSeparators(fileName);
+}
+
+void MainWindow::checkpointDocumentAutoSave()
+{
+    if (mDocumentTransactionDepth > 0 ||
+            Preferences::instance()->autoSaveIntervalMinutes() <= 0)
+        return;
+    QTimer *timer = findChild<QTimer*>(
+                QStringLiteral("documentAutoSaveTimer"));
+    if (timer)
+        timer->stop();
+    autoSaveCurrentDocument();
+    updateDocumentAutoSaveTimer();
+}
+
+void MainWindow::beginDocumentTransaction()
+{
+    ++mDocumentTransactionDepth;
+    if (QTimer *timer = findChild<QTimer*>(
+                QStringLiteral("documentAutoSaveTimer")))
+        timer->stop();
+}
+
+void MainWindow::endDocumentTransaction()
+{
+    Q_ASSERT(mDocumentTransactionDepth > 0);
+    if (mDocumentTransactionDepth <= 0)
+        return;
+    --mDocumentTransactionDepth;
+    if (mDocumentTransactionDepth == 0)
+        updateDocumentAutoSaveTimer();
 }
 void MainWindow::writeWindowSettings()
 {
@@ -3947,8 +4062,7 @@ void MainWindow::addMapDocument(MapDocument *mapDocument)
 
 void MainWindow::aboutTiled()
 {
-    AboutDialog aboutDialog(this);
-    aboutDialog.exec();
+    showPZToolsAbout(this, tr("TileZed"), true);
 }
 
 void MainWindow::retranslateUi()
@@ -4027,6 +4141,15 @@ void MainWindow::mapDocumentChanged(MapDocument *mapDocument)
     }
 
     mMapDocument = mapDocument;
+
+    if (MapScene *scene = mDocumentManager->currentMapScene()) {
+        connect(scene, &MapScene::partialChunkSelectionChanged,
+                this, &MainWindow::updateActions, Qt::UniqueConnection);
+        connect(scene, &MapScene::partialChunkSaveFailed,
+                this, [this](const QString &message) {
+            QMessageBox::warning(this, tr("Partial Chunks"), message);
+        });
+    }
 
     mActionHandler->setMapDocument(mMapDocument);
     mLayerDock->setMapDocument(mMapDocument);

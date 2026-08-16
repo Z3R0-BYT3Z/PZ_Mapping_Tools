@@ -375,6 +375,7 @@ QMenuBar::item:pressed
 QMenu
 {
     color: #eff0f1;
+    background-color: #31363b;
     margin: 0.09em;
 }
 
@@ -905,6 +906,13 @@ QComboBox:editable
     background-color: #1d2023;
 }
 
+QComboBox:editable QLineEdit
+{
+    color: #eff0f1;
+    background-color: #1d2023;
+    border: none;
+}
+
 QPushButton:checked
 {
     background-color: #626568;
@@ -1026,6 +1034,8 @@ QComboBox QAbstractItemView
 {
     /* This happens for the drop-down menu always, whether editable or not.*/
     background-color: #1d2023;
+    color: #eff0f1;
+    selection-color: #eff0f1;
     selection-background-color: #2a79a3;
     outline-color: 0em;
     border-radius: 0.09em;

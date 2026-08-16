@@ -28,6 +28,7 @@
 #include "tilelayer.h"
 
 namespace Tiled {
+class Tileset;
 namespace Internal {
 
 class MapDocument;
@@ -83,6 +84,7 @@ private:
     void clearConnections(MapDocument *mapDocument);
 
     TileLayer *mStamp;
+    QList<Tileset *> mTilesetReferences;
     TileLayer *mFillOverlay;
     QRegion mFillRegion;
 

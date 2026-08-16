@@ -23,6 +23,7 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QPalette>
 #include <QSaveFile>
 #include <QSettings>
 #include <QTextStream>
@@ -147,6 +148,70 @@ QString builtInThemeStyleSheet(const QString &displayName)
     }
     return QString();
 }
+QPalette defaultApplicationPalette()
+{
+    static const QPalette palette = qApp->palette();
+    return palette;
+}
+QPalette applicationPaletteForTheme(const QString &themeName)
+{
+    QPalette palette = defaultApplicationPalette();
+    QColor window;
+    QColor base;
+    QColor alternate;
+    QColor text;
+    QColor muted;
+    QColor highlight;
+    QColor highlightedText;
+    if (themeName == QLatin1String("Breeze (Dark)")
+            || themeName == QLatin1String("Breeze (Dark Blue)")) {
+        window = QColor(QStringLiteral("#31363b"));
+        base = QColor(QStringLiteral("#1d2023"));
+        alternate = QColor(QStringLiteral("#2c3034"));
+        text = QColor(QStringLiteral("#eff0f1"));
+        muted = QColor(QStringLiteral("#76797c"));
+        highlight = QColor(QStringLiteral("#3daee9"));
+        highlightedText = text;
+    } else if (themeName == QLatin1String("QDarkStyle (Dark)")) {
+        window = QColor(QStringLiteral("#19232d"));
+        base = QColor(QStringLiteral("#37414f"));
+        alternate = QColor(QStringLiteral("#455364"));
+        text = QColor(QStringLiteral("#dfe1e2"));
+        muted = QColor(QStringLiteral("#788d9c"));
+        highlight = QColor(QStringLiteral("#1a72bb"));
+        highlightedText = text;
+    } else if (themeName == QLatin1String("Mapping Discord (B42)")) {
+        window = QColor(QStringLiteral("#141c17"));
+        base = QColor(QStringLiteral("#101712"));
+        alternate = QColor(QStringLiteral("#19231c"));
+        text = QColor(QStringLiteral("#eef2ef"));
+        muted = QColor(QStringLiteral("#9da9a1"));
+        highlight = QColor(QStringLiteral("#4e8f61"));
+        highlightedText = text;
+    } else {
+        return palette;
+    }
+    const QPalette::ColorGroup groups[] = {
+        QPalette::Active, QPalette::Inactive, QPalette::Disabled
+    };
+    for (QPalette::ColorGroup group : groups) {
+        const QColor groupText = group == QPalette::Disabled ? muted : text;
+        palette.setColor(group, QPalette::Window, window);
+        palette.setColor(group, QPalette::WindowText, groupText);
+        palette.setColor(group, QPalette::Base, base);
+        palette.setColor(group, QPalette::AlternateBase, alternate);
+        palette.setColor(group, QPalette::ToolTipBase, base);
+        palette.setColor(group, QPalette::ToolTipText, groupText);
+        palette.setColor(group, QPalette::Text, groupText);
+        palette.setColor(group, QPalette::Button, window);
+        palette.setColor(group, QPalette::ButtonText, groupText);
+        palette.setColor(group, QPalette::BrightText, QColor(QStringLiteral("#ffffff")));
+        palette.setColor(group, QPalette::Link, highlight);
+        palette.setColor(group, QPalette::Highlight, highlight);
+        palette.setColor(group, QPalette::HighlightedText, highlightedText);
+    }
+    return palette;
+}
 void ensureBuiltInThemesExtracted()
 {
     const QString directoryPath = themesDirectoryPath();
@@ -155,11 +220,15 @@ void ensureBuiltInThemesExtracted()
     const QDir directory(directoryPath);
     for (const BuiltInTheme &theme : builtInThemes) {
         const QString destinationPath = directory.filePath(QLatin1String(theme.fileName));
-        if (QFileInfo::exists(destinationPath))
-            continue;
         const QString styleSheet = builtInThemeStyleSheet(QLatin1String(theme.displayName));
         if (styleSheet.isEmpty())
             continue;
+        QFile existing(destinationPath);
+        if (existing.open(QIODevice::ReadOnly)
+                && existing.readAll() == styleSheet.toUtf8()) {
+            continue;
+        }
+        existing.close();
         QSaveFile destination(destinationPath);
         if (!destination.open(QIODevice::WriteOnly))
             continue;
@@ -944,8 +1013,9 @@ void Preferences::applyTheme() const
 {
     ensureBuiltInThemesExtracted();
     mSettings->setValue(QLatin1String("Interface/Theme"), mTheme);
+    qApp->setStyleSheet(QString());
+    qApp->setPalette(applicationPaletteForTheme(mTheme));
     if (mTheme == QStringLiteral("Default")) {
-        qApp->setStyleSheet(QString());
         return;
     }
     QString styleSheet;
@@ -981,7 +1051,6 @@ void Preferences::applyTheme() const
         }
     }
     if (resource.isEmpty() && !styleSheetLoaded) {
-        qApp->setStyleSheet(QString());
         return;
     }
     if (!resource.isEmpty()) {

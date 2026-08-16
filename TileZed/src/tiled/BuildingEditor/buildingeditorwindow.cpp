@@ -63,6 +63,7 @@
 #include "shortcut/keyboardshortcutwindow.h"
 
 #include "preferences.h"
+#include "pztoolsabout.h"
 #include "luaconsole.h"
 #include "tilemetainfomgr.h"
 #include "tilesetmanager.h"
@@ -85,6 +86,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGraphicsView>
+#include <QHash>
 #include <QLabel>
 #include <QListWidget>
 #include <QMessageBox>
@@ -92,6 +94,7 @@
 #include <QShowEvent>
 #include <QSignalBlocker>
 #include <QSplitter>
+#include <QSet>
 //#include <QStackedWidget>
 #include <QStatusBar>
 #include <QTimer>
@@ -331,6 +334,10 @@ void EditorWindowPerDocumentStuff::setInitialPosition()
 
 void EditorWindowPerDocumentStuff::autoSaveCheck()
 {
+    if (mAtomicEditDepth > 0) {
+        mAutoSaveTimer.stop();
+        return;
+    }
     if (BuildingPreferences::instance()->autoSaveIntervalMinutes() <= 0) {
         mAutoSaveTimer.stop();
         removeAutoSaveFile();
@@ -352,6 +359,8 @@ void EditorWindowPerDocumentStuff::autoSaveCheck()
 
 void EditorWindowPerDocumentStuff::autoSaveTimeout()
 {
+    if (mAtomicEditDepth > 0)
+        return;
     if (BuildingPreferences::instance()->autoSaveIntervalMinutes() <= 0)
         return;
     qDebug() << "BuildingEd auto-save timeout";
@@ -371,6 +380,32 @@ void EditorWindowPerDocumentStuff::autoSaveTimeout()
     }
     mMainWindow->writeBuilding(document(), mAutoSaveFileName);
     qDebug() << "BuildingEd auto-saved:" << mAutoSaveFileName;
+}
+
+void EditorWindowPerDocumentStuff::checkpointAutoSave()
+{
+    if (BuildingPreferences::instance()->autoSaveIntervalMinutes() <= 0
+            || !document()->isModified()) {
+        return;
+    }
+    mAutoSaveTimer.stop();
+    autoSaveTimeout();
+}
+
+void EditorWindowPerDocumentStuff::beginAtomicEdit()
+{
+    ++mAtomicEditDepth;
+    if (mAtomicEditDepth == 1)
+        mAutoSaveTimer.stop();
+}
+
+void EditorWindowPerDocumentStuff::endAtomicEdit()
+{
+    if (mAtomicEditDepth <= 0)
+        return;
+    --mAtomicEditDepth;
+    if (mAtomicEditDepth == 0)
+        autoSaveCheck();
 }
 
 void EditorWindowPerDocumentStuff::removeAutoSaveFile()
@@ -630,6 +665,12 @@ BuildingEditorWindow::BuildingEditorWindow(QWidget *parent) :
     connect(mLuaConsoleAction, &QAction::triggered,
             this, &BuildingEditorWindow::showLuaConsole);
     connect(ui->actionHelp, &QAction::triggered, this, &BuildingEditorWindow::help);
+    QAction *aboutBuildingEd = new QAction(tr("About BuildingEd"), this);
+    aboutBuildingEd->setMenuRole(QAction::AboutRole);
+    ui->menuHelp->insertAction(ui->actionAboutQt, aboutBuildingEd);
+    connect(aboutBuildingEd, &QAction::triggered, this, [this]() {
+        showPZToolsAbout(this, tr("BuildingEd"), true);
+    });
     connect(ui->actionAboutQt, &QAction::triggered, qApp, &QApplication::aboutQt);
 
     // Do this after connect() calls above -> esp. documentAdded()
@@ -1558,68 +1599,15 @@ void BuildingEditorWindow::exportNewBinary()
 
 void BuildingEditorWindow::editCut()
 {
-    if (!mCurrentDocument || currentLayer().isEmpty())
-        return;
-
-    if (mCurrentDocumentStuff->isTile()) {
-        QRegion selection = mCurrentDocument->tileSelection();
-        if (!selection.isEmpty()) {
-            QRect r = selection.boundingRect();
-            QList<BuildingDocument::ClipboardTileLayer> clips;
-            QUndoStack *undoStack = mCurrentDocument->undoStack();
-            undoStack->beginMacro(tr("Cut Tiles"));
-            for (BuildingFloor *floor : mCurrentDocument->building()->floors()) {
-                if (!mTileSelectionScope && floor != currentFloor())
-                    continue;
-                if (mTileSelectionScope &&
-                        mTileSelectionScope->levelMode() ==
-                        Tiled::Internal::TileSelectionScope::CurrentLevel &&
-                        floor != currentFloor()) {
-                    continue;
-                }
-                for (const QString &layerName : BuildingMap::layerNames(
-                         floor->level())) {
-                    const bool current = layerName == currentLayer();
-                    if (!mTileSelectionScope && !current)
-                        continue;
-                    if (mTileSelectionScope &&
-                            !mTileSelectionScope->includesLayer(
-                                layerName, floor->layerVisibility(layerName),
-                                current)) {
-                        continue;
-                    }
-                    FloorTileGrid *tiles = floor->grimeAt(
-                                layerName, r, selection);
-                    if (!tiles->isEmpty()) {
-                        BuildingDocument::ClipboardTileLayer clip;
-                        clip.level = floor->level();
-                        clip.layerName = layerName;
-                        clip.tiles = tiles;
-                        clips.append(clip);
-                    } else {
-                        delete tiles;
-                    }
-                    FloorTileGrid *erased = floor->grimeAt(layerName, r);
-                    if (erased->replace(selection.translated(-r.topLeft()),
-                                        QString())) {
-                        undoStack->push(new PaintFloorTiles(
-                            mCurrentDocument, floor, layerName, selection,
-                            r.topLeft(), erased, "Cut Tiles"));
-                    } else {
-                        delete erased;
-                    }
-                }
-            }
-            undoStack->endMacro();
-            if (!clips.isEmpty())
-                mCurrentDocument->setClipboardTileLayers(
-                            clips, selection.translated(-r.topLeft()),
-                            mCurrentDocument->currentLevel());
-        }
-    }
+    captureTileClipboard(true);
 }
 
 void BuildingEditorWindow::editCopy()
+{
+    captureTileClipboard(false);
+}
+
+void BuildingEditorWindow::captureTileClipboard(bool cut)
 {
     if (!mCurrentDocument || currentLayer().isEmpty())
         return;
@@ -1627,8 +1615,17 @@ void BuildingEditorWindow::editCopy()
     if (mCurrentDocumentStuff->isTile()) {
         QRegion selection = mCurrentDocument->tileSelection();
         if (!selection.isEmpty()) {
+            mCurrentDocumentStuff->checkpointAutoSave();
             QRect r = selection.boundingRect();
             QList<BuildingDocument::ClipboardTileLayer> clips;
+            QList<Room *> rooms;
+            QList<BuildingDocument::ClipboardRoomLayer> roomLayers;
+            QHash<Room *, int> roomIndexes;
+            QUndoStack *undoStack = mCurrentDocument->undoStack();
+            if (cut) {
+                mCurrentDocumentStuff->beginAtomicEdit();
+                undoStack->beginMacro(tr("Cut Building Selection"));
+            }
             for (BuildingFloor *floor : mCurrentDocument->building()->floors()) {
                 if (!mTileSelectionScope && floor != currentFloor())
                     continue;
@@ -1638,6 +1635,42 @@ void BuildingEditorWindow::editCopy()
                         floor != currentFloor()) {
                     continue;
                 }
+
+                BuildingDocument::ClipboardRoomLayer roomLayer;
+                roomLayer.level = floor->level();
+                roomLayer.rooms.resize(r.width());
+                QVector<QVector<Room *> > cutGrid = floor->grid();
+                bool roomsCut = false;
+                for (int x = 0; x < r.width(); ++x) {
+                    roomLayer.rooms[x] = QVector<int>(r.height(), -2);
+                    for (int y = 0; y < r.height(); ++y) {
+                        const QPoint source = r.topLeft() + QPoint(x, y);
+                        if (!selection.contains(source) ||
+                                !floor->bounds().contains(source)) {
+                            continue;
+                        }
+                        Room *room = floor->GetRoomAt(source);
+                        roomLayer.rooms[x][y] = -1;
+                        if (room) {
+                            if (!roomIndexes.contains(room)) {
+                                roomIndexes.insert(room, rooms.size());
+                                rooms.append(new Room(room));
+                            }
+                            roomLayer.rooms[x][y] = roomIndexes.value(room);
+                            if (cut) {
+                                cutGrid[source.x()][source.y()] = nullptr;
+                                roomsCut = true;
+                            }
+                        }
+                    }
+                }
+                roomLayers.append(roomLayer);
+                if (roomsCut) {
+                    undoStack->push(new SwapFloorGrid(
+                                        mCurrentDocument, floor, cutGrid,
+                                        "Cut Rooms"));
+                }
+
                 for (const QString &layerName : BuildingMap::layerNames(
                          floor->level())) {
                     const bool current = layerName == currentLayer();
@@ -1653,19 +1686,47 @@ void BuildingEditorWindow::editCopy()
                                 layerName, r, selection);
                     if (tiles->isEmpty()) {
                         delete tiles;
-                        continue;
+                    } else {
+                        BuildingDocument::ClipboardTileLayer clip;
+                        clip.level = floor->level();
+                        clip.layerName = layerName;
+                        clip.tiles = tiles;
+                        clips.append(clip);
                     }
-                    BuildingDocument::ClipboardTileLayer clip;
-                    clip.level = floor->level();
-                    clip.layerName = layerName;
-                    clip.tiles = tiles;
-                    clips.append(clip);
+                    if (cut) {
+                        FloorTileGrid *erased = floor->grimeAt(layerName, r);
+                        if (erased->replace(
+                                    selection.translated(-r.topLeft()),
+                                    QString())) {
+                            undoStack->push(new PaintFloorTiles(
+                                mCurrentDocument, floor, layerName, selection,
+                                r.topLeft(), erased, "Cut Tiles"));
+                        } else {
+                            delete erased;
+                        }
+                    }
                 }
             }
-            if (!clips.isEmpty())
+            if (cut) {
+                undoStack->endMacro();
+                mCurrentDocumentStuff->endAtomicEdit();
+            }
+            if (!clips.isEmpty() || !roomLayers.isEmpty()) {
                 mCurrentDocument->setClipboardTileLayers(
                             clips, selection.translated(-r.topLeft()),
-                            mCurrentDocument->currentLevel());
+                            mCurrentDocument->currentLevel(), rooms,
+                            roomLayers);
+                qInfo() << "BuildingEd clipboard captured"
+                        << (cut ? "cut" : "copy")
+                        << "bounds" << r
+                        << "tile layers" << clips.size()
+                        << "rooms" << rooms.size()
+                        << "room layers" << roomLayers.size();
+                DrawTileTool::instance()->makeCurrent();
+                DrawTileTool::instance()->setClipboardPlacement();
+            } else {
+                qDeleteAll(rooms);
+            }
         }
     }
 }
@@ -1684,39 +1745,170 @@ void BuildingEditorWindow::editPaste()
             DrawTileTool::instance()->makeCurrent();
             DrawTileTool::instance()->setCaptureTiles(tiles->clone(),
                                                       mCurrentDocument->clipboardTilesRgn());
-        } else if (!clips.isEmpty()) {
-            QRegion selection = mCurrentDocument->tileSelection();
-            if (selection.isEmpty()) {
-                statusBar()->showMessage(
-                            tr("Select the destination anchor tile before "
-                               "pasting a multi-layer selection."), 6000);
-                return;
-            }
-            QPoint targetPos = selection.boundingRect().topLeft();
-            QUndoStack *undoStack = mCurrentDocument->undoStack();
-            undoStack->beginMacro(tr("Paste Tile Selection"));
-            int pasted = 0;
-            for (const BuildingDocument::ClipboardTileLayer &clip : clips) {
-                const int level = currentDocument()->currentLevel() +
-                        clip.level - currentDocument()->clipboardAnchorLevel();
-                BuildingFloor *floor = currentBuilding()->floor(level);
-                if (!floor)
-                    continue;
-                const QRegion targetRegion =
-                        mCurrentDocument->clipboardTilesRgn()
-                        .translated(targetPos);
-                undoStack->push(new PaintFloorTiles(
-                    mCurrentDocument, floor, clip.layerName, targetRegion,
-                    targetPos, clip.tiles->clone(), "Paste Tiles"));
-                ++pasted;
-            }
-            undoStack->endMacro();
-            statusBar()->showMessage(
-                        tr("Pasted %1 tile layer(s) at %2,%3")
-                        .arg(pasted).arg(targetPos.x()).arg(targetPos.y()),
-                        5000);
+        } else if (mCurrentDocument->clipboardHasContent()) {
+            DrawTileTool::instance()->makeCurrent();
+            DrawTileTool::instance()->setClipboardPlacement();
         }
     }
+}
+
+bool BuildingEditorWindow::pasteClipboardAt(const QPoint &requestedTargetPos)
+{
+    if (!mCurrentDocument || !mCurrentDocument->clipboardHasContent())
+        return false;
+
+    const QRect clipboardBounds =
+            mCurrentDocument->clipboardTilesRgn().boundingRect();
+    if (clipboardBounds.isEmpty())
+        return false;
+
+    Building *building = currentBuilding();
+    QPoint targetPos = requestedTargetPos;
+    const QRect requestedBounds(clipboardBounds.topLeft() + targetPos,
+                                clipboardBounds.size());
+    const QPoint offset(qMax(0, -requestedBounds.left()),
+                        qMax(0, -requestedBounds.top()));
+    const QSize oldSize = building->size();
+    const int requiredRight = requestedBounds.right() + offset.x() + 1;
+    const int requiredBottom = requestedBounds.bottom() + offset.y() + 1;
+    const QSize newSize(qMax(oldSize.width() + offset.x(), requiredRight),
+                        qMax(oldSize.height() + offset.y(), requiredBottom));
+    targetPos += offset;
+
+    QUndoStack *undoStack = mCurrentDocument->undoStack();
+    mCurrentDocumentStuff->beginAtomicEdit();
+    undoStack->beginMacro(tr("Paste Building Selection"));
+
+    if (newSize != oldSize || !offset.isNull()) {
+        undoStack->push(new EmitResizeBuilding(mCurrentDocument, true));
+        undoStack->push(new ResizeBuilding(mCurrentDocument, offset, newSize));
+        for (BuildingFloor *floor : building->floors()) {
+            undoStack->push(new ResizeFloor(mCurrentDocument, floor,
+                                            newSize, offset));
+            for (BuildingObject *object : floor->objects()) {
+                if (!offset.isNull()) {
+                    undoStack->push(new MoveObject(
+                                        mCurrentDocument, object,
+                                        object->pos() + offset));
+                }
+            }
+        }
+        if (building->hasBasementAccess() && !offset.isNull()) {
+            BasementAccess access = building->basementAccess();
+            access.mX += offset.x();
+            access.mY += offset.y();
+            undoStack->push(new SetBasementAccess(mCurrentDocument, access));
+        }
+        if (!offset.isNull()) {
+            undoStack->push(new ChangeRoomSelection(
+                                mCurrentDocument,
+                                mCurrentDocument->roomSelection()
+                                .translated(offset)));
+            undoStack->push(new ChangeTileSelection(
+                                mCurrentDocument,
+                                mCurrentDocument->tileSelection()
+                                .translated(offset)));
+        }
+        undoStack->push(new EmitResizeBuilding(mCurrentDocument, false));
+    }
+
+    QVector<Room *> pastedRooms(
+                mCurrentDocument->clipboardRooms().size(), nullptr);
+    QSet<int> usedRoomIndexes;
+    for (const BuildingDocument::ClipboardRoomLayer &roomLayer :
+         mCurrentDocument->clipboardRoomLayers()) {
+        const int level = mCurrentDocument->currentLevel() +
+                roomLayer.level - mCurrentDocument->clipboardAnchorLevel();
+        if (!building->floor(level))
+            continue;
+        for (const QVector<int> &column : roomLayer.rooms) {
+            for (int roomIndex : column) {
+                if (roomIndex >= 0 &&
+                        roomIndex < pastedRooms.size()) {
+                    usedRoomIndexes.insert(roomIndex);
+                }
+            }
+        }
+    }
+    const int firstRoomIndex = building->roomCount();
+    int insertedRoomCount = 0;
+    for (int index = 0; index < pastedRooms.size(); ++index) {
+        if (!usedRoomIndexes.contains(index))
+            continue;
+        Room *room = new Room(mCurrentDocument->clipboardRooms().at(index));
+        undoStack->push(new AddRoom(mCurrentDocument,
+                                    firstRoomIndex + insertedRoomCount,
+                                    room));
+        if (building->rooms().contains(room)) {
+            pastedRooms[index] = room;
+            ++insertedRoomCount;
+        }
+    }
+
+    int pastedRoomLayers = 0;
+    for (const BuildingDocument::ClipboardRoomLayer &roomLayer :
+         mCurrentDocument->clipboardRoomLayers()) {
+        const int level = mCurrentDocument->currentLevel() +
+                roomLayer.level - mCurrentDocument->clipboardAnchorLevel();
+        BuildingFloor *floor = building->floor(level);
+        if (!floor)
+            continue;
+        QVector<QVector<Room *> > grid = floor->grid();
+        bool changed = false;
+        for (int x = 0; x < roomLayer.rooms.size(); ++x) {
+            for (int y = 0; y < roomLayer.rooms.at(x).size(); ++y) {
+                const int roomIndex = roomLayer.rooms.at(x).at(y);
+                if (roomIndex == -2)
+                    continue;
+                const QPoint destination = targetPos + QPoint(x, y);
+                if (!floor->bounds().contains(destination))
+                    continue;
+                Room *room = roomIndex >= 0 &&
+                        roomIndex < pastedRooms.size()
+                        ? pastedRooms.at(roomIndex) : nullptr;
+                if (grid[destination.x()][destination.y()] != room) {
+                    grid[destination.x()][destination.y()] = room;
+                    changed = true;
+                }
+            }
+        }
+        if (changed) {
+            undoStack->push(new SwapFloorGrid(
+                                mCurrentDocument, floor, grid,
+                                "Paste Rooms"));
+            ++pastedRoomLayers;
+        }
+    }
+
+    int pastedTileLayers = 0;
+    const QRegion targetRegion = mCurrentDocument->clipboardTilesRgn()
+            .translated(targetPos);
+    for (const BuildingDocument::ClipboardTileLayer &clip :
+         mCurrentDocument->clipboardTileLayers()) {
+        const int level = mCurrentDocument->currentLevel() +
+                clip.level - mCurrentDocument->clipboardAnchorLevel();
+        BuildingFloor *floor = building->floor(level);
+        if (!floor)
+            continue;
+        undoStack->push(new PaintFloorTiles(
+                            mCurrentDocument, floor, clip.layerName,
+                            targetRegion, targetPos, clip.tiles->clone(),
+                            "Paste Tiles"));
+        ++pastedTileLayers;
+    }
+
+    undoStack->endMacro();
+    mCurrentDocumentStuff->endAtomicEdit();
+    qInfo() << "BuildingEd clipboard pasted at" << targetPos
+            << "tile layers" << pastedTileLayers
+            << "room layers" << pastedRoomLayers
+            << "rooms" << insertedRoomCount
+            << "building size" << building->size();
+    statusBar()->showMessage(
+                tr("Pasted %1 tile layer(s) and %2 room layout(s) at %3,%4")
+                .arg(pastedTileLayers).arg(pastedRoomLayers)
+                .arg(targetPos.x()).arg(targetPos.y()), 5000);
+    return true;
 }
 
 void BuildingEditorWindow::editDelete()

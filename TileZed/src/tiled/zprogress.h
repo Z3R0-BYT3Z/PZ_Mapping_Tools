@@ -40,6 +40,9 @@ public:
     bool wasCanceled() const
     { return mCanceled; }
 
+    bool isActive() const
+    { return mDepth > 0; }
+
     QWidget *mainWindow() const
     { return mMainWindow; }
 

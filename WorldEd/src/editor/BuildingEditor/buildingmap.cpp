@@ -137,10 +137,12 @@ QString BuildingMap::buildingTileAt(int x, int y, const QList<bool> visibleLevel
                         test = tlBlend->cellAt(tx, ty).tile; // building tile
                     if (test) {
                         Tile *realTile = test;
-                        if (test->properties().contains(QLatin1String("invisible"))) {
+                        if (test->properties().contains(QLatin1String("invisible"))
+                                || (test->image().isNull()
+                                    && test->hasResolvedSource())) {
                             test = TilesetManager::instance()->invisibleTile();
                         }
-                        if (test->image().isNull()) {
+                        if (test->image().isNull() && !test->hasResolvedSource()) {
                             test = TilesetManager::instance()->missingTile();
                         }
                         QRect imageBox(test->offset(), test->image().size());

@@ -22,6 +22,7 @@
 #include "threads.h"
 #include "worldcell.h"
 #include "worldgeometry.h"
+#include "partialchunkselection.h"
 
 #include <QAtomicInteger>
 #include <QTimer>
@@ -101,6 +102,7 @@ public:
     QString missingTilesetsString(Tiled::Map *map);
     void checkHolesOnLevelZero();
     int fillHolesInGeneratedLot();
+    bool partialSquareSelected(int localX, int localY) const;
 
 public slots:
     void addJob();
@@ -138,6 +140,7 @@ private:
     int mRemovedBuildingCount = 0;
     QVector<QPoint> mHoleInFloor;
     QString mError;
+    PZTools::PartialChunkSelection mPartialChunks;
 
     friend class LotFilesManager256;
 };

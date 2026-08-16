@@ -64,7 +64,7 @@ public:
      * Convenience method to copy the current selection to the clipboard.
      * Deals with either tile selection or object selection.
      */
-    void copySelection(const MapDocument *mapDocument,
+    bool copySelection(const MapDocument *mapDocument,
                        const TileSelectionScope *scope = nullptr);
 
 signals:

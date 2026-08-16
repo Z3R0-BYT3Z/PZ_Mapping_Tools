@@ -11,7 +11,6 @@
 #include "zprogress.h"
 
 #include "BuildingEditor/building.h"
-#include "BuildingEditor/buildingeditorwindow.h"
 #include "BuildingEditor/buildingfloor.h"
 #include "BuildingEditor/buildingmap.h"
 #include "BuildingEditor/buildingobjects.h"
@@ -225,7 +224,6 @@ void CheckBuildingsWindow::itemActivated(QTreeWidgetItem *item, int column)
         return;
     Issue &issue = mFiles[ui->treeWidget->indexOfTopLevelItem(item->parent())]->issues[item->parent()->indexOfChild(item)];
     MainWindow::instance()->openFile(issue.file->path);
-    BuildingEditorWindow::instance()->focusOn(issue.file->path, issue.x, issue.y, issue.z, issue.objectIndex);
 }
 
 void CheckBuildingsWindow::syncList()

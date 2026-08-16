@@ -40,6 +40,8 @@ public:
     void setMainWindow(QWidget *parent);
 
     bool isVisible();
+    bool isActive() const
+    { return mDepth > 0; }
     void hide();
     void show();
 

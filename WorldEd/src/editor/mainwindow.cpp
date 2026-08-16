@@ -51,6 +51,7 @@
 #include "preferencesdialog.h"
 #include "progress.h"
 #include "propertiesdock.h"
+#include "pztoolsabout.h"
 #include "propertydefinitionsdialog.h"
 #include "propertyenumdialog.h"
 #include "resizeworlddialog.h"
@@ -96,6 +97,7 @@
 #include "InGameMap/ingamemapscene.h"
 #include "InGameMap/ingamemapwriter.h"
 #include "InGameMap/ingamemapwriterbinary.h"
+#include "InGameMap/worldmapannotationsdialog.h"
 
 #include <quazip.h>
 #include <quazipfile.h>
@@ -118,6 +120,7 @@
 #include <QDateTime>
 #include <QComboBox>
 #include <QDebug>
+#include <QDataStream>
 #include <QFileDialog>
 #include <QFile>
 #include <QFileInfo>
@@ -225,6 +228,50 @@ bool commitFilePair(const QStringList &temporaryFiles,
     }
     return true;
 }
+bool validateInGameMapBinaryFile(const QString &fileName, QString *error)
+{
+    QFile file(fileName);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error)
+            *error = file.errorString();
+        return false;
+    }
+    if (file.read(4) != QByteArrayLiteral("IGMB")) {
+        if (error)
+            *error = QObject::tr("The binary header does not start with IGMB.");
+        return false;
+    }
+    QDataStream stream(&file);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    qint32 version = 0;
+    qint32 cellSize = 0;
+    qint32 width = 0;
+    qint32 height = 0;
+    stream >> version >> cellSize >> width >> height;
+    if (stream.status() != QDataStream::Ok) {
+        if (error)
+            *error = QObject::tr("The binary header is incomplete.");
+        return false;
+    }
+    if (version != 2) {
+        if (error)
+            *error = QObject::tr("The binary version is %1 instead of 2.")
+                    .arg(version);
+        return false;
+    }
+    if (cellSize != 256) {
+        if (error)
+            *error = QObject::tr("The binary cell size is %1 instead of 256.")
+                    .arg(cellSize);
+        return false;
+    }
+    if (width <= 0 || height <= 0) {
+        if (error)
+            *error = QObject::tr("The binary world dimensions are invalid.");
+        return false;
+    }
+    return true;
+}
 bool writeInGameMapFilePair(
         World *world, const QString &xmlFileName,
         QString *error,
@@ -282,6 +329,19 @@ bool writeInGameMapFilePair(
         if (error) {
             *error = QObject::tr("Could not write the binary map data.\n\n%1")
                     .arg(binaryWriter.errorString());
+        }
+        return false;
+    }
+    QString binaryValidationError;
+    if (!validateInGameMapBinaryFile(
+                binaryTemporaryName, &binaryValidationError)) {
+        QFile::remove(xmlTemporaryName);
+        QFile::remove(binaryTemporaryName);
+        if (error) {
+            *error = QObject::tr(
+                        "The generated binary map data is not compatible "
+                        "with Build 42.20.\n\n%1")
+                    .arg(binaryValidationError);
         }
         return false;
     }
@@ -625,6 +685,17 @@ bool MainWindow::validateInGameMapForestExport(
             *error = tr("One or more Forest export test files could not be read.");
         return false;
     }
+    QString binaryHeaderError;
+    if (!validateInGameMapBinaryFile(
+                forestBinaryPath, &binaryHeaderError)
+            || !validateInGameMapBinaryFile(
+                worldBinaryPath, &binaryHeaderError)) {
+        if (error) {
+            *error = tr("An exported binary map header is invalid.\n\n%1")
+                    .arg(binaryHeaderError);
+        }
+        return false;
+    }
     if (!forestXml.contains("value=\"forest\"")
             || forestXml.contains("value=\"Residential\"")
             || !worldXml.contains("value=\"Residential\"")
@@ -696,8 +767,9 @@ bool MainWindow::validateInGameMapForestExport(
         return false;
     }
     if (summary) {
-        *summary = tr("forest/non-Forest XML and binary filtering, Forest "
-                      "PNG, two image levels, and pyramid.txt bounds verified");
+        *summary = tr("Build 42.20 IGMB headers, forest/non-Forest XML and "
+                      "binary filtering, Forest PNG, two image levels, and "
+                      "pyramid.txt bounds verified");
     }
     return true;
 }
@@ -732,6 +804,59 @@ MainWindow::MainWindow(QWidget *parent)
     , mLotPackWindow(0)
 {
     ui->setupUi(this);
+
+    mPartialChunksMenu = new QMenu(tr("Partial Chunks"), this);
+    ui->menuBar->insertMenu(ui->helpMenu->menuAction(),
+                            mPartialChunksMenu);
+    mPartialChunksAction = mPartialChunksMenu->addAction(
+                tr("Enable Partial Chunks"));
+    mPartialChunksAction->setCheckable(true);
+    mPartialChunksAction->setIcon(QIcon(
+                QLatin1String(":/images/22x22/stock-tool-rect-select.png")));
+    mPartialChunksAction->setToolTip(tr(
+                "Enable or disable Partial Chunks"));
+    mPartialChunksAction->setStatusTip(tr(
+                "Enable the Native256 8 x 8-square chunk export mask"));
+    mSelectAllPartialChunksAction = mPartialChunksMenu->addAction(
+                tr("Select All Chunks"));
+    mSelectAllPartialChunksAction->setIcon(QIcon(
+                QLatin1String(":/images/22x22/tool-select-objects.png")));
+    mSelectAllPartialChunksAction->setToolTip(tr(
+                "Select all chunks (Ctrl+A)"));
+    mSelectAllPartialChunksAction->setShortcut(QKeySequence::SelectAll);
+    mSelectAllPartialChunksAction->setStatusTip(tr(
+                "Include all 1024 chunks in the current cell"));
+    mClearPartialChunksAction = mPartialChunksMenu->addAction(
+                tr("Clear Chunk Selection"));
+    mClearPartialChunksAction->setIcon(QIcon(
+                QLatin1String(":/images/24x24/edit-clear.png")));
+    mClearPartialChunksAction->setToolTip(tr(
+                "Clear the chunk selection"));
+    mClearPartialChunksAction->setStatusTip(tr(
+                "Omit all chunks from the current cell export"));
+    mPartialChunksMenu->addSeparator();
+    QAction *partialChunksHelpAction = mPartialChunksMenu->addAction(
+                tr("How Partial Chunks Works..."));
+    connect(mPartialChunksAction, &QAction::toggled,
+            this, &MainWindow::setPartialChunksEnabled);
+    connect(mSelectAllPartialChunksAction, &QAction::triggered,
+            this, &MainWindow::selectAllPartialChunks);
+    connect(mClearPartialChunksAction, &QAction::triggered,
+            this, &MainWindow::clearPartialChunks);
+    connect(partialChunksHelpAction, &QAction::triggered, this, [this]() {
+        QMessageBox::information(this, tr("Partial Chunks"), tr(
+                    "Partial Chunks is a Native256 LOT export mask. The cell remains a normal 256 x 256 editing canvas.\n\n"
+                    "Open a cell view and enable it from the Partial Chunks menu or its toolbar. The overlay is a 32 x 32 grid. Each grid square is one complete 8 x 8-square game chunk. Click a chunk to include or omit it. Drag across the grid to select or clear a rectangular group. The starting chunk determines whether the group is included or omitted. Included chunks use a light tint and omitted chunks are darkened. The line and tint color follows the Grid color in Preferences.\n\n"
+                    "Chunk selection does not select, delete, or modify TMX tiles. Ctrl+A selects all 1024 chunks while the mode is active. Select All Chunks and Clear Chunk Selection change the export mask for the complete cell.\n\n"
+                    "The mask is saved beside the TMX as map-name.tmx.pzchunks and is shared with TileZed. While the mode is enabled, Hole Detection and automatic hole filling are bypassed. Generate Lots writes selected chunks and encodes omitted chunks as absent LOT data and null navigation chunks. Legacy 300-square projects are not supported."));
+    });
+    mPartialChunksToolBar = addToolBar(tr("Partial Chunks"));
+    mPartialChunksToolBar->setObjectName(
+                QLatin1String("PartialChunksToolBar"));
+    mPartialChunksToolBar->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    mPartialChunksToolBar->addAction(mPartialChunksAction);
+    mPartialChunksToolBar->addAction(mSelectAllPartialChunksAction);
+    mPartialChunksToolBar->addAction(mClearPartialChunksAction);
 
     mInstance = this;
 
@@ -818,6 +943,59 @@ MainWindow::MainWindow(QWidget *parent)
     mRedoAction->setIcon(redoIcon);
 
     mUndoDock = new UndoDock(undoGroup, this);
+
+    QMenu *worldMapOverlayMenu = new QMenu(
+                tr("World Map Overlays"), ui->menuView);
+    mLoadWorldMapOverlayAction = worldMapOverlayMenu->addAction(
+                tr("Load worldmap.xml..."));
+    mLoadWorldMapForestOverlayAction = worldMapOverlayMenu->addAction(
+                tr("Load worldmap-forest.xml..."));
+    worldMapOverlayMenu->addSeparator();
+    mShowWorldMapOverlayAction = worldMapOverlayMenu->addAction(
+                tr("Show worldmap overlay"));
+    mShowWorldMapOverlayAction->setCheckable(true);
+    mShowWorldMapForestOverlayAction = worldMapOverlayMenu->addAction(
+                tr("Show worldmap-forest overlay"));
+    mShowWorldMapForestOverlayAction->setCheckable(true);
+    worldMapOverlayMenu->addSeparator();
+    mClearWorldMapOverlaysAction = worldMapOverlayMenu->addAction(
+                tr("Clear loaded overlays"));
+    const QList<QAction *> viewActions = ui->menuView->actions();
+    const int overlayPosition = viewActions.indexOf(
+                ui->actionShowZonesInWorldView) + 1;
+    QAction *viewMenuSeparator = overlayPosition > 0
+            && overlayPosition < viewActions.size()
+            ? viewActions.at(overlayPosition) : nullptr;
+    ui->menuView->insertMenu(viewMenuSeparator, worldMapOverlayMenu);
+    connect(mLoadWorldMapOverlayAction, &QAction::triggered,
+            this, [this]() { loadWorldMapOverlay(false); });
+    connect(mLoadWorldMapForestOverlayAction, &QAction::triggered,
+            this, [this]() { loadWorldMapOverlay(true); });
+    connect(mShowWorldMapOverlayAction, &QAction::toggled,
+            this, [this](bool visible) {
+        WorldDocument *worldDoc = currentWorldDocument();
+        WorldView *view = worldDoc
+                ? dynamic_cast<WorldView *>(worldDoc->view()) : nullptr;
+        if (view)
+            view->scene()->setWorldMapOverlayVisible(false, visible);
+    });
+    connect(mShowWorldMapForestOverlayAction, &QAction::toggled,
+            this, [this](bool visible) {
+        WorldDocument *worldDoc = currentWorldDocument();
+        WorldView *view = worldDoc
+                ? dynamic_cast<WorldView *>(worldDoc->view()) : nullptr;
+        if (view)
+            view->scene()->setWorldMapOverlayVisible(true, visible);
+    });
+    connect(mClearWorldMapOverlaysAction, &QAction::triggered,
+            this, [this]() {
+        WorldDocument *worldDoc = currentWorldDocument();
+        WorldView *view = worldDoc
+                ? dynamic_cast<WorldView *>(worldDoc->view()) : nullptr;
+        if (view)
+            view->scene()->clearWorldMapOverlays();
+        updateActions();
+    });
 
     ui->menuView->addAction(mLayersDock->toggleViewAction());
     ui->menuView->addAction(mLotsDock->toggleViewAction());
@@ -1034,6 +1212,8 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::writeInGameMapForest);
     connect(ui->actionWriteInGameMapWorldMap, &QAction::triggered,
             this, &MainWindow::writeInGameMapWorldMap);
+    connect(ui->actionEditWorldMapAnnotations, &QAction::triggered,
+            this, &MainWindow::editWorldMapAnnotations);
     connect(ui->actionRemoveInGameMapFeatures, &QAction::triggered, this, &MainWindow::removeInGameMapFeatures);
     connect(ui->actionRemoveInGameMapPoints, &QAction::triggered, this, &MainWindow::removeInGameMapPoint);
     connect(ui->actionSplitInGameMapPolygon, &QAction::triggered, this, &MainWindow::splitInGameMapPolygon);
@@ -1124,6 +1304,12 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::tilesetCleanup);
 //    connect(ui->actionReadOldWaterDotLua, &QAction::triggered, this, &MainWindow::readOldWaterDotLua);
 
+    QAction *aboutPZWorldEd = new QAction(tr("About PZWorldEd"), this);
+    aboutPZWorldEd->setMenuRole(QAction::AboutRole);
+    ui->helpMenu->insertAction(ui->actionAboutQt, aboutPZWorldEd);
+    connect(aboutPZWorldEd, &QAction::triggered, this, [this]() {
+        showPZToolsAbout(this, tr("PZWorldEd"), false);
+    });
     connect(ui->actionAboutQt, &QAction::triggered, qApp, &QApplication::aboutQt);
 
     connect(docman(), &DocumentManager::documentAdded, this, &MainWindow::documentAdded);
@@ -1593,6 +1779,12 @@ void MainWindow::documentAdded(Document *doc)
         CellScene *scene = new CellScene(view);
         view->setScene(scene);
         scene->setDocument(cellDoc);
+        connect(scene, &CellScene::partialChunkSelectionChanged,
+                this, &MainWindow::updateActions);
+        connect(scene, &CellScene::partialChunkSaveFailed,
+                this, [this](const QString &message) {
+            QMessageBox::warning(this, tr("Partial Chunks"), message);
+        });
         // Handle failure to load the map.
         // Currently this never happens as a placeholder map
         // will be used in case of failure.
@@ -2043,7 +2235,7 @@ void MainWindow::updateDocumentAutoSaveTimer()
     if (!timer)
         return;
     const int minutes = Preferences::instance()->autoSaveIntervalMinutes();
-    if (minutes <= 0) {
+    if (minutes <= 0 || mDocumentTransactionDepth > 0) {
         timer->stop();
         return;
     }
@@ -2052,7 +2244,9 @@ void MainWindow::updateDocumentAutoSaveTimer()
 
 void MainWindow::autoSaveCurrentDocument()
 {
-    if (!mCurrentDocument || QApplication::activeModalWidget())
+    if (!mCurrentDocument || mDocumentTransactionDepth > 0 ||
+            QApplication::activeModalWidget() ||
+            Progress::instance()->isActive())
         return;
     WorldDocument *worldDocument = mCurrentDocument->asWorldDocument();
     if (!worldDocument && mCurrentDocument->isCellDocument())
@@ -2064,6 +2258,37 @@ void MainWindow::autoSaveCurrentDocument()
         qInfo().noquote() << "WorldEd auto-saved"
                           << QDir::toNativeSeparators(
                                  worldDocument->fileName());
+}
+
+void MainWindow::checkpointDocumentAutoSave()
+{
+    if (mDocumentTransactionDepth > 0 ||
+            Preferences::instance()->autoSaveIntervalMinutes() <= 0)
+        return;
+    QTimer *timer = findChild<QTimer*>(
+                QStringLiteral("documentAutoSaveTimer"));
+    if (timer)
+        timer->stop();
+    autoSaveCurrentDocument();
+    updateDocumentAutoSaveTimer();
+}
+
+void MainWindow::beginDocumentTransaction()
+{
+    ++mDocumentTransactionDepth;
+    if (QTimer *timer = findChild<QTimer*>(
+                QStringLiteral("documentAutoSaveTimer")))
+        timer->stop();
+}
+
+void MainWindow::endDocumentTransaction()
+{
+    Q_ASSERT(mDocumentTransactionDepth > 0);
+    if (mDocumentTransactionDepth <= 0)
+        return;
+    --mDocumentTransactionDepth;
+    if (mDocumentTransactionDepth == 0)
+        updateDocumentAutoSaveTimer();
 }
 #include "BuildingEditor/buildingtiles.h"
 #include "BuildingEditor/buildingtemplates.h"
@@ -3554,6 +3779,7 @@ void MainWindow::initActionManager()
     actionManager->registerAction(ui->actionGenerateInGameMapRoadFeatures, CONTEXT_MENU, CATEGORY_MENU_INGAME_MAP, QStringLiteral("Menu.InGameMap.GenerateRoadFeatures"));
     actionManager->registerAction(ui->actionWriteInGameMapForest, CONTEXT_MENU, CATEGORY_MENU_INGAME_MAP, QStringLiteral("Menu.InGameMap.WriteWorldmapForest"));
     actionManager->registerAction(ui->actionWriteInGameMapWorldMap, CONTEXT_MENU, CATEGORY_MENU_INGAME_MAP, QStringLiteral("Menu.InGameMap.WriteWorldmap"));
+    actionManager->registerAction(ui->actionEditWorldMapAnnotations, CONTEXT_MENU, CATEGORY_MENU_INGAME_MAP, QStringLiteral("Menu.InGameMap.EditWorldmapAnnotations"));
     actionManager->registerAction(ui->actionReadInGameMapFeaturesXML, CONTEXT_MENU, CATEGORY_MENU_INGAME_MAP, QStringLiteral("Menu.InGameMap.ReadXML"));
     actionManager->registerAction(ui->actionWriteInGameMapFeaturesXML_256, CONTEXT_MENU, CATEGORY_MENU_INGAME_MAP, QStringLiteral("Menu.InGameMap.WriteXML8x8"));
     actionManager->registerAction(ui->actionOverwriteInGameMapFeaturesXML_256, CONTEXT_MENU, CATEGORY_MENU_INGAME_MAP, QStringLiteral("Menu.InGameMap.OverwriteXML8x8"), QStringLiteral("Overwrite Features XML 8x8"));
@@ -3658,6 +3884,7 @@ void MainWindow::copy()
             world = dialog.toWorld();
     }
     if (world) {
+        checkpointDocumentAutoSave();
         WorldWriter w;
         QByteArray bytes;
         QBuffer buffer(&bytes);
@@ -3677,8 +3904,11 @@ void MainWindow::paste()
     WorldDocument *worldDoc = mCurrentDocument->asWorldDocument();
     if (Clipboard::instance()->cellsInClipboardCount())
         worldDoc->view()->scene()->asWorldScene()->pasteCellsFromClipboard();
-    else
+    else {
+        beginDocumentTransaction();
         Clipboard::instance()->pasteEverythingButCells(worldDoc);
+        endDocumentTransaction();
+    }
 }
 
 void MainWindow::showClipboard()
@@ -4332,6 +4562,70 @@ void MainWindow::readInGameMapFeaturesXML()
     updateActions();
 }
 
+void MainWindow::loadWorldMapOverlay(bool forest)
+{
+    WorldDocument *worldDoc = currentWorldDocument();
+    WorldView *view = worldDoc
+            ? dynamic_cast<WorldView *>(worldDoc->view()) : nullptr;
+    if (!view)
+        return;
+
+    const QString settingsKey = forest
+            ? QLatin1String("WorldMapOverlay/ForestPath")
+            : QLatin1String("WorldMapOverlay/WorldPath");
+    QString suggested = mSettings.value(settingsKey).toString();
+    if (suggested.isEmpty()) {
+        const QString directory =
+                worldDoc->world()->getGenerateLotsSettings().exportDir;
+        suggested = QDir(directory).filePath(forest
+                ? QStringLiteral("worldmap-forest.xml")
+                : QStringLiteral("worldmap.xml"));
+    }
+    const QString title = forest
+            ? tr("Load worldmap-forest.xml Overlay")
+            : tr("Load worldmap.xml Overlay");
+    const QString fileName = QFileDialog::getOpenFileName(
+                this, title, suggested, tr("World map XML (*.xml)"));
+    if (fileName.isEmpty())
+        return;
+
+    PROGRESS progress(tr("Loading world-map overlay"), this);
+    QString error;
+    if (!view->scene()->loadWorldMapOverlay(fileName, forest, &error)) {
+        progress.release();
+        QMessageBox::critical(
+                    this, tr("Unable to Load World Map Overlay"),
+                    tr("%1\n\n%2")
+                    .arg(QDir::toNativeSeparators(fileName), error));
+        return;
+    }
+    mSettings.setValue(settingsKey, QFileInfo(fileName).absoluteFilePath());
+
+    if (!forest) {
+        const QString companion = QFileInfo(fileName).dir().filePath(
+                    QStringLiteral("worldmap-forest.xml"));
+        if (QFileInfo::exists(companion)) {
+            QString companionError;
+            if (view->scene()->loadWorldMapOverlay(
+                        companion, true, &companionError)) {
+                mSettings.setValue(
+                            QLatin1String("WorldMapOverlay/ForestPath"),
+                            QFileInfo(companion).absoluteFilePath());
+            } else {
+                qWarning().noquote()
+                        << "Worldmap companion overlay was not loaded:"
+                        << companionError;
+            }
+        }
+    }
+
+    progress.release();
+    statusBar()->showMessage(
+                tr("Loaded world-map overlay: %1")
+                .arg(QFileInfo(fileName).fileName()), 5000);
+    updateActions();
+}
+
 void MainWindow::clearCells()
 {
     Q_ASSERT(mCurrentDocument);
@@ -4489,6 +4783,8 @@ void MainWindow::checkForHoles()
     }
     if (CellDocument *doc = mCurrentDocument->asCellDocument()) {
         CellScene *scene = doc->scene();
+        if (scene->partialChunksEnabled())
+            return;
         scene->checkHolesOnLevelZero();
         if (doc->view()->miniMap()) {
             doc->view()->miniMap()->update();
@@ -4538,6 +4834,36 @@ void MainWindow::checkForHoles()
                     .arg(repaired)
                     .arg(QDir::toNativeSeparators(backupPath)));
     }
+}
+
+void MainWindow::setPartialChunksEnabled(bool enabled)
+{
+    CellDocument *doc = mCurrentDocument
+            ? mCurrentDocument->asCellDocument() : nullptr;
+    if (!doc)
+        return;
+    doc->scene()->setPartialChunksEnabled(enabled);
+    updateActions();
+}
+
+void MainWindow::selectAllPartialChunks()
+{
+    CellDocument *doc = mCurrentDocument
+            ? mCurrentDocument->asCellDocument() : nullptr;
+    if (!doc)
+        return;
+    doc->scene()->selectAllPartialChunks();
+    updateActions();
+}
+
+void MainWindow::clearPartialChunks()
+{
+    CellDocument *doc = mCurrentDocument
+            ? mCurrentDocument->asCellDocument() : nullptr;
+    if (!doc)
+        return;
+    doc->scene()->clearPartialChunks();
+    updateActions();
 }
 
 void MainWindow::createInGameMapFeatureImage()
@@ -4894,6 +5220,32 @@ void MainWindow::writeInGameMapWorldMap()
                      QDir::toNativeSeparators(
                          xmlFileName + QLatin1String(".bin"))));
 }
+
+void MainWindow::editWorldMapAnnotations()
+{
+    QString suggested = mSettings.value(
+                QLatin1String("InGameMap/WorldMapAnnotationsFile"))
+            .toString();
+    if (WorldDocument *worldDoc = currentWorldDocument()) {
+        const QDir projectDir(QFileInfo(worldDoc->fileName()).absolutePath());
+        const QString direct = projectDir.filePath(
+                    QLatin1String("worldmap-annotations.lua"));
+        const QString lots = projectDir.filePath(
+                    QLatin1String("lots/worldmap-annotations.lua"));
+        if (QFileInfo::exists(direct))
+            suggested = direct;
+        else if (QFileInfo::exists(lots))
+            suggested = lots;
+        else if (suggested.isEmpty())
+            suggested = direct;
+    }
+    WorldMapAnnotationsDialog dialog(suggested, this);
+    dialog.exec();
+    if (!dialog.fileName().isEmpty()) {
+        mSettings.setValue(QLatin1String("InGameMap/WorldMapAnnotationsFile"),
+                           dialog.fileName());
+    }
+}
 void MainWindow::writeWindowSettings()
 {
     if (!PortableSettings::shouldPersistMainWindowGeometry(this)) {
@@ -5060,6 +5412,47 @@ void MainWindow::updateActions()
     WorldDocument *currentWorldDoc = cellDoc ? cellDoc->worldDocument() : worldDoc;
     World *world = worldDoc ? worldDoc->world() : (cellDoc ? cellDoc->world() : nullptr);
     bool hasCellDoc = cellDoc != nullptr;
+    CellScene *partialScene = cellDoc ? cellDoc->scene() : nullptr;
+    const bool partialSupported = partialScene
+            && partialScene->supportsPartialChunks();
+    const bool partialEnabled = partialSupported
+            && partialScene->partialChunksEnabled();
+    WorldView *overlayView = currentWorldDoc
+            ? dynamic_cast<WorldView *>(currentWorldDoc->view()) : nullptr;
+    WorldScene *overlayScene = overlayView ? overlayView->scene() : nullptr;
+    const bool hasWorldOverlay = overlayScene
+            && overlayScene->hasWorldMapOverlay(false);
+    const bool hasForestOverlay = overlayScene
+            && overlayScene->hasWorldMapOverlay(true);
+    mLoadWorldMapOverlayAction->setEnabled(overlayScene != nullptr);
+    mLoadWorldMapForestOverlayAction->setEnabled(overlayScene != nullptr);
+    mShowWorldMapOverlayAction->setEnabled(hasWorldOverlay);
+    mShowWorldMapForestOverlayAction->setEnabled(hasForestOverlay);
+    mClearWorldMapOverlaysAction->setEnabled(
+                hasWorldOverlay || hasForestOverlay);
+    {
+        QSignalBlocker worldOverlayBlocker(mShowWorldMapOverlayAction);
+        QSignalBlocker forestOverlayBlocker(
+                    mShowWorldMapForestOverlayAction);
+        mShowWorldMapOverlayAction->setChecked(
+                    hasWorldOverlay
+                    && overlayScene->worldMapOverlayVisible(false));
+        mShowWorldMapForestOverlayAction->setChecked(
+                    hasForestOverlay
+                    && overlayScene->worldMapOverlayVisible(true));
+    }
+    mPartialChunksMenu->setEnabled(partialSupported);
+    mPartialChunksToolBar->setEnabled(partialSupported);
+    {
+        QSignalBlocker blocker(mPartialChunksAction);
+        mPartialChunksAction->setChecked(partialEnabled);
+    }
+    mSelectAllPartialChunksAction->setEnabled(partialEnabled);
+    mClearPartialChunksAction->setEnabled(partialEnabled);
+    mPartialChunksMenu->setTitle(partialEnabled
+            ? tr("Partial Chunks (%1 selected)")
+                .arg(partialScene->selectedPartialChunkCount())
+            : tr("Partial Chunks"));
 
     ui->actionSave->setEnabled(hasDoc);
     ui->actionSaveAs->setEnabled(hasDoc);
@@ -5124,7 +5517,7 @@ void MainWindow::updateActions()
     ui->actionClearMapOnly->setEnabled(false);
     ui->actionRemoveEmptyBorderCells->setEnabled(
                 worldDoc && worldDoc->world()->size() != QSize(1, 1));
-    ui->actionCheckForHoles->setEnabled(hasCellDoc);
+    ui->actionCheckForHoles->setEnabled(hasCellDoc && !partialEnabled);
 
     bool selectedCells = (cellDoc != nullptr) || (worldDoc != nullptr && !worldDoc->selectedCells().isEmpty());
     ui->actionGenerateInGameMapBuildingFeatures->setEnabled(selectedCells);

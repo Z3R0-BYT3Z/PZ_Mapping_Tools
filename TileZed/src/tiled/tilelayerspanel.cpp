@@ -104,8 +104,11 @@ void LayersPanelDelegate::paint(QPainter *painter,
     Tile *namedTile = tile;
     if (tile == BuildingEditor::BuildingTilesMgr::instance()->noneTiledTile())
         tile = nullptr;
-    if (tile && tile->image().isNull())
-        tile = TilesetManager::instance()->missingTile();
+    if (tile && tile->image().isNull()) {
+        tile = tile->hasResolvedSource()
+                ? TilesetManager::instance()->invisibleTile()
+                : TilesetManager::instance()->missingTile();
+    }
 
     const int extra = 2;
 

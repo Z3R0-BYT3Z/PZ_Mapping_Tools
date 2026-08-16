@@ -26,6 +26,8 @@
 class MapImage;
 
 class QFileSystemModel;
+class QGraphicsRectItem;
+class QGraphicsTextItem;
 
 namespace Ui {
 class WelcomeMode;
@@ -50,6 +52,7 @@ public:
     { return mFilePath; }
 
     void allowRemove();
+    void applyTheme();
 
 signals:
     void clicked();
@@ -59,6 +62,9 @@ signals:
 private:
     QString mFilePath;
     QRectF mBoundingRect;
+    QGraphicsRectItem *mBackgroundItem;
+    QGraphicsTextItem *mPrimaryTextItem;
+    QGraphicsTextItem *mSecondaryTextItem;
     QGraphicsItem *mRemoveItem;
     QGraphicsItem *mRemoveBGItem;
 };
@@ -100,6 +106,7 @@ public slots:
 
     void roomToneIndexChanged(int index);
     void roomToneTextChanged(const QString &text);
+    void applyTheme();
 
 private:
     void setAutoSaveFiles();

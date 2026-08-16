@@ -174,7 +174,9 @@ void BuildingEntryDelegate::paint(QPainter *painter,
                 QRect target((p1 - QPointF(tileWidth/2, imageHeight - tileHeight)).toPoint(),
                         QSize(tileWidth, imageHeight));
                 if (tile->image().isNull()) {
-                    tile = TilesetManager::instance()->missingTile();
+                    tile = tile->hasResolvedSource()
+                            ? TilesetManager::instance()->invisibleTile()
+                            : TilesetManager::instance()->missingTile();
                 }
                 QImage image = tile->image();
                 const QMargins margins = tile->drawMargins(scale);

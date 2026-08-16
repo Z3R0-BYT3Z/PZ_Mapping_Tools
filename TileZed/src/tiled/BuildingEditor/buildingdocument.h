@@ -135,10 +135,18 @@ public:
         FloorTileGrid *tiles = nullptr;
     };
 
+    struct ClipboardRoomLayer {
+        int level = 0;
+        QVector<QVector<int> > rooms;
+    };
+
     void setClipboardTiles(FloorTileGrid *tiles, const QRegion &rgn);
     void setClipboardTileLayers(const QList<ClipboardTileLayer> &layers,
                                 const QRegion &rgn,
-                                int anchorLevel);
+                                int anchorLevel,
+                                const QList<Room *> &rooms = QList<Room *>(),
+                                const QList<ClipboardRoomLayer> &roomLayers =
+                                    QList<ClipboardRoomLayer>());
 
     FloorTileGrid *clipboardTiles() const
     { return mClipboardTiles; }
@@ -148,6 +156,15 @@ public:
 
     const QList<ClipboardTileLayer> &clipboardTileLayers() const
     { return mClipboardTileLayers; }
+
+    const QList<Room *> &clipboardRooms() const
+    { return mClipboardRooms; }
+
+    const QList<ClipboardRoomLayer> &clipboardRoomLayers() const
+    { return mClipboardRoomLayers; }
+
+    bool clipboardHasContent() const
+    { return !mClipboardTileLayers.isEmpty() || !mClipboardRoomLayers.isEmpty(); }
 
     int clipboardAnchorLevel() const
     { return mClipboardAnchorLevel; }
@@ -292,6 +309,8 @@ private:
     FloorTileGrid *mClipboardTiles;
     QRegion mClipboardTilesRgn;
     QList<ClipboardTileLayer> mClipboardTileLayers;
+    QList<Room *> mClipboardRooms;
+    QList<ClipboardRoomLayer> mClipboardRoomLayers;
     int mClipboardAnchorLevel = 0;
     bool mClipboardPreservesPlanes = false;
 };

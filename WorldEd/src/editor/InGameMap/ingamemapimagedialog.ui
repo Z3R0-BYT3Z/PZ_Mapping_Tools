@@ -62,14 +62,14 @@
      <item>
       <widget class="QLabel" name="label_3">
        <property name="text">
-        <string>Rules File:</string>
+        <string>MapToPNG rules:</string>
        </property>
       </widget>
      </item>
      <item>
       <widget class="QLineEdit" name="rulesFilePath">
        <property name="placeholderText">
-        <string>.txt file containing color rules</string>
+        <string>MapToPNG.txt, not terrain Rules.txt</string>
        </property>
       </widget>
      </item>

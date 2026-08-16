@@ -21,6 +21,7 @@
 #include "celldocument.h"
 #include "chunkmap.h"
 #include "documentmanager.h"
+#include "preferences.h"
 #include "simplefile.h"
 #include "world.h"
 #include "worlddocument.h"
@@ -30,6 +31,7 @@
 #include <QBuffer>
 #include <QDebug>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QImage>
 #include <QMessageBox>
 #include <QSettings>
@@ -64,6 +66,16 @@ InGameMapImageDialog::InGameMapImageDialog(QWidget *parent) :
     QSettings qSettings;
     QString mapPath = qSettings.value(KEY_MAP_PATH).toString();
     QString rulesPath = qSettings.value(KEY_RULES_PATH).toString();
+    MapToPNGFileSettings mapToPngSettings;
+    QList<MapToPNGFileRule> mapToPngRules;
+    MapToPNGFile mapToPngFile;
+    if (rulesPath.isEmpty()
+            || !mapToPngFile.read(rulesPath, mapToPngSettings,
+                                  mapToPngRules)) {
+        rulesPath = Preferences::instance()->appConfigPath(
+                    QLatin1String("MapToPNG.txt"));
+        qSettings.setValue(KEY_RULES_PATH, rulesPath);
+    }
     QString outputPath = qSettings.value(KEY_OUTPUT_PATH).toString();
     ui->inputMapPath->setText(mapPath);
     ui->rulesFilePath->setText(rulesPath);
@@ -89,8 +101,10 @@ void InGameMapImageDialog::chooseMapDirectory()
 
 void InGameMapImageDialog::chooseRulesFile()
 {
-    QString f = QFileDialog::getOpenFileName(this, tr("Choose rules file"),
-                                             ui->rulesFilePath->text(), QLatin1String("Text Files (*.txt)"));
+    QString f = QFileDialog::getOpenFileName(
+                this, tr("Choose MapToPNG.txt"),
+                ui->rulesFilePath->text(),
+                tr("MapToPNG rules (MapToPNG.txt);;Text Files (*.txt)"));
     if (f.isEmpty()) {
         return;
     }
@@ -136,7 +150,9 @@ void InGameMapImageDialog::clickedTheButton()
     MapToPNGFileSettings settings2;
     if (file.read(rulesPath, settings2, mRules) == false) {
         QMessageBox::critical(this, tr("In-Game Map Image Error"),
-                              tr("Error while reading %1\n%2")
+                              tr("Create World Image requires MapToPNG.txt, "
+                                 "not the terrain Rules.txt file.\n\n"
+                                 "Error while reading %1\n%2")
                               .arg(rulesPath)
                               .arg(file.mError));
         return;

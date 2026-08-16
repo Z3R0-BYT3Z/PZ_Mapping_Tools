@@ -27,6 +27,7 @@
 #include "mapobject.h" // needed for meta-type for some reason
 
 #include <QGraphicsScene>
+#include "partialchunkselection.h"
 #include <QMap>
 #include <QSet>
 
@@ -88,6 +89,14 @@ public:
      */
     bool isGridVisible() const { return mGridVisible; }
 
+    bool supportsPartialChunks() const;
+    bool partialChunksEnabled() const;
+    int selectedPartialChunkCount() const;
+    bool partialChunkPreviewSelected(int x, int y) const;
+    void setPartialChunksEnabled(bool enabled);
+    void selectAllPartialChunks();
+    void clearPartialChunks();
+
     /**
      * Returns the set of selected map object items.
      */
@@ -133,6 +142,8 @@ public:
 
 signals:
     void selectedObjectItemsChanged();
+    void partialChunkSelectionChanged();
+    void partialChunkSaveFailed(const QString &message);
 
 public slots:
     /**
@@ -253,6 +264,16 @@ private:
     typedef QMap<MapObject*, MapObjectItem*> ObjectItems;
     ObjectItems mObjectItems;
     QSet<MapObjectItem*> mSelectedObjectItems;
+    PZTools::PartialChunkSelection mPartialChunks;
+    bool mPartialChunkLassoActive = false;
+    bool mPartialChunkLassoSelect = false;
+    QPoint mPartialChunkLassoStart = QPoint(-1, -1);
+    QPoint mPartialChunkLassoCurrent = QPoint(-1, -1);
+
+    void loadPartialChunks();
+    void savePartialChunks();
+    QPoint partialChunkAt(const QPointF &scenePos, bool clamp) const;
+    QRect partialChunkLassoRect() const;
 };
 
 } // namespace Internal

@@ -61,6 +61,10 @@
         <file>images/24x24/zoom-original.png</file>
         <file>images/24x24/zoom-out.png</file>
         <file>images/24x24/tool-edit-polygons.png</file>
+        <file>images/24x24/object-point-tool.svg</file>
+        <file>images/24x24/object-polygon-tool.svg</file>
+        <file>images/24x24/object-polyline-tool.svg</file>
+        <file>images/24x24/worldmap-annotations.svg</file>
         <file>images/22x22/stock-tool-bucket-fill.png</file>
         <file>images/22x22/tool-zombie-heatmap.svg</file>
         <file>images/22x22/tool-biome-map.svg</file>
@@ -75,11 +79,11 @@
         <file>images/22x22/road-tool-edit.png</file>
         <file>images/22x22/road-tool-select.png</file>
         <file>images/22x22/bmp-tool-select.png</file>
-        <file>images/missing-tile.png</file>
+        <file>images/missing-tile.svg</file>
         <file>images/22x22/tool-spawn-point.png</file>
         <file>images/idea.png</file>
         <file>images/24x24/insert-rectangle.png</file>
-        <file>images/SpeakerIcon.png</file>
-        <file>images/invisible-tile.png</file>
+        <file>images/speaker-tool.svg</file>
+        <file>images/invisible-tile.svg</file>
     </qresource>
 </RCC>

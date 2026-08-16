@@ -110,6 +110,7 @@ BuildingDocument::~BuildingDocument()
 {
     for (const ClipboardTileLayer &layer : qAsConst(mClipboardTileLayers))
         delete layer.tiles;
+    qDeleteAll(mClipboardRooms);
 }
 
 QString BuildingDocument::displayName() const
@@ -239,11 +240,16 @@ void BuildingDocument::setClipboardTiles(FloorTileGrid *tiles, const QRegion &rg
 void BuildingDocument::setClipboardTileLayers(
         const QList<ClipboardTileLayer> &layers,
         const QRegion &rgn,
-        int anchorLevel)
+        int anchorLevel,
+        const QList<Room *> &rooms,
+        const QList<ClipboardRoomLayer> &roomLayers)
 {
     for (const ClipboardTileLayer &old : qAsConst(mClipboardTileLayers))
         delete old.tiles;
+    qDeleteAll(mClipboardRooms);
     mClipboardTileLayers = layers;
+    mClipboardRooms = rooms;
+    mClipboardRoomLayers = roomLayers;
     mClipboardTiles = mClipboardTileLayers.isEmpty()
             ? nullptr : mClipboardTileLayers.first().tiles;
     mClipboardTilesRgn = rgn;

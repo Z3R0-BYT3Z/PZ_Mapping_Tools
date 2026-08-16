@@ -77,9 +77,36 @@ Each TMX contains one Rules snapshot and one Blends snapshot. Import replaces
 the selected snapshot in memory. Saving persists the replacement. Reload after
 Import is unnecessary. Identical imports are treated as a no-op.
 
+WorldEd BMP To TMX provides **Update Rules/Blends metadata only** for existing
+TMX maps assigned to all world cells or only the selected cells. It replaces
+the stored Rules and Blends paths, aliases, rules, and blends. Bitmap pixels,
+layers, objects, tilesets, no-blend masks, and edge settings remain unchanged.
+WorldEd lists the files first, skips identical snapshots, writes atomically,
+and creates a dated project backup before changing any TMX file.
+
 Older TMX files can retain unresolved tileset references. Removing only the
 tilesets that no longer resolve to a PNG can reduce unnecessary rule work.
 Project Doctor can inspect and repair those references with a backup.
+
+TileZed also records a rate-limited warning when ground-brush preparation takes
+40 ms or more. The line separates temporary Rules and Blends calculation from
+automatic blend-tile cleanup and includes the brush bounds and active metadata
+counts.
+
+The deployed validator can measure a specific map while checking that indexed
+Blends and sparse dirty regions produce the same layers as their compatibility
+paths. It also verifies that the Sand rule resolves only its declared tiles
+when similarly named test or custom sheets are present. When the benchmark map
+contains `blends_natural_01_TEST`, the validator removes and restores that
+sheet, rebuilds the automatic layers, and checks the Sand output after both
+operations:
+
+```powershell
+TileZed.exe --validate-brush-performance C:\path\to\map.tmx
+```
+
+Without a TMX argument, the command runs the built-in brush, undo, Rules, and
+Blends checks only.
 
 ## Reproducing a problem
 

@@ -23,7 +23,6 @@
 #include <QPainter>
 #include <QSet>
 
-class MapComposite;
 class MapInfo;
 class WorldCell;
 class WorldDocument;
@@ -69,11 +68,8 @@ private:
     bool shouldGenerateCell(WorldCell *cell);
     bool generateCell(WorldCell *cell);
     bool doBuildings(WorldCell *cell, MapInfo *mapInfo);
-    bool processObjectGroups(WorldCell *cell, MapComposite *mapComposite);
-    bool processObjectGroup(WorldCell *cell, Tiled::ObjectGroup *objectGroup, int levelOffset, const QPoint &offset);
     bool processObjectGroup(WorldCell *cell, MapInfo *mapInfo, Tiled::ObjectGroup *objectGroup, int levelOffset, const QPoint &offset, QRect &bounds, QVector<QRect> &rects);
     bool traceBuildingOutline(WorldCell *cell, MapInfo *mapInfo, QRect &bounds, QVector<QRect> &rects);
-    bool isInvalidBuildingPolygon(const QPolygon &poly);
     bool doWater(WorldCell* cell, MapInfo* mapInfo);
     bool doTrees(WorldCell* cell, MapInfo *mapInfo);
     bool doRoads(WorldCell *cell, MapInfo *mapInfo);

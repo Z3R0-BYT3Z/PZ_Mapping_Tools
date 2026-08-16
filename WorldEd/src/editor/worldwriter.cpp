@@ -436,6 +436,11 @@ public:
                          QLatin1String(settings.updateExisting ? "true" : "false"));
         w.writeEndElement();
 
+        w.writeStartElement(QLatin1String("metadata-only"));
+        w.writeAttribute(QLatin1String("checked"),
+                         QLatin1String(settings.metadataOnly ? "true" : "false"));
+        w.writeEndElement();
+
         w.writeEndElement(); // </BMPToTMX>
     }
 

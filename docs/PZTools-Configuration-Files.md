@@ -29,6 +29,7 @@ belong inside the mapper's project or mod.
 | `Rules.txt` | WorldEd BMP tools | Color aliases and terrain-generation rules |
 | `Blends.txt` | WorldEd BMP tools | Terrain edges and overlay transitions |
 | `MapBaseXML.txt` | WorldEd BMP tools | Base TMX structure for generated maps |
+| `MapToPNG.txt` | WorldEd Create World Image | Tile-to-color rules for rendering compiled LOT data to PNG |
 | `Roads.txt` | WorldEd | Road presets |
 | `Fences.txt` | TileZed | Fence presets and directional pieces |
 | `Curbs.txt` | TileZed | Curb presets and directional pieces |
@@ -37,8 +38,12 @@ belong inside the mapper's project or mod.
 | `Rearrange.txt` | TileZed | Ordered tile selections for rearrangement tools |
 | `RearrangeGrid.txt` | TileZed | Old and new tile-grid mappings |
 
-Legacy files such as `MapToPNG.txt`, `Textures.txt`, `TileShapes.txt`, and
-`thumbnails.txt` are not active runtime catalogues.
+WorldEd can synchronize the selected `Rules.txt` and `Blends.txt` into the
+embedded metadata snapshot of existing assigned TMX maps without regenerating
+their terrain images or rewriting their map content.
+
+Legacy files such as `Textures.txt`, `TileShapes.txt`, and `thumbnails.txt`
+are not active runtime catalogues.
 
 ## Tileset resolution
 

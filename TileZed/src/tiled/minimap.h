@@ -157,6 +157,7 @@ public:
 
     QImage mBmps[2];
     int mBmpIndex;
+    QPoint mBmpPatchOrigin;
     QList<Tiled::BmpAlias*> mBmpAliases;
     QList<Tiled::BmpRule*> mBmpRules;
     QList<Tiled::BmpBlend*> mBmpBlends;
@@ -207,6 +208,8 @@ public:
     MiniMapItem(Tiled::Internal::ZomboidScene *scene, QGraphicsItem *parent = 0);
     ~MiniMapItem();
 
+    static bool validateBmpPatchTransfer(QString *errorString);
+
     QRectF boundingRect() const;
 
     void paint(QPainter *painter,
@@ -249,6 +252,7 @@ private slots:
     void mapChanged();
 
     void tilesetAdded(int index, Tiled::Tileset *tileset);
+    void tilesetAboutToBeRemoved(Tiled::Tileset *tileset);
     void tilesetRemoved(Tiled::Tileset *tileset);
     void tilesetChanged(Tiled::Tileset *tileset);
 

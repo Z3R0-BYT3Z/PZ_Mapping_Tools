@@ -59,6 +59,7 @@
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsView>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -1461,7 +1462,8 @@ RoomToneCursorItem::RoomToneCursorItem(CellScene *scene, QGraphicsItem *parent) 
     QGraphicsItem(parent),
     mScene(scene),
     mRenderer(scene->renderer()),
-    mImage(QImage(QStringLiteral(":/images/SpeakerIcon.png")))
+    mImage(QIcon(QStringLiteral(":/images/speaker-tool.svg"))
+           .pixmap(32, 32).toImage())
 {
 }
 
@@ -1511,7 +1513,7 @@ SINGLETON_IMPL(RoomToneTool)
 
 RoomToneTool::RoomToneTool()
     : BaseCellSceneTool(QLatin1String("Place Room Tone"),
-                        QIcon(QLatin1String(":/images/SpeakerIcon.png")),
+                        QIcon(QLatin1String(":/images/speaker-tool.svg")),
                         QKeySequence()),
       mContextMenuVisible(false)
 {
@@ -4451,6 +4453,7 @@ void PasteCellsTool::pasteCells(const QPointF &pos)
 
     QUndoStack *undoStack = mScene->worldDocument()->undoStack();
     int count = mDnDItems.size();
+    MainWindow::instance()->beginDocumentTransaction();
     undoStack->beginMacro(tr("Paste %1 Cell%2").arg(count).arg(QLatin1String((count > 1) ? "s" : "")));
     undoStack->push(new ProgressBegin(tr("Pasting Cells"))); // in case of multiple loadMap() calls
 #if 1
@@ -4473,6 +4476,7 @@ void PasteCellsTool::pasteCells(const QPointF &pos)
     mScene->worldDocument()->setSelectedCells(newSelection, true);
     undoStack->push(new ProgressEnd(tr("Undoing Paste Cells"))); // in case of multiple loadMap() calls
     undoStack->endMacro();
+    MainWindow::instance()->endDocumentTransaction();
 }
 
 void PasteCellsTool::cancelMoving()

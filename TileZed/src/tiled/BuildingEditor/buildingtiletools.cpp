@@ -20,6 +20,7 @@
 #include "BuildingEditor/buildingtiles.h"
 #include "buildingfloor.h"
 #include "buildingdocument.h"
+#include "buildingeditorwindow.h"
 #include "buildingtemplates.h"
 #include "buildingorthoview.h"
 #include "buildingundoredo.h"
@@ -59,6 +60,12 @@ void DrawTileToolCursor::paint(QPainter *painter,
     if (!mEditor) return;
     mEditor->drawTileSelection(painter, mRegion, mColor, option->exposedRect,
                                mEditor->currentLevel());
+    for (const QPair<QRegion, QColor> &roomRegion : mRoomRegions) {
+        mEditor->drawTileSelection(painter, roomRegion.first,
+                                   roomRegion.second,
+                                   option->exposedRect,
+                                   mEditor->currentLevel());
+    }
 }
 
 void DrawTileToolCursor::setColor(const QColor &color)
@@ -73,6 +80,7 @@ void DrawTileToolCursor::setTileRegion(const QRegion &tileRgn)
 {
     if (!mEditor) return;
     if (tileRgn != mRegion) {
+        const QRect changedArea = tileRgn.xored(mRegion).boundingRect();
         QPolygonF polygon = mEditor->tileToScenePolygon(tileRgn.boundingRect(),
                                                         mEditor->currentLevel());
         QRectF bounds = polygon.boundingRect();
@@ -101,7 +109,6 @@ void DrawTileToolCursor::setTileRegion(const QRegion &tileRgn)
 
         mRegion = tileRgn;
 
-        const QRect changedArea = tileRgn.xored(mRegion).boundingRect();
         update(mEditor->tileToScenePolygon(changedArea,
                                            mEditor->currentLevel()).boundingRect());
     }
@@ -110,6 +117,13 @@ void DrawTileToolCursor::setTileRegion(const QRegion &tileRgn)
 void DrawTileToolCursor::setEditor(BuildingBaseScene *editor)
 {
     mEditor = editor;
+}
+
+void DrawTileToolCursor::setRoomRegions(
+        const QList<QPair<QRegion, QColor> > &regions)
+{
+    mRoomRegions = regions;
+    update();
 }
 
 /////
@@ -130,9 +144,19 @@ DrawTileTool::DrawTileTool() :
     mErasing(false),
     mCursor(0),
     mCapturing(false),
-    mCaptureTiles(0)
+    mClipboardPlacement(false),
+    mCaptureTiles(0),
+    mClipboardPreviewTiles(0),
+    mClipboardPreviewLevel(-1)
 {
     updateStatusText();
+}
+
+DrawTileTool::~DrawTileTool()
+{
+    clearCaptureTiles();
+    clearClipboardPreview();
+    mInstance = nullptr;
 }
 
 void DrawTileTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
@@ -140,6 +164,14 @@ void DrawTileTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
     QPoint tilePos = mEditor->sceneToTile(event->scenePos(), mEditor->currentLevel());
 
     if (event->button() == Qt::RightButton) {
+        if (mClipboardPlacement) {
+            mClipboardPlacement = false;
+            clearClipboardPreview();
+            mEditor->clearToolTiles();
+            updateCursor(event->scenePos());
+            updateStatusText();
+            return;
+        }
         // Right-click to cancel drawing/erasing.
         if (mMouseDown) {
             mMouseDown = false;
@@ -182,6 +214,15 @@ void DrawTileTool::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
     Q_UNUSED(event)
     if (mCapturing) {
         endCapture();
+        return;
+    }
+    if (mClipboardPlacement && mMouseDown) {
+        mMouseDown = false;
+        BuildingEditorWindow *window = BuildingEditorWindow::instance();
+        if (window)
+            window->pasteClipboardAt(mCursorTileBounds.topLeft());
+        updateCursor(event->scenePos());
+        updateStatusText();
         return;
     }
     if (mMouseDown) {
@@ -234,6 +275,8 @@ void DrawTileTool::currentModifiersChanged(Qt::KeyboardModifiers modifiers)
 void DrawTileTool::setTile(const QString &tileName)
 {
     mTileName = tileName;
+    mClipboardPlacement = false;
+    clearClipboardPreview();
     clearCaptureTiles();
 }
 
@@ -241,11 +284,22 @@ void DrawTileTool::setCaptureTiles(FloorTileGrid *tiles, const QRegion &rgn)
 {
     Q_ASSERT(tiles->bounds().contains(rgn.boundingRect()));
 
+    mClipboardPlacement = false;
+    clearClipboardPreview();
     clearCaptureTiles();
     mCaptureTiles = tiles;
     mCaptureTilesRgn = rgn/*.translated(-rgn.boundingRect().topLeft())*/;
     if (mEditor)
         updateCursor(mMouseScenePos);
+}
+
+void DrawTileTool::setClipboardPlacement()
+{
+    clearCaptureTiles();
+    mClipboardPlacement = rebuildClipboardPreview();
+    if (mEditor)
+        updateCursor(mMouseScenePos);
+    updateStatusText();
 }
 
 void DrawTileTool::activate()
@@ -265,6 +319,8 @@ void DrawTileTool::deactivate()
         mEditor->clearToolTiles();
     }
     mMouseDown = false;
+    mClipboardPlacement = false;
+    clearClipboardPreview();
 }
 
 void DrawTileTool::beginCapture()
@@ -313,6 +369,85 @@ void DrawTileTool::clearCaptureTiles()
     mCaptureTiles = 0;
 }
 
+void DrawTileTool::clearClipboardPreview()
+{
+    delete mClipboardPreviewTiles;
+    mClipboardPreviewTiles = nullptr;
+    mClipboardPreviewRegion = QRegion();
+    mClipboardPreviewRoomRegions.clear();
+    mClipboardPreviewLevel = -1;
+}
+
+bool DrawTileTool::rebuildClipboardPreview()
+{
+    clearClipboardPreview();
+    if (!document())
+        return false;
+
+    const QRect bounds = document()->clipboardTilesRgn().boundingRect();
+    if (bounds.isEmpty())
+        return false;
+
+    mClipboardPreviewTiles = new FloorTileGrid(bounds.width(),
+                                               bounds.height());
+    mClipboardPreviewRegion = document()->clipboardTilesRgn();
+    mClipboardPreviewLevel = document()->currentLevel();
+
+    const QList<BuildingDocument::ClipboardTileLayer> layers =
+            document()->clipboardTileLayers();
+    for (const BuildingDocument::ClipboardTileLayer &layer : layers) {
+        if (!layer.tiles)
+            continue;
+        const int targetLevel = mClipboardPreviewLevel + layer.level
+                - document()->clipboardAnchorLevel();
+        if (targetLevel != mClipboardPreviewLevel)
+            continue;
+        const int width = qMin(bounds.width(), layer.tiles->width());
+        const int height = qMin(bounds.height(), layer.tiles->height());
+        for (int x = 0; x < width; ++x) {
+            for (int y = 0; y < height; ++y) {
+                const QString tileName = layer.tiles->at(x, y);
+                if (!tileName.isEmpty())
+                    mClipboardPreviewTiles->replace(x, y, tileName);
+            }
+        }
+    }
+
+    const QList<Room *> rooms = document()->clipboardRooms();
+    QHash<int, QRegion> roomRegionsByIndex;
+    const QList<BuildingDocument::ClipboardRoomLayer> roomLayers =
+            document()->clipboardRoomLayers();
+    for (const BuildingDocument::ClipboardRoomLayer &roomLayer : roomLayers) {
+        const int targetLevel = mClipboardPreviewLevel + roomLayer.level
+                - document()->clipboardAnchorLevel();
+        if (targetLevel != mClipboardPreviewLevel)
+            continue;
+        int x = 0;
+        for (const QVector<int> &column : roomLayer.rooms) {
+            int y = 0;
+            for (int roomIndex : column) {
+                if (x < bounds.width() && y < bounds.height()
+                        && roomIndex >= 0 && roomIndex < rooms.size()
+                        && rooms.at(roomIndex)) {
+                    roomRegionsByIndex[roomIndex] += QRect(
+                                QPoint(x, y), QSize(1, 1));
+                }
+                ++y;
+            }
+            ++x;
+        }
+    }
+    for (auto it = roomRegionsByIndex.cbegin();
+         it != roomRegionsByIndex.cend(); ++it) {
+        QColor color = QColor::fromRgb(rooms.at(it.key())->Color);
+        color.setAlpha(96);
+        mClipboardPreviewRoomRegions.append(
+                    qMakePair(it.value(), color));
+    }
+    return !mClipboardPreviewTiles->isEmpty()
+            || !mClipboardPreviewRoomRegions.isEmpty();
+}
+
 void DrawTileTool::updateCursor(const QPointF &scenePos, bool force)
 {
     QPoint tilePos = mEditor->sceneToTile(scenePos, mEditor->currentLevel());
@@ -326,7 +461,20 @@ void DrawTileTool::updateCursor(const QPointF &scenePos, bool force)
     }
     mCursor->setEditor(mEditor);
 
-    if (mMouseDown) {
+    if (mClipboardPlacement) {
+        if (mClipboardPreviewLevel != document()->currentLevel()
+                && !rebuildClipboardPreview()) {
+            mClipboardPlacement = false;
+        }
+    }
+
+    if (mClipboardPlacement) {
+        const QRect clipboardBounds = mClipboardPreviewRegion.boundingRect();
+        mCursorTileBounds = QRect(
+                    tilePos.x() - clipboardBounds.width() / 2,
+                    tilePos.y() - clipboardBounds.height() / 2,
+                    clipboardBounds.width(), clipboardBounds.height());
+    } else if (mMouseDown) {
         mCursorTileBounds = QRect(QPoint(qMin(mStartTilePos.x(), tilePos.x()),
                                   qMin(mStartTilePos.y(), tilePos.y())),
                                   QPoint(qMax(mStartTilePos.x(), tilePos.x()),
@@ -363,6 +511,34 @@ void DrawTileTool::updateCursor(const QPointF &scenePos, bool force)
         mEditor->setToolTiles(tiles, mCursorTileBounds.topLeft(), layerName());
         delete tiles;
     }
+
+    if (mClipboardPlacement) {
+        if (mClipboardPreviewTiles
+                && !mClipboardPreviewTiles->isEmpty()) {
+            mEditor->setToolTiles(mClipboardPreviewTiles,
+                                  mCursorTileBounds.topLeft(),
+                                  layerName());
+        } else {
+            mEditor->clearToolTiles();
+        }
+        QList<QPair<QRegion, QColor> > roomRegions;
+        for (const QPair<QRegion, QColor> &room :
+             mClipboardPreviewRoomRegions) {
+            roomRegions.append(qMakePair(
+                        room.first.translated(mCursorTileBounds.topLeft()),
+                        room.second));
+        }
+        mCursor->setRoomRegions(roomRegions);
+        mCursor->setTileRegion(mClipboardPreviewRegion
+                               .translated(mCursorTileBounds.topLeft()));
+        QColor highlight = QApplication::palette().highlight().color();
+        highlight.setAlpha(80);
+        mCursor->setColor(highlight);
+        mCursor->setVisible(true);
+        return;
+    }
+
+    mCursor->setRoomRegions(QList<QPair<QRegion, QColor> >());
 
     mCursor->setTileRegion(mCaptureTiles ?
                                mCaptureTilesRgn.translated(mCursorTileBounds.topLeft())
@@ -406,7 +582,9 @@ void DrawTileTool::updateCursor(const QPointF &scenePos, bool force)
 
 void DrawTileTool::updateStatusText()
 {
-    if (mCapturing && !mMouseMoved) {
+    if (mClipboardPlacement) {
+        setStatusText(tr("Left-click to place the copied building selection.  Right-click to cancel."));
+    } else if (mCapturing && !mMouseMoved) {
         setStatusText(tr("Drag to capture tiles.  Release button to cancel."));
     } else if (mCapturing)
         setStatusText(tr("Width,Height = %1,%2.  Release button to capture tiles.")

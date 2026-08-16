@@ -653,7 +653,11 @@ void BuildingIsoScene::setToolTiles(const FloorTileGrid *tiles,
     clearToolTiles();
 
     CompositeLayerGroupItem *item = itemForFloor(currentFloor());
+    if (!item)
+        return;
     CompositeLayerGroup *layerGroup = item->layerGroup();
+    if (!layerGroup)
+        return;
 
     TileLayer *layer = 0;
     foreach (TileLayer *tl, layerGroup->layers()) {
@@ -1185,23 +1189,11 @@ void BuildingIsoScene::roomDefinitionChanged()
 
 void BuildingIsoScene::roomAdded(Room *room)
 {
-    Q_UNUSED(room)
-    foreach (BuildingFloor *floor, mDocument->building()->floors()) {
-        mBuildingMap->floorEdited(floor);
-        BuildingBaseScene::floorEdited(floor);
-    }
-
     mBuildingMap->roomAdded(room);
 }
 
 void BuildingIsoScene::roomRemoved(Room *room)
 {
-    Q_UNUSED(room)
-    foreach (BuildingFloor *floor, mDocument->building()->floors()) {
-        mBuildingMap->floorEdited(floor);
-        BuildingBaseScene::floorEdited(floor);
-    }
-
     mBuildingMap->roomRemoved(room);
 }
 

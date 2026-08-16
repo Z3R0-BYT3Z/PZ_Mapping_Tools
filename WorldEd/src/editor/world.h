@@ -66,6 +66,7 @@ public:
     bool compress;
     bool copyPixels;
     bool updateExisting;
+    bool metadataOnly;
 
     BMPToTMXSettings() :
         assignMapsToWorld(false),
@@ -75,7 +76,8 @@ public:
         unknownVegetationFallback(0xff000000u),
         compress(true),
         copyPixels(true),
-        updateExisting(false)
+        updateExisting(false),
+        metadataOnly(false)
     {
     }
 
@@ -93,7 +95,8 @@ public:
                     other.unknownVegetationFallback &&
                 compress == other.compress &&
                 copyPixels == other.copyPixels &&
-                updateExisting == other.updateExisting;
+                updateExisting == other.updateExisting &&
+                metadataOnly == other.metadataOnly;
     }
 
     bool operator != (const BMPToTMXSettings &other)

@@ -105,10 +105,12 @@ Tile *PickTileTool::pickTile(const QPointF &pos)
                 for (int i = 0; i < cells.size(); i++) {
                     Tile *test = cells[i]->tile;
                     Tile *realTile = test;
-                    if (test->properties().contains(QLatin1String("invisible"))) {
+                    if (test->properties().contains(QLatin1String("invisible"))
+                            || (test->image().isNull()
+                                && test->hasResolvedSource())) {
                         test = TilesetManager::instance()->invisibleTile();
                     }
-                    if (test->image().isNull()) {
+                    if (test->image().isNull() && !test->hasResolvedSource()) {
                         test = TilesetManager::instance()->missingTile();
                     }
                     QRect imageBox(test->offset(), test->image().size());

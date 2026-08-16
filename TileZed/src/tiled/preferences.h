@@ -160,6 +160,9 @@ public:
     QColor tilesetBackgroundColor() const
     { return mTilesetBackgroundColor; }
 
+    bool tilesetBackgroundColorIsDefault() const
+    { return mTilesetBackgroundColorIsDefault; }
+
     QString thumbnailsDirectory() const
     { return mThumbnailsDirectory; }
 
@@ -241,6 +244,7 @@ signals:
     void highlightRoomUnderPointerChanged(bool highlight);
     void eraserBrushSizeChanged(int newSize);
     void tilesetBackgroundColorChanged(const QColor &color);
+    void themeChanged(const QString &theme);
     void thumbnailsDirectoryChanged(const QString &dir);
     void showCellBorderChanged(bool show);
 #endif
@@ -287,6 +291,7 @@ private:
     bool mHighlightRoomUnderPointer;
     int mEraserBrushSize;
     QColor mTilesetBackgroundColor;
+    bool mTilesetBackgroundColorIsDefault;
     QString mThumbnailsDirectory;
     bool mShowTileSelection;
     bool mShowInvisibleTiles;

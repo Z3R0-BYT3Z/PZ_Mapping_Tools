@@ -81,8 +81,8 @@
         <file>images/22x22/bmp-tool.png</file>
         <file>images/22x22/bmp-select.png</file>
         <file>images/22x22/bmp-rect.png</file>
-        <file>images/22x22/brush-circle.png</file>
-        <file>images/22x22/brush-square.png</file>
+        <file>images/22x22/brush-circle.svg</file>
+        <file>images/22x22/brush-square.svg</file>
         <file>images/22x22/bmp-bucket.png</file>
         <file>images/22x22/bmp-wand.png</file>
         <file>images/22x22/bmp-eraser.png</file>
@@ -93,9 +93,9 @@
         <file>images/22x22/bmp-no-blend.png</file>
         <file>images/22x22/curb-tool.png</file>
         <file>images/22x22/edge-tool.png</file>
-        <file>images/22x22/fence-tool.png</file>
+        <file>images/22x22/fence-tool.svg</file>
         <file>images/16x16/lock.png</file>
-        <file>images/missing-tile.png</file>
-        <file>images/invisible-tile.png</file>
+        <file>images/missing-tile.svg</file>
+        <file>images/invisible-tile.svg</file>
     </qresource>
 </RCC>

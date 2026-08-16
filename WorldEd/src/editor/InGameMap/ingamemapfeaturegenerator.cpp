@@ -39,6 +39,7 @@
 
 #include <qmath.h>
 #include <QDebug>
+#include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QMessageBox>
@@ -57,6 +58,21 @@ struct pzPolygon
 };
 
 int PIXELS_PER_CELL = 48;
+bool tmxContainsRoomDefs(const QString &fileName)
+{
+    QFile file(fileName);
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    const QByteArray token("RoomDefs");
+    QByteArray overlap;
+    while (!file.atEnd()) {
+        const QByteArray bytes = overlap + file.read(64 * 1024);
+        if (bytes.contains(token))
+            return true;
+        overlap = bytes.right(token.size() - 1);
+    }
+    return false;
+}
 bool validateGeneratedPolygon(ClipperLib::Path &path, WorldCell *cell,
                               const QString &featureType, const QString &part,
                               int &cleanedCount, int &rejectedCount)
@@ -173,7 +189,8 @@ bool InGameMapFeatureGenerator::shouldGenerateCell(WorldCell *cell)
 {
     switch (mFeatureType) {
     case FeatureBuilding:
-        return !cell->lots().isEmpty();
+        return !cell->lots().isEmpty()
+                || tmxContainsRoomDefs(cell->mapFilePath());
     case FeatureTree:
         return true;
     case FeatureWater:
@@ -226,15 +243,18 @@ bool InGameMapFeatureGenerator::generateCell(WorldCell *cell)
 
 bool InGameMapFeatureGenerator::doBuildings(WorldCell *cell, MapInfo *mapInfo)
 {
-    // Remove all "building=" features
     auto& features = cell->inGameMap().features();
     for (int i = features.size() - 1; i >= 0; i--) {
         auto* feature = features[i];
+        bool isBuilding = false;
         for (auto& property : feature->properties()) {
             if (property.mKey == QStringLiteral("building")) {
-                mWorldDoc->removeInGameMapFeature(cell, feature->index());
+                isBuilding = true;
+                break;
             }
         }
+        if (isBuilding)
+            mWorldDoc->removeInGameMapFeature(cell, feature->index());
     }
 
     DelayedMapLoader mapLoader;
@@ -249,17 +269,31 @@ bool InGameMapFeatureGenerator::doBuildings(WorldCell *cell, MapInfo *mapInfo)
             lots += lot;
         } else {
             mFailures += GenerateCellFailure(cell, MapManager::instance()->errorString());
-//            mError = MapManager::instance()->errorString();
-//            return false;
         }
     }
 
-#if 1
     while (mapLoader.isLoading()) {
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
     }
 
-    // This method won't work for buildings in the TMX, it only works for separate building files.
+    if (!mapLoader.errorString().isEmpty()) {
+        mError = mapLoader.errorString();
+        return false;
+    }
+
+    if (mapInfo->map() != nullptr) {
+        QRect bounds;
+        QVector<QRect> rects;
+        for (ObjectGroup *og : mapInfo->map()->objectGroups()) {
+            if (!processObjectGroup(cell, mapInfo, og, 0, QPoint(),
+                                    bounds, rects)) {
+                return false;
+            }
+        }
+        if (!traceBuildingOutline(cell, mapInfo, bounds, rects))
+            return false;
+    }
+
     for (WorldCellLot *lot : lots) {
         MapInfo *info = MapManager::instance()->mapInfo(lot->mapName());
         if (info != nullptr && info->map() != nullptr) {
@@ -277,343 +311,12 @@ bool InGameMapFeatureGenerator::doBuildings(WorldCell *cell, MapInfo *mapInfo)
     }
 
     return true;
-#else
-    // The cell map must be loaded before creating the MapComposite, which will
-    // possibly load embedded lots.
-    while (mapInfo->isLoading())
-        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-
-    MapComposite staticMapComposite(mapInfo);
-    MapComposite *mapComposite = &staticMapComposite;
-    while (mapComposite->waitingForMapsToLoad() || mapLoader.isLoading())
-        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-    if (!mapLoader.errorString().isEmpty()) {
-        mError = mapLoader.errorString();
-        return false;
-    }
-
-    foreach (WorldCellLot *lot, cell->lots()) {
-        MapInfo *info = MapManager::instance()->mapInfo(lot->mapName());
-        Q_ASSERT(info && info->map());
-        mapComposite->addMap(info, lot->pos(), lot->level());
-    }
-
-    return processObjectGroups(cell, mapComposite);
-#endif
-}
-
-bool InGameMapFeatureGenerator::processObjectGroups(WorldCell *cell, MapComposite *mapComposite)
-{
-    foreach (Layer *layer, mapComposite->map()->layers()) {
-        if (ObjectGroup *og = layer->asObjectGroup()) {
-            if (!processObjectGroup(cell, og, mapComposite->levelRecursive(),
-                                    mapComposite->originRecursive()))
-                return false;
-        }
-    }
-
-    foreach (MapComposite *subMap, mapComposite->subMaps())
-        if (!processObjectGroups(cell, subMap))
-            return false;
-
-    return true;
-}
-
-namespace {
-
-class OutlineCell {
-public:
-    OutlineCell(int x, int y)
-        : x(x)
-        , y(y)
-    {
-    }
-
-    int x = -1, y = -1;
-    bool w = false, n = false, e = false, s = false; // true if no cell in this direction
-    bool tw = false, tn = false, te = false, ts = false; // true if traced the given edge
-    bool inner = false;
-    bool start = false;
-};
-
-typedef std::shared_ptr<OutlineCell> OutlineCellPtr;
-
-class OutlineGrid {
-public:
-    std::vector<OutlineCellPtr> elements;
-    int W, H;
-    bool EXTEND = true;
-
-    void setSize(int w, int h) {
-        elements.resize(size_t(w * h));
-        W = w;
-        H = h;
-    }
-
-    void setInner(int x, int y) {
-        OutlineCellPtr f1 = get(x, y);
-        if (f1) {
-            f1->inner = true;
-        }
-    }
-
-    bool isInner(int x, int y) {
-        OutlineCellPtr f1 = get(x, y);
-        return f1 && (f1->start || f1->inner);
-    }
-
-    bool canTrace_W(int x, int y) {
-        OutlineCellPtr cell = get(x, y);
-        return cell && cell->inner && cell->w && !cell->tw;
-    }
-
-    bool canTrace_N(int x, int y) {
-        OutlineCellPtr cell = get(x, y);
-        return cell && cell->inner && cell->n && !cell->tn;
-    }
-
-    bool canTrace_E(int x, int y) {
-        OutlineCellPtr cell = get(x, y);
-        return cell && cell->inner && cell->e && !cell->te;
-    }
-
-    bool canTrace_S(int x, int y) {
-        OutlineCellPtr cell = get(x, y);
-        return cell && cell->inner && cell->s && !cell->ts;
-    }
-
-    OutlineCellPtr& elementAt(int x, int y) {
-        return elements[size_t(x + y * W)];
-    }
-
-    OutlineCellPtr get(int x, int y) {
-        if (x < 0 || x >= W)
-            return nullptr;
-        if (y < 0 || y >= H)
-            return nullptr;
-        if (!elementAt(x, y))
-            elementAt(x, y) = std::make_shared<OutlineCell>(x, y);
-        return elementAt(x, y);
-    }
-
-    void trace_W(OutlineCell& cell, QPolygon& nodes, int extend) {
-        const int x = cell.x, y = cell.y;
-        if (EXTEND && extend != -1) {
-            nodes[extend] = { x, y };
-        } else {
-            nodes += { x, y };
-        }
-        cell.tw = true; // done
-
-        // turn w, continue n, turn e
-        if (canTrace_S(x - 1, y - 1)) {
-            trace_S(*get(x - 1, y - 1), nodes, -1);
-        } else if (canTrace_W(x, y - 1)) {
-            trace_W(*get(x, y - 1), nodes, nodes.size()-1);
-        } else if (canTrace_N(x, y)) {
-            trace_N(cell, nodes, -1);
-        }
-    }
-
-    void trace_N(OutlineCell& cell, QPolygon& nodes, int extend) {
-        const int x = cell.x, y = cell.y;
-        if (EXTEND && extend != -1) {
-            nodes[extend] = { x + 1, y };
-        } else {
-            nodes += { x + 1, y };
-        }
-        cell.tn = true; // done
-
-        // turn n, continue e, turn s
-        if (canTrace_W(x + 1, y - 1)) {
-            trace_W(*get(x + 1, y - 1), nodes, -1);
-        } else if (canTrace_N(x + 1, y)) {
-            trace_N(*get(x + 1, y), nodes, nodes.size()-1);
-        } else if (canTrace_E(x, y)) {
-            trace_E(cell, nodes, -1);
-        }
-    }
-
-    void trace_E(OutlineCell& cell, QPolygon& nodes, int extend) {
-        const int x = cell.x, y = cell.y;
-        if (EXTEND && extend != -1) {
-            nodes[extend] = { x + 1, y + 1 };
-        } else {
-            nodes += { x + 1, y + 1 };
-        }
-        cell.te = true; // done
-
-        // turn e, continue s, turn w
-        if (canTrace_N(x + 1, y + 1)) {
-            trace_N(*get(x + 1, y + 1), nodes, -1);
-        } else if (canTrace_E(x, y + 1)) {
-            trace_E(*get(x, y + 1), nodes, nodes.size()-1);
-        } else if (canTrace_S(x, y)) {
-            trace_S(cell, nodes, -1);
-        }
-    }
-
-    void trace_S(OutlineCell& cell, QPolygon& nodes, int extend) {
-        const int x = cell.x, y = cell.y;
-        if (EXTEND && extend != -1) {
-            nodes[extend] = { x, y + 1 };
-        } else {
-            nodes += { x, y + 1 };
-        }
-        cell.ts = true; // done
-
-        // turn s, continue w, turn n
-        if (canTrace_E(x - 1, y + 1)) {
-            trace_E(*get(x - 1, y + 1), nodes, -1);
-        } else if (canTrace_S(x - 1, y)) {
-            trace_S(*get(x - 1, y), nodes, nodes.size()-1);
-        } else if (canTrace_W(x, y)) {
-            trace_W(cell, nodes, -1);
-        }
-    }
-
-    QPolygon trace(OutlineCell& cell) {
-        const int x = cell.x, y = cell.y;
-        QPolygon nodes;
-        QPoint node1(x, y);
-        nodes += node1;
-        cell.start = true;
-        trace_N(cell, nodes, -1);
-        if (nodes.back() == nodes.first())
-            nodes.pop_back();
-        return nodes;
-    }
-
-    void trace(bool extend, std::function<void(QPolygon&)> callback) {
-        EXTEND = extend;
-        for (int y = 0; y < H; y++) {
-            for (int x = 0; x < W; x++) {
-                OutlineCell& cell = *get(x, y);
-                if (!cell.inner)
-                    continue;
-                if (!isInner(x - 1, y))
-                    cell.w = true;
-                if (!isInner(x, y - 1))
-                    cell.n = true;
-                if (!isInner(x + 1, y))
-                    cell.e = true;
-                if (!isInner(x, y + 1))
-                    cell.s = true;
-            }
-        }
-
-        for (int y = 0; y < H; y++) {
-            for (int x = 0; x < W; x++) {
-                OutlineCellPtr cell = get(x, y);
-                // every poly must have a nw corner.
-                // this should only happen once.
-                if (cell && cell->n && cell->w && cell->inner && !(cell->tw || cell->tn || cell->te || cell->ts)) {
-                    QPolygon nodes = trace(*cell);
-                    if (nodes.isEmpty())
-                        continue;
-                    callback(nodes);
-                }
-            }
-        }
-    }
-};
-
-} // namespace
-
-bool InGameMapFeatureGenerator::processObjectGroup(WorldCell *cell, ObjectGroup *objectGroup, int levelOffset, const QPoint &offset)
-{
-    if (objectGroup->name().contains(QLatin1String("RoomDefs")) == false) {
-        return true;
-    }
-
-    int level = objectGroup->level();
-    level += levelOffset;
-
-    if (level != 0)
-        return true;
-
-    QRect bounds;
-    QVector<QRect> rects;
-
-    foreach (const MapObject *mapObject, objectGroup->objects()) {
-#if 0
-        if (mapObject->name().isEmpty() || mapObject->type().isEmpty())
-            continue;
-#endif
-        if (mapObject->width() * mapObject->height() <= 0)
-            continue;
-
-        if ((level <= 0) && BuildingEditor::RoofHiding::isEmptyOutside(mapObject->name())) {
-            continue;
-        }
-
-        int x = qFloor(mapObject->x());
-        int y = qFloor(mapObject->y());
-        int w = qCeil(mapObject->x() + mapObject->width()) - x;
-        int h = qCeil(mapObject->y() + mapObject->height()) - y;
-
-        if (objectGroup->map()->orientation() == Map::Isometric) {
-            x += 3 * level;
-            y += 3 * level;
-        }
-
-        // Apply the MapComposite offset in the top-level map.
-        x += offset.x();
-        y += offset.y();
-
-#if 0
-        if (x < 0 || y < 0 || x + w > 300 || y + h > 300) {
-            x = qBound(0, x, 300);
-            y = qBound(0, y, 300);
-            mError = tr("A RoomDef in cell %1,%2 overlaps cell boundaries.\nNear x,y=%3,%4")
-                    .arg(cell->x()).arg(cell->y()).arg(x).arg(y);
-            return false;
-        }
-#endif
-        if (bounds.isEmpty())
-            bounds = { x, y, w, h };
-        else
-            bounds |= { x, y, w, h };
-        rects += { x, y, w, h };
-    }
-
-    if (bounds.isEmpty())
-        return true;
-
-    OutlineGrid grid;
-    grid.setSize(bounds.width(), bounds.height());
-    for (auto& rect : rects) {
-        for (int y = 0; y < rect.height(); y++)
-            for (int x = 0; x < rect.width(); x++)
-                grid.setInner(rect.x() - bounds.x() + x, rect.y() - bounds.y() + y);
-    }
-
-    grid.trace(true, [&](QPolygon& nodes) {
-        nodes.translate(bounds.left(), bounds.top());
-
-        InGameMapFeature* feature = new InGameMapFeature(&cell->inGameMap());
-
-        InGameMapProperty property;
-        property.mKey = QStringLiteral("building");
-        property.mValue = QStringLiteral("yes");
-        feature->properties() += property;
-
-        feature->mGeometry.mType = QStringLiteral("Polygon");
-        InGameMapCoordinates coords;
-        for (auto& point : nodes) {
-            coords += InGameMapPoint(point.x(), point.y());
-        }
-        feature->mGeometry.mCoordinates += coords;
-
-        mWorldDoc->addInGameMapFeature(cell, cell->inGameMap().features().size(), feature);
-    });
-
-    return true;
 }
 
 bool InGameMapFeatureGenerator::processObjectGroup(WorldCell *cell, MapInfo *mapInfo, ObjectGroup *objectGroup, int levelOffset,
                                                    const QPoint &offset, QRect &bounds, QVector<QRect> &rects)
 {
+    Q_UNUSED(cell)
     Q_UNUSED(mapInfo)
 
     if (objectGroup->name().contains(QLatin1String("RoomDefs")) == false) {
@@ -628,10 +331,6 @@ bool InGameMapFeatureGenerator::processObjectGroup(WorldCell *cell, MapInfo *map
     }
 
     for (const MapObject *mapObject : objectGroup->objects()) {
-#if 0
-        if (mapObject->name().isEmpty() || mapObject->type().isEmpty())
-            continue;
-#endif
         if (mapObject->width() * mapObject->height() <= 0)
             continue;
 
@@ -649,19 +348,9 @@ bool InGameMapFeatureGenerator::processObjectGroup(WorldCell *cell, MapInfo *map
             y += 3 * level;
         }
 
-        // Apply the MapComposite offset in the top-level map.
         x += offset.x();
         y += offset.y();
 
-#if 0
-        if (x < 0 || y < 0 || x + w > 300 || y + h > 300) {
-            x = qBound(0, x, 300);
-            y = qBound(0, y, 300);
-            mError = tr("A RoomDef in cell %1,%2 overlaps cell boundaries.\nNear x,y=%3,%4")
-                    .arg(cell->x()).arg(cell->y()).arg(x).arg(y);
-            return false;
-        }
-#endif
         if (bounds.isEmpty())
             bounds = { x, y, w, h };
         else
@@ -676,7 +365,6 @@ bool InGameMapFeatureGenerator::traceBuildingOutline(WorldCell *cell, MapInfo *m
 {
     if (bounds.isEmpty())
         return true;
-#if 1
     ClipperLib::Clipper clipper;
     ClipperLib::Path path;
 
@@ -708,8 +396,6 @@ bool InGameMapFeatureGenerator::traceBuildingOutline(WorldCell *cell, MapInfo *m
         }
     }
 
-    // FIXME: This may create multiple features each with an outer and zero or more holes.
-    //        It would be better if a single feature per building was created.
     for (pzPolygon *poly : allPolygons) {
         ClipperLib::Path path = poly->outer;
         if (!validateGeneratedPolygon(path, cell, QStringLiteral("building"),
@@ -765,59 +451,7 @@ bool InGameMapFeatureGenerator::traceBuildingOutline(WorldCell *cell, MapInfo *m
     }
 
     qDeleteAll(allPolygons);
-#else
-    OutlineGrid grid;
-    grid.setSize(bounds.width(), bounds.height());
-    for (auto& rect : rects) {
-        for (int y = 0; y < rect.height(); y++)
-            for (int x = 0; x < rect.width(); x++)
-                grid.setInner(rect.x() - bounds.x() + x, rect.y() - bounds.y() + y);
-    }
-
-    grid.trace(true, [&](QPolygon& nodes) {
-        nodes.translate(bounds.left(), bounds.top());
-
-        if (isInvalidBuildingPolygon(nodes)) {
-            return;
-        }
-
-        InGameMapFeature* feature = new InGameMapFeature(&cell->inGameMap());
-
-        InGameMapProperty property;
-        property.mKey = QStringLiteral("building");
-        QString LEGEND = QStringLiteral("Legend");
-        if (mapInfo->map()->properties().contains(LEGEND)) {
-            property.mValue = mapInfo->map()->property(LEGEND);
-        } else {
-            property.mValue = QStringLiteral("yes");
-        }
-        feature->properties() += property;
-        for (auto it = mapInfo->map()->properties().cbegin(); it != mapInfo->map()->properties().cend(); it++) {
-            if (it.key() == LEGEND) {
-                continue;
-            }
-            property.mKey = it.key();
-            property.mValue = it.value();
-            feature->properties() += property;
-        }
-
-        feature->mGeometry.mType = QStringLiteral("Polygon");
-        InGameMapCoordinates coords;
-        for (auto& point : nodes) {
-            coords += InGameMapPoint(point.x(), point.y());
-        }
-        feature->mGeometry.mCoordinates += coords;
-
-        mWorldDoc->addInGameMapFeature(cell, cell->inGameMap().features().size(), feature);
-    });
-#endif
     return true;
-}
-
-bool InGameMapFeatureGenerator::isInvalidBuildingPolygon(const QPolygon &poly)
-{
-    QRect bounds = poly.boundingRect();
-    return (bounds.width() == 2) && (bounds.height() == 2);
 }
 
 #include <stack>

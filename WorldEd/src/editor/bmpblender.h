@@ -47,7 +47,7 @@ public:
     BmpRulesFile();
     ~BmpRulesFile();
 
-    bool read(const QString &fileName);
+    bool read(const QString &fileName, bool convertOldFormat = true);
     bool write(const QString &fileName);
 
     QString errorString() const
@@ -71,7 +71,7 @@ private:
     QRgb rgbFromStringList(const QStringList &rgb, bool &ok);
 
     bool isOldFormat(const QString &fileName);
-    bool readOldFormat(const QString &fileName);
+    bool readOldFormat(const QString &fileName, bool convertOldFormat);
 
     QList<BmpAlias*> mAliases;
     QMap<QString,BmpAlias*> mAliasByName;

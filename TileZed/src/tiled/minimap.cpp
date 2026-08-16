@@ -41,8 +41,11 @@
 #include <QGraphicsPolygonItem>
 #include <QHBoxLayout>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QScrollBar>
 #include <QToolButton>
+
+#include <cstring>
 
 using namespace Tiled;
 using namespace Tiled::Internal;
@@ -52,6 +55,54 @@ inline QNoDebug noise() { return QNoDebug(); }
 #else
 inline QDebug noise() { return QDebug(QtDebugMsg); }
 #endif
+
+static void applyImagePatch(QImage &destination, const QImage &patch,
+                            const QPoint &origin)
+{
+    const QRect destinationRect = QRect(origin, patch.size())
+            & destination.rect();
+    if (destinationRect.isEmpty())
+        return;
+
+    const QRect sourceRect = destinationRect.translated(-origin);
+    if (destination.depth() == 32
+            && destination.format() == patch.format()) {
+        for (int y = 0; y < destinationRect.height(); ++y) {
+            std::memcpy(destination.scanLine(destinationRect.top() + y)
+                        + destinationRect.left() * 4,
+                        patch.constScanLine(sourceRect.top() + y)
+                        + sourceRect.left() * 4,
+                        size_t(destinationRect.width()) * 4);
+        }
+        return;
+    }
+
+    QPainter painter(&destination);
+    painter.drawImage(destinationRect, patch, sourceRect);
+}
+
+bool MiniMapItem::validateBmpPatchTransfer(QString *errorString)
+{
+    const QRgb patchColor = qRgb(25, 150, 210);
+    QImage destination(8, 8, QImage::Format_ARGB32);
+    destination.fill(Qt::black);
+    QImage patch(3, 2, QImage::Format_ARGB32);
+    patch.fill(patchColor);
+    applyImagePatch(destination, patch, QPoint(2, 4));
+    for (int y = 0; y < destination.height(); ++y) {
+        for (int x = 0; x < destination.width(); ++x) {
+            const bool inPatch = QRect(2, 4, 3, 2).contains(x, y);
+            const QRgb expected = inPatch ? patchColor : qRgb(0, 0, 0);
+            if (destination.pixel(x, y) != expected) {
+                *errorString = QStringLiteral(
+                            "MiniMap BMP patch changed pixel %1,%2 incorrectly")
+                        .arg(x).arg(y);
+                return false;
+            }
+        }
+    }
+    return true;
+}
 
 /////
 
@@ -411,7 +462,9 @@ void MiniMapRenderWorker::processChanges(const QList<MapChange *> &changes)
             break;
         }
         case MapChange::BmpPainted: {
-            sm.mMapComposite->map()->rbmp(c.mBmpIndex).rimage() = c.mBmps[c.mBmpIndex];
+            applyImagePatch(
+                        sm.mMapComposite->map()->rbmp(c.mBmpIndex).rimage(),
+                        c.mBmps[c.mBmpIndex], c.mBmpPatchOrigin);
             sm.mMapComposite->bmpBlender()->markDirty(c.mRegion);
             break;
         }
@@ -654,6 +707,8 @@ MiniMapItem::MiniMapItem(ZomboidScene *zscene, QGraphicsItem *parent)
 
     connect(mScene->mapDocument(), &MapDocument::tilesetAdded,
             this, &MiniMapItem::tilesetAdded);
+    connect(mScene->mapDocument(), &MapDocument::tilesetAboutToBeRemoved,
+            this, &MiniMapItem::tilesetAboutToBeRemoved);
     connect(mScene->mapDocument(), &MapDocument::tilesetRemoved,
             this, &MiniMapItem::tilesetRemoved);
     connect(TilesetManager::instance(), &TilesetManager::tilesetChanged,
@@ -909,11 +964,15 @@ void MiniMapItem::tilesetAdded(int index, Tileset *tileset)
     queueChange(c);
 }
 
-void MiniMapItem::tilesetRemoved(Tileset *tileset)
+void MiniMapItem::tilesetAboutToBeRemoved(Tileset *tileset)
 {
+    Q_UNUSED(tileset)
     mRenderThread->interrupt(true);
     mNeedsResume = true;
+}
 
+void MiniMapItem::tilesetRemoved(Tileset *tileset)
+{
     MapChange *c = new MapChange(MapChange::TilesetRemoved);
     c->mTilesetName = tileset->name();
     queueChange(c);
@@ -933,10 +992,17 @@ void MiniMapItem::tilesetChanged(Tileset *tileset)
 
 void MiniMapItem::bmpPainted(int bmpIndex, const QRegion &region)
 {
+    const QImage &image = mMapComposite->map()->rbmp(bmpIndex).rimage();
+    const QRegion clipped = region & image.rect();
+    if (clipped.isEmpty())
+        return;
+
+    const QRect patchBounds = clipped.boundingRect();
     MapChange *c = new MapChange(MapChange::BmpPainted);
     c->mBmpIndex = bmpIndex;
-    c->mBmps[bmpIndex] = mMapComposite->map()->rbmp(bmpIndex).rimage().copy(); // FIXME: send changed part only
-    c->mRegion = region;
+    c->mBmpPatchOrigin = patchBounds.topLeft();
+    c->mBmps[bmpIndex] = image.copy(patchBounds);
+    c->mRegion = clipped;
     queueChange(c);
 }
 

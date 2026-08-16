@@ -419,6 +419,8 @@
     <property name="title">
      <string>InGameMap</string>
     </property>
+    <addaction name="actionEditWorldMapAnnotations"/>
+    <addaction name="separator"/>
     <addaction name="actionRemoveInGameMapFeatures"/>
     <addaction name="actionRemoveInGameMapPoints"/>
     <addaction name="actionSplitInGameMapPolygon"/>
@@ -467,6 +469,8 @@
    <addaction name="actionOpen"/>
    <addaction name="actionSave"/>
    <addaction name="actionSaveAs"/>
+   <addaction name="separator"/>
+   <addaction name="actionEditWorldMapAnnotations"/>
    <addaction name="separator"/>
   </widget>
   <widget class="QStatusBar" name="statusBar"/>
@@ -1026,6 +1030,21 @@
    </property>
    <property name="toolTip">
     <string>Write water, road, building and other non-Forest features to worldmap.xml</string>
+   </property>
+  </action>
+  <action name="actionEditWorldMapAnnotations">
+   <property name="icon">
+    <iconset resource="editor.qrc">
+     <normaloff>:/images/24x24/worldmap-annotations.svg</normaloff>:/images/24x24/worldmap-annotations.svg</iconset>
+   </property>
+   <property name="text">
+    <string>World Map Annotations Editor...</string>
+   </property>
+   <property name="toolTip">
+    <string>Open the structured editor for worldmap-annotations.lua text symbols</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Alt+A</string>
    </property>
   </action>
   <action name="actionRemoveInGameMapFeatures">

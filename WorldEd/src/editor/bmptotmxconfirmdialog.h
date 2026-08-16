@@ -36,6 +36,7 @@ public:
     ~BMPToTMXConfirmDialog();
 
     void updateExisting();
+    void metadataOnly(int unchangedCount, int skippedCount);
 
 private:
     QTreeWidgetItem *itemForDirectory(const QString &path);

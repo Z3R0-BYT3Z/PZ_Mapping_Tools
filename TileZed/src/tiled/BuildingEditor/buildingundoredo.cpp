@@ -467,14 +467,58 @@ void ChangeUsedFurniture::swap()
 
 ResizeFloor::ResizeFloor(BuildingDocument *doc, BuildingFloor *floor,
                              const QSize &newSize) :
+    ResizeFloor(doc, floor, newSize, QPoint())
+{
+}
+
+ResizeFloor::ResizeFloor(BuildingDocument *doc, BuildingFloor *floor,
+                         const QSize &newSize, const QPoint &offset) :
     QUndoCommand(QCoreApplication::translate("Undo Commands", "Resize Floor")),
     mDocument(doc),
     mFloor(floor),
     mSize(newSize)
 {
-    mGrid = floor->resizeGrid(newSize);
-    mGrime = floor->resizeGrime(newSize + QSize(1, 1));
-    mSquarePropertiesGrid = floor->resizeSquarePropertiesGrid(newSize);
+    mGrid.resize(newSize.width());
+    for (int x = 0; x < newSize.width(); ++x)
+        mGrid[x].resize(newSize.height());
+    const QVector<QVector<Room *> > &sourceGrid = floor->grid();
+    for (int x = 0; x < sourceGrid.size(); ++x) {
+        for (int y = 0; y < sourceGrid.at(x).size(); ++y) {
+            const QPoint destination = QPoint(x, y) + offset;
+            if (QRect(QPoint(), newSize).contains(destination))
+                mGrid[destination.x()][destination.y()] = sourceGrid.at(x).at(y);
+        }
+    }
+
+    const QSize grimeSize = newSize + QSize(1, 1);
+    for (const QString &layerName : floor->grimeLayers()) {
+        FloorTileGrid *source = floor->grime().value(layerName);
+        FloorTileGrid *destination = new FloorTileGrid(grimeSize.width(),
+                                                       grimeSize.height());
+        for (int x = 0; x < source->width(); ++x) {
+            for (int y = 0; y < source->height(); ++y) {
+                const QPoint target = QPoint(x, y) + offset;
+                if (destination->bounds().contains(target))
+                    destination->replace(target.x(), target.y(),
+                                         source->at(x, y));
+            }
+        }
+        mGrime[layerName] = destination;
+    }
+
+    mSquarePropertiesGrid = new Tiled::PropertiesGrid(newSize.width(),
+                                                       newSize.height());
+    Tiled::PropertiesGrid *sourceProperties = floor->squarePropertiesGrid();
+    for (int x = 0; x < sourceProperties->width(); ++x) {
+        for (int y = 0; y < sourceProperties->height(); ++y) {
+            const QPoint destination = QPoint(x, y) + offset;
+            if (mSquarePropertiesGrid->bounds().contains(destination)) {
+                mSquarePropertiesGrid->replace(
+                            destination.x(), destination.y(),
+                            sourceProperties->at(x, y));
+            }
+        }
+    }
 }
 
 ResizeFloor::~ResizeFloor()

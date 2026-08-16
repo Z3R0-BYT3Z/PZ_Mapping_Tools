@@ -727,7 +727,7 @@ public:
     CreatePointObjectTool()
         : AbstractCreatePolygonObjectTool(ObjectGeometryType::Point)
     {
-        setIcon(QIcon(QStringLiteral(":/images/22x22/road-tool-edit.png")));
+        setIcon(QIcon(QStringLiteral(":/images/24x24/object-point-tool.svg")));
     }
 };
 
@@ -739,7 +739,7 @@ public:
     CreatePolygonObjectTool()
         : AbstractCreatePolygonObjectTool(ObjectGeometryType::Polygon)
     {
-        setIcon(QIcon(QStringLiteral(":/images/24x24/insert-polygon.png")));
+        setIcon(QIcon(QStringLiteral(":/images/24x24/object-polygon-tool.svg")));
     }
 };
 
@@ -751,7 +751,7 @@ public:
     CreatePolylineObjectTool()
         : AbstractCreatePolygonObjectTool(ObjectGeometryType::Polyline)
     {
-        setIcon(QIcon(QStringLiteral(":/images/24x24/insert-polyline.png")));
+        setIcon(QIcon(QStringLiteral(":/images/24x24/object-polyline-tool.svg")));
     }
 };
 

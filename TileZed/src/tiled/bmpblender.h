@@ -19,6 +19,7 @@
 #define BMPBLENDER_H
 
 #include <QCoreApplication>
+#include <QHash>
 #include <QMap>
 #include <QRegion>
 #include <QRgb>
@@ -139,6 +140,7 @@ public:
 
     void tilesetAdded(Tileset *ts);
     void tilesetRemoved(const QString &tilesetName);
+    bool referencesTileset(const QString &tilesetName) const;
 
     QStringList warnings() const
     {
@@ -148,6 +150,10 @@ public:
     }
 
     void setHack(bool hack) { mHack = hack; }
+    void setUseBlendCandidateIndex(bool enabled)
+    { mUseBlendCandidateIndex = enabled; }
+    void setUseSparseWorkRegions(bool enabled)
+    { mUseSparseWorkRegions = enabled; }
     QSet<Tile*> knownBlendTiles()
     { return mKnownBlendTiles; }
     void tilesToPixels(int x1, int y1, int x2, int y2);
@@ -171,8 +177,10 @@ private:
     void initTiles();
     void imagesToTileGrids(int x1, int y1, int x2, int y2);
     void addEdgeTiles(int x1, int y1, int x2, int y2);
-    void tileGridsToLayers(int x1, int y1, int x2, int y2);
+    bool tileGridsToLayers(int x1, int y1, int x2, int y2,
+                           bool notify = true);
     QString resolveAlias(const QString &tileName, int randForPos) const;
+    void tilesetCollectionChanged();
 
     Map *mMap;
     QMap<QString,SparseTileGrid*> mTileGrids;
@@ -182,6 +190,7 @@ private:
     QStringList mTilesetNames;
     QStringList mTileNames;
     QMap<QString,Tile*> mTileByName;
+    QHash<QString,Tileset*> mTilesetByName;
     bool mInitTilesLater;
 
     Tile *getNeighbouringTile(int x, int y);
@@ -223,19 +232,29 @@ private:
     class BlendWrapper
     {
     public:
-        BlendWrapper(BmpBlend *blend) :
-            mBlend(blend)
+        BlendWrapper(BmpBlend *blend, int order) :
+            mBlend(blend),
+            mOrder(order),
+            mCandidateMark(0)
         {}
         BmpBlend *mBlend;
+        int mOrder;
+        quint32 mCandidateMark;
         QVector<Tile*> mMainTiles;
         QVector<Tile*> mBlendTiles;
         QVector<Tile*> mExcludeTiles;
         QList<QVector<Tile*> > mExclude2Tiles;
+        QSet<Tile*> mMainTileSet;
+        QSet<Tile*> mBlendTileSet;
+        QSet<Tile*> mExcludeTileSet;
+        QList<QSet<Tile*> > mExclude2TileSets;
     };
 
     QList<BlendWrapper*> mBlendList;
     QStringList mBlendLayers;
     QMap<QString,QList<BlendWrapper*> > mBlendsByLayer;
+    QHash<QString,QHash<Tile*,QVector<BlendWrapper*> > > mBlendCandidatesByLayer;
+    quint32 mBlendCandidateSerial = 0;
     QSet<QString> mBlendExclude2Layers;
     int mInactiveRuleCount = 0;
     int mInactiveBlendCount = 0;
@@ -243,6 +262,8 @@ private:
     QSet<Tile*> mKnownBlendTiles;
     bool mHack;
     bool mBlendEdgesEverywhere;
+    bool mUseBlendCandidateIndex;
+    bool mUseSparseWorkRegions;
     typedef QHash<int,BlendWrapper*> BlendGrid;
     QMap<QString,BlendGrid> mBlendGrids; // blend at each x,y
 

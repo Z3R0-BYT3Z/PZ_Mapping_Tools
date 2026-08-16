@@ -64,6 +64,7 @@
 #include <QFileInfo>
 #include <QGraphicsItem>
 #include <QGraphicsSceneEvent>
+#include <QIcon>
 #include <QKeyEvent>
 #include <QLineF>
 #include <QMatrix4x4>
@@ -1378,10 +1379,12 @@ void LayerGroupVBO::gatherTiles(Tiled::MapRenderer *renderer, const QRectF& expo
                     const Tile *tile =
                             mMapCompositeVBO->mScene->environmentPreviewTile(
                                 sourceTile, square);
-                    if (tile->properties().contains(QStringLiteral("invisible"))) {
+                    if (tile->properties().contains(QStringLiteral("invisible"))
+                            || (tile->image().isNull()
+                                && tile->hasResolvedSource())) {
                         tile = invisibleTile;
                     }
-                    if (tile->image().isNull()) {
+                    if (tile->image().isNull() && !tile->hasResolvedSource()) {
                         tile = missingTile;
                     }
                     Tileset *tileset = tile->tileset();
@@ -4518,7 +4521,8 @@ QRect BasementItem::stairBoundsRelativeToThis() const
 
 RoomToneItem::RoomToneItem(WorldCellObject *object, CellScene *scene, QGraphicsItem *parent) :
     ObjectItem(object, scene, parent),
-    mImage(QImage(QStringLiteral(":/images/SpeakerIcon.png")))
+    mImage(QIcon(QStringLiteral(":/images/speaker-tool.svg"))
+           .pixmap(32, 32).toImage())
 {
 //    setFlag(ItemIgnoresTransformations);
 }
@@ -5647,6 +5651,7 @@ static int calculateLayerInsertIndex(MapLevel *mapLevel, TileLayer *layer, const
 void CellScene::loadMap()
 {
     mPendingDefer = true;
+    loadPartialChunks();
 
     if (mMap) {
         restoreEnvironmentPreviewTiles();
@@ -6677,9 +6682,7 @@ void CellScene::rebuildEnvironmentPreview()
     }
     QList<Tiled::Tileset*> required = requiredTilesets.values();
     for (Tiled::Tileset *tileset : qAsConst(required)) {
-        if (tileset && (tileset->tileCount() == 0 ||
-                        (tileset->tileAt(0) &&
-                         tileset->tileAt(0)->image().isNull()))) {
+        if (tileset && (!tileset->isLoaded() || tileset->isMissing())) {
             tilesetManager->loadTileset(tileset, tileset->imageSource());
         }
     }
@@ -6934,6 +6937,10 @@ void CellScene::synchLayerGroupsLater()
 void CellScene::checkHolesOnLevelZero()
 {
     mHoleInFloor.clear();
+    if (partialChunksEnabled()) {
+        update();
+        return;
+    }
     if (mMapComposite == nullptr) {
         return;
     }
@@ -7822,6 +7829,19 @@ bool CellScene::mapChanged(MapInfo *mapInfo)
 
 void CellScene::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
+    if (partialChunksEnabled() && event->button() == Qt::LeftButton) {
+        const QPoint chunk = partialChunkAt(event->scenePos(), false);
+        if (chunk.x() >= 0 && chunk.y() >= 0) {
+            mPartialChunkLassoActive = true;
+            mPartialChunkLassoStart = chunk;
+            mPartialChunkLassoCurrent = chunk;
+            mPartialChunkLassoSelect = !mPartialChunks.isSelected(
+                        chunk.x(), chunk.y());
+            update();
+            event->accept();
+            return;
+        }
+    }
     QGraphicsScene::mousePressEvent(event);
     if (event->isAccepted())
         return;
@@ -7832,6 +7852,12 @@ void CellScene::mousePressEvent(QGraphicsSceneMouseEvent *event)
 
 void CellScene::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 {
+    if (mPartialChunkLassoActive) {
+        mPartialChunkLassoCurrent = partialChunkAt(event->scenePos(), true);
+        update();
+        event->accept();
+        return;
+    }
     QGraphicsScene::mouseMoveEvent(event);
     if (event->isAccepted()) {
         // If an item receives Hover events, this event will get swallowed.
@@ -7851,12 +7877,128 @@ void CellScene::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 
 void CellScene::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
 {
+    if (mPartialChunkLassoActive && event->button() == Qt::LeftButton) {
+        mPartialChunkLassoCurrent = partialChunkAt(event->scenePos(), true);
+        const QRect chunks = partialChunkLassoRect();
+        for (int y = chunks.top(); y <= chunks.bottom(); ++y) {
+            for (int x = chunks.left(); x <= chunks.right(); ++x)
+                mPartialChunks.setSelected(x, y, mPartialChunkLassoSelect);
+        }
+        mPartialChunkLassoActive = false;
+        savePartialChunks();
+        update();
+        emit partialChunkSelectionChanged();
+        event->accept();
+        return;
+    }
     QGraphicsScene::mouseReleaseEvent(event);
     if (event->isAccepted())
         return;
 
     if (mActiveTool)
         mActiveTool->mouseReleaseEvent(event);
+}
+
+bool CellScene::supportsPartialChunks() const
+{
+    return mDocument && world()
+            && world()->gridFormat() == WorldGridFormat::Native256
+            && cell() && !cell()->mapFilePath().isEmpty();
+}
+
+bool CellScene::partialChunksEnabled() const
+{
+    return supportsPartialChunks() && mPartialChunks.enabled();
+}
+
+int CellScene::selectedPartialChunkCount() const
+{
+    return mPartialChunks.selectedCount();
+}
+
+const PZTools::PartialChunkSelection &CellScene::partialChunks() const
+{
+    return mPartialChunks;
+}
+
+bool CellScene::partialChunkPreviewSelected(int x, int y) const
+{
+    if (mPartialChunkLassoActive && partialChunkLassoRect().contains(x, y))
+        return mPartialChunkLassoSelect;
+    return mPartialChunks.isSelected(x, y);
+}
+
+void CellScene::setPartialChunksEnabled(bool enabled)
+{
+    if (!supportsPartialChunks())
+        return;
+    mPartialChunkLassoActive = false;
+    mPartialChunks.setEnabled(enabled);
+    mHoleInFloor.clear();
+    savePartialChunks();
+    update();
+    emit partialChunkSelectionChanged();
+}
+
+void CellScene::selectAllPartialChunks()
+{
+    if (!partialChunksEnabled())
+        return;
+    mPartialChunkLassoActive = false;
+    mPartialChunks.selectAll();
+    savePartialChunks();
+    update();
+    emit partialChunkSelectionChanged();
+}
+
+void CellScene::clearPartialChunks()
+{
+    if (!partialChunksEnabled())
+        return;
+    mPartialChunkLassoActive = false;
+    mPartialChunks.clear();
+    savePartialChunks();
+    update();
+    emit partialChunkSelectionChanged();
+}
+
+QPoint CellScene::partialChunkAt(const QPointF &scenePos, bool clamp) const
+{
+    if (!mRenderer || !document())
+        return QPoint(-1, -1);
+    QPoint tile = mRenderer->pixelToTileCoordsInt(
+                scenePos, document()->currentLevel());
+    if (!clamp && (tile.x() < 0 || tile.y() < 0
+                   || tile.x() >= 256 || tile.y() >= 256))
+        return QPoint(-1, -1);
+    tile.setX(qBound(0, tile.x(), 255));
+    tile.setY(qBound(0, tile.y(), 255));
+    return QPoint(tile.x() / PZTools::PartialChunkSelection::ChunkSize,
+                  tile.y() / PZTools::PartialChunkSelection::ChunkSize);
+}
+
+QRect CellScene::partialChunkLassoRect() const
+{
+    return QRect(mPartialChunkLassoStart,
+                 mPartialChunkLassoCurrent).normalized();
+}
+
+void CellScene::loadPartialChunks()
+{
+    QString error;
+    const QString path = mDocument && cell()
+            ? cell()->mapFilePath() : QString();
+    if (!mPartialChunks.load(path, &error) && !error.isEmpty())
+        emit partialChunkSaveFailed(error);
+}
+
+void CellScene::savePartialChunks()
+{
+    if (!mDocument || !cell() || cell()->mapFilePath().isEmpty())
+        return;
+    QString error;
+    if (!mPartialChunks.save(cell()->mapFilePath(), &error))
+        emit partialChunkSaveFailed(error);
 }
 
 void CellScene::dragEnterEvent(QGraphicsSceneDragDropEvent *event)

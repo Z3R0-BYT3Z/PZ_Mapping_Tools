@@ -749,6 +749,22 @@ bool LotFilesManager256::generateCell(LotFilesWorker256 *worker, WorldCell *cell
     worker->mCombinedCellMaps = combinedMaps;
     worker->mCell = cell;
     worker->mHoleInFloor.clear();
+    QString partialError;
+    if (!worker->mPartialChunks.load(cell->mapFilePath(), &partialError)) {
+        mError = tr("Could not read the partial chunk selection for cell %1,%2:\n%3")
+                .arg(cell->x()).arg(cell->y()).arg(partialError);
+        delete combinedMaps;
+        worker->mCombinedCellMaps = nullptr;
+        return false;
+    }
+    if (worker->mPartialChunks.enabled()
+            && mWorldDoc->world()->gridFormat()
+                != WorldGridFormat::Native256) {
+        mError = tr("Partial Chunks is supported only by Native 256 projects.");
+        delete combinedMaps;
+        worker->mCombinedCellMaps = nullptr;
+        return false;
+    }
     worker->setStatus(LotFilesWorker256::Status::LoadingMaps);
     return true;
 }
@@ -1092,6 +1108,14 @@ bool LotFilesWorker256::generateCell()
     int cell256X = combinedMaps.mCell256X;
     int cell256Y = combinedMaps.mCell256Y;
 
+    if (mPartialChunks.enabled()) {
+        qInfo() << "Partial Chunks export" << cell256X << cell256Y
+                << "selected" << mPartialChunks.selectedCount()
+                << "omitted"
+                << CHUNKS_PER_CELL_256 * CHUNKS_PER_CELL_256
+                   - mPartialChunks.selectedCount();
+    }
+
     MapComposite* mapComposite = combinedMaps.mMapComposite;
     MapInfo* mapInfo = mapComposite->mapInfo();
 
@@ -1174,7 +1198,10 @@ bool LotFilesWorker256::generateCell()
                     if (ly >= mapHeight) continue;
                     LotFile::Entry *e = new LotFile::Entry(cellToGid(cell));
                     mGridData[lx][ly][lg->level() - MIN_WORLD_LEVEL].Entries.append(e);
-                    if (cellBounds256.contains(lx, ly)) {
+                    if (cellBounds256.contains(lx, ly)
+                            && partialSquareSelected(
+                                lx - cellBounds256.left(),
+                                ly - cellBounds256.top())) {
                         TileMap[e->gid]->used = true;
                         mMinLevel = std::min(mMinLevel, lg->level());
                         mMaxLevel = std::max(mMaxLevel, lg->level());
@@ -1184,8 +1211,10 @@ bool LotFilesWorker256::generateCell()
         }
     }
 
-    checkHolesOnLevelZero();
-    fillHolesInGeneratedLot();
+    if (!mPartialChunks.enabled()) {
+        checkHolesOnLevelZero();
+        fillHolesInGeneratedLot();
+    }
 
     if (mMinLevel == 10000) {
         mMinLevel = mMaxLevel = 0;
@@ -1230,8 +1259,23 @@ bool LotFilesWorker256::generateCell()
 
     QList<qint64> PositionMap;
 
+    qint64 absentPosition = -1;
+    if (mPartialChunks.enabled()
+            && mPartialChunks.selectedCount()
+                < CHUNKS_PER_CELL_256 * CHUNKS_PER_CELL_256) {
+        absentPosition = file.pos();
+        out << qint32(-1);
+        out << qint32(CHUNK_SIZE_256 * CHUNK_SIZE_256
+                      * (mMaxLevel - mMinLevel + 1));
+    }
+
     for (int x = 0; x < CHUNKS_PER_CELL_256; x++) {
         for (int y = 0; y < CHUNKS_PER_CELL_256; y++) {
+            if (mPartialChunks.enabled()
+                    && !mPartialChunks.isSelected(x, y)) {
+                PositionMap += absentPosition;
+                continue;
+            }
             PositionMap += file.pos();
             const int chunkX = cell256X * CELL_SIZE_256
                     - combinedMaps.mMinSourceCellX * combinedMaps.mSourceCellSize
@@ -1261,6 +1305,18 @@ bool LotFilesWorker256::generateCell()
     mCombinedCellMaps->moveToThread(mCombinedCellMaps->mMapComposite, qApp->thread());
     setStatus(Status::Finished);
     return true;
+}
+
+bool LotFilesWorker256::partialSquareSelected(int localX, int localY) const
+{
+    if (!mPartialChunks.enabled())
+        return true;
+    if (localX < 0 || localY < 0
+            || localX >= CELL_SIZE_256 || localY >= CELL_SIZE_256)
+        return false;
+    return mPartialChunks.isSelected(
+                localX / CHUNK_SIZE_256,
+                localY / CHUNK_SIZE_256);
 }
 
 void LotFilesWorker256::checkHolesOnLevelZero() {
@@ -1806,6 +1862,11 @@ bool LotFilesWorker256::generateHeaderAux(int cell256X, int cell256Y)
         const int imageCellY = cell256Y - lotSettings.worldOrigin.y();
         for (int x = 0; x < CHUNKS_PER_CELL_256; ++x) {
             for (int y = 0; y < CHUNKS_PER_CELL_256; ++y) {
+                if (mPartialChunks.enabled()
+                        && !mPartialChunks.isSelected(x, y)) {
+                    out << quint8(0);
+                    continue;
+                }
                 const int px = imageCellX * CHUNKS_PER_CELL_256 + x;
                 const int py = imageCellY * CHUNKS_PER_CELL_256 + y;
                 const quint8 intensity =
@@ -1929,6 +1990,8 @@ void LotFilesWorker256::generateBuildingObjects(int mapWidth, int mapHeight, Lot
             if (x < 0 || y < 0 || x >= mapWidth || y >= mapHeight) {
                 continue;
             }
+            if (!partialSquareSelected(x, y))
+                continue;
             LotFile::Square& square = mGridData[x][y][room->floor - MIN_WORLD_LEVEL];
 
             // Remember the room at each position in the map.
@@ -1958,6 +2021,8 @@ void LotFilesWorker256::generateBuildingObjects(int mapWidth, int mapHeight, Lot
             if (x < 0 || x >= mapWidth) {
                 continue;
             }
+            if (!partialSquareSelected(x, y))
+                continue;
             LotFile::Square& square = mGridData[x][y][room->floor - MIN_WORLD_LEVEL];
             for (LotFile::Entry *entry : qAsConst(square.Entries)) {
                 int metaEnum = TileMap[entry->gid]->metaEnum;
@@ -1980,6 +2045,8 @@ void LotFilesWorker256::generateBuildingObjects(int mapWidth, int mapHeight, Lot
             if (y < 0 || y >= mapHeight) {
                 continue;
             }
+            if (!partialSquareSelected(x, y))
+                continue;
             LotFile::Square& square = mGridData[x][y][room->floor - MIN_WORLD_LEVEL];
             for (LotFile::Entry *entry : qAsConst(square.Entries)) {
                 int metaEnum = TileMap[entry->gid]->metaEnum;
@@ -2237,7 +2304,10 @@ void LotFilesWorker256::generateChunkData()
     }
     const GenerateLotsSettings &lotSettings = mWorldDoc->world()->getGenerateLotsSettings();
     Navigate::ChunkDataFile256 cdf;
-    cdf.fromMap(*mCombinedCellMaps, mCombinedCellMaps->mMapComposite, mRoomRectLookup, lotSettings);
+    const QBitArray *selectedChunks = mPartialChunks.enabled()
+            ? &mPartialChunks.selectedChunks() : nullptr;
+    cdf.fromMap(*mCombinedCellMaps, mCombinedCellMaps->mMapComposite,
+                mRoomRectLookup, lotSettings, selectedChunks);
 }
 
 void LotFilesWorker256::clearRemovedBuildingsList()
@@ -2395,9 +2465,36 @@ bool LotFilesWorker256::processObjectGroup(CombinedCellMaps &combinedMaps, Objec
             // Apply the MapComposite offset in the top-level map.
             x += offset1.x();
             y += offset1.y();
-            LotFile::RoomRect *rr = new LotFile::RoomRect(name, x, y, level, w, h);
-            mRoomRects += rr;
-            mRoomRectByLevel[level] += rr;
+            if (!mPartialChunks.enabled()) {
+                LotFile::RoomRect *rr = new LotFile::RoomRect(
+                            name, x, y, level, w, h);
+                mRoomRects += rr;
+                mRoomRectByLevel[level] += rr;
+                continue;
+            }
+            const QRect roomBounds(x, y, w, h);
+            const QString partialName = name.contains(QLatin1Char('#'))
+                    ? name : name + QStringLiteral("#partial");
+            for (int chunkY = 0;
+                 chunkY < CHUNKS_PER_CELL_256; ++chunkY) {
+                for (int chunkX = 0;
+                     chunkX < CHUNKS_PER_CELL_256; ++chunkX) {
+                    if (!mPartialChunks.isSelected(chunkX, chunkY))
+                        continue;
+                    const QRect chunkBounds(
+                                chunkX * CHUNK_SIZE_256,
+                                chunkY * CHUNK_SIZE_256,
+                                CHUNK_SIZE_256, CHUNK_SIZE_256);
+                    const QRect piece = roomBounds.intersected(chunkBounds);
+                    if (piece.isEmpty())
+                        continue;
+                    LotFile::RoomRect *rr = new LotFile::RoomRect(
+                                partialName, piece.x(), piece.y(), level,
+                                piece.width(), piece.height());
+                    mRoomRects += rr;
+                    mRoomRectByLevel[level] += rr;
+                }
+            }
         }
     }
     return true;

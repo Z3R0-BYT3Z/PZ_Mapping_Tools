@@ -109,8 +109,11 @@ void TileDelegate::paint(QPainter *painter,
 #endif
         return;
     }
-    if (m->showEmptyTilesAsMissing() && tile->image().isNull())
-        tile = TilesetManager::instance()->missingTile();
+    if (m->showTransparentTiles() && tile->image().isNull()) {
+        tile = tile->hasResolvedSource()
+                ? TilesetManager::instance()->invisibleTile()
+                : TilesetManager::instance()->missingTile();
+    }
 
     const int extra = 2;
 
@@ -145,7 +148,7 @@ void TileDelegate::paint(QPainter *painter,
             painter->drawLine(left, top, right, top);
         if (index.row() == r.bottom())
             painter->drawLine(left, bottom, right, bottom);
-        painter->setPen(Qt::black);
+        painter->setPen(option.palette.color(QPalette::Text));
     }
 
     // Draw the tile image
@@ -474,7 +477,17 @@ void MixedTilesetView::scaleChanged(qreal scale)
 
 void MixedTilesetView::tilesetBackgroundColorChanged(const QColor &color)
 {
-    setStyleSheet(QStringLiteral("QTableView { alternate-background-color: %1; background-color: %1; }").arg(color.name()));
+    QColor effectiveColor = color;
+    Preferences *preferences = Preferences::instance();
+    if (preferences->tilesetBackgroundColorIsDefault())
+        effectiveColor = QApplication::palette().color(QPalette::Base);
+    setStyleSheet(QStringLiteral("QTableView { alternate-background-color: %1; background-color: %1; color: palette(text); }").arg(effectiveColor.name()));
+}
+
+void MixedTilesetView::themeChanged()
+{
+    tilesetBackgroundColorChanged(
+                Preferences::instance()->tilesetBackgroundColor());
 }
 
 void MixedTilesetView::init()
@@ -519,6 +532,8 @@ void MixedTilesetView::init()
 
     tilesetBackgroundColorChanged(Preferences::instance()->tilesetBackgroundColor());
     connect(Preferences::instance(), &Preferences::tilesetBackgroundColorChanged, this, &MixedTilesetView::tilesetBackgroundColorChanged);
+    connect(Preferences::instance(), &Preferences::themeChanged,
+            this, &MixedTilesetView::themeChanged);
 }
 
 /////
@@ -531,7 +546,7 @@ MixedTilesetModel::MixedTilesetModel(QObject *parent) :
     mShowHeaders(true),
     mShowLabels(false),
     mHighlightLabelledItems(false),
-    mShowEmptyTilesAsMissing(false),
+    mShowTransparentTiles(false),
     mColumnCount(COLUMN_COUNT)
 {
 }
@@ -1072,9 +1087,9 @@ void MixedTilesetModel::setLabel(Tile *tile, const QString &label)
     }
 }
 
-void MixedTilesetModel::setShowEmptyTilesAsMissig(bool show)
+void MixedTilesetModel::setShowTransparentTiles(bool show)
 {
-    mShowEmptyTilesAsMissing = show;
+    mShowTransparentTiles = show;
 }
 
 void MixedTilesetModel::setToolTip(int tileIndex, const QString &text)

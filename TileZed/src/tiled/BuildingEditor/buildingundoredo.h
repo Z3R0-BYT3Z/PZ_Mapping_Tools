@@ -429,6 +429,8 @@ class ResizeFloor : public QUndoCommand
 {
 public:
     ResizeFloor(BuildingDocument *doc, BuildingFloor *floor, const QSize &newSize);
+    ResizeFloor(BuildingDocument *doc, BuildingFloor *floor,
+                const QSize &newSize, const QPoint &offset);
 
     ~ResizeFloor();
 

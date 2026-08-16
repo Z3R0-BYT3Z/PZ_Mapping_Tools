@@ -21,9 +21,13 @@
 #include "buildingtools.h"
 
 #include <QBrush>
+#include <QColor>
 #include <QGraphicsPolygonItem>
+#include <QList>
+#include <QPair>
 #include <QPen>
 #include <QRectF>
+#include <QRegion>
 
 class QAction;
 class QGraphicsSceneMouseEvent;
@@ -53,11 +57,14 @@ public:
 
     void setTileRegion(const QRegion &tileRgn);
 
+    void setRoomRegions(const QList<QPair<QRegion, QColor> > &regions);
+
     void setEditor(BuildingBaseScene *editor);
 
 private:
     BuildingBaseScene *mEditor;
     QRegion mRegion;
+    QList<QPair<QRegion, QColor> > mRoomRegions;
     QRectF mBoundingRect;
     QColor mColor;
 };
@@ -82,6 +89,7 @@ public:
     { return mTileName; }
 
     void setCaptureTiles(FloorTileGrid *tiles, const QRegion &rgn);
+    void setClipboardPlacement();
 
 public slots:
     void activate();
@@ -91,6 +99,8 @@ private:
     void beginCapture();
     void endCapture();
     void clearCaptureTiles();
+    void clearClipboardPreview();
+    bool rebuildClipboardPreview();
 
     void updateCursor(const QPointF &scenePos, bool force = true);
     void updateStatusText();
@@ -98,7 +108,7 @@ private:
 private:
     Q_DISABLE_COPY(DrawTileTool)
     static DrawTileTool *mInstance;
-    ~DrawTileTool() { mInstance = nullptr; }
+    ~DrawTileTool();
 
     bool mMouseDown;
     bool mMouseMoved;
@@ -110,8 +120,13 @@ private:
     QRect mCursorTileBounds;
     DrawTileToolCursor *mCursor;
     bool mCapturing;
+    bool mClipboardPlacement;
     FloorTileGrid *mCaptureTiles;
     QRegion mCaptureTilesRgn;
+    FloorTileGrid *mClipboardPreviewTiles;
+    QRegion mClipboardPreviewRegion;
+    QList<QPair<QRegion, QColor> > mClipboardPreviewRoomRegions;
+    int mClipboardPreviewLevel;
 
     QString mTileName;
 };

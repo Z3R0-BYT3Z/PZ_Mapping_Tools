@@ -49,7 +49,9 @@ class WorldDocument;
 class Zoomable;
 
 class QComboBox;
+class QAction;
 class QMenu;
+class QToolBar;
 class QToolButton;
 
 namespace Lua {
@@ -73,6 +75,9 @@ public:
 
     void openLastFiles();
     void startSettingsAutoSave();
+    void checkpointDocumentAutoSave();
+    void beginDocumentTransaction();
+    void endDocumentTransaction();
 
     bool InitConfigFiles();
 
@@ -165,6 +170,9 @@ public slots:
     void clearMapOnly();
     void removeEmptyBorderCells();
     void checkForHoles();
+    void setPartialChunksEnabled(bool enabled);
+    void selectAllPartialChunks();
+    void clearPartialChunks();
 
     void generateInGameMapBuildingFeatures();
     void generateInGameMapTreeFeatures();
@@ -172,6 +180,7 @@ public slots:
     void generateInGameMapRoadFeatures();
     void writeInGameMapForest();
     void writeInGameMapWorldMap();
+    void editWorldMapAnnotations();
     void removeInGameMapFeatures();
     void splitInGameMapPolygon();
     void convertInGameMapPolylineToPolygon();
@@ -235,6 +244,7 @@ private:
     bool canConvertToInGameMapPolygon();
     void writeInGameMapFeaturesXML();
     void overwriteInGameMapFeaturesXML();
+    void loadWorldMapOverlay(bool forest);
 
     struct ViewHint
     {
@@ -255,6 +265,11 @@ private:
 
 private:
     Ui::MainWindow *ui;
+    QAction *mLoadWorldMapOverlayAction = nullptr;
+    QAction *mLoadWorldMapForestOverlayAction = nullptr;
+    QAction *mShowWorldMapOverlayAction = nullptr;
+    QAction *mShowWorldMapForestOverlayAction = nullptr;
+    QAction *mClearWorldMapOverlaysAction = nullptr;
     UndoDock *mUndoDock;
     LayersDock *mLayersDock;
     LotsDock *mLotsDock;
@@ -282,6 +297,12 @@ private:
     QToolButton *mPoweredPreviewButton = nullptr;
     QToolButton *mSnowPreviewButton = nullptr;
     QToolButton *mJumboPreviewButton = nullptr;
+    QMenu *mPartialChunksMenu = nullptr;
+    QToolBar *mPartialChunksToolBar = nullptr;
+    QAction *mPartialChunksAction = nullptr;
+    QAction *mSelectAllPartialChunksAction = nullptr;
+    QAction *mClearPartialChunksAction = nullptr;
+    int mDocumentTransactionDepth = 0;
 
     static MainWindow *mInstance;
 };

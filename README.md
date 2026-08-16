@@ -10,12 +10,20 @@ and negative-level support and adds current Build 42 mapping workflows,
 portable configuration, native 256-cell support, image editing, mapping
 automation, compatibility corrections, and safer project maintenance.
 
+Tim Baker created the original WorldEd and TileZed foundation. The current
+unofficial Qt 5 continuation, maintenance, new features, and fixes are developed
+by **Alree / Unjammer**, except where a change has another explicitly recorded
+provenance.
+
 This is a community project. It is not an official The Indie Stone release.
 Project Zomboid game assets are not included.
 
 - [Current release changes](RELEASE_CHANGELOG.md)
 - [Documentation](DOCUMENTATION.md)
+- [Troubleshooting FAQ](docs/FAQ.md)
 - [Feature reference](docs/Feature-Reference.md)
+- [Feature provenance](FEATURE_PROVENANCE.md)
+- [Upstream history](UPSTREAM-HISTORY.md)
 - [Build instructions](BUILDING.md)
 
 ![WorldEd displaying a generated terrain cell](docs/images/worlded-overview.png)
@@ -31,7 +39,9 @@ terrain imports, and LOT generation.
 Important additions include:
 
 - Native256 projects with one source cell mapped to one output cell
-- BMP-to-TMX validation and optional repair
+- Partial Chunks mode for selecting the 8 x 8-square chunks included in a
+  Native256 LOT export
+- BMP-to-TMX validation, optional repair, and Rules/Blends metadata-only synchronization
 - Hole Detection based on actual tile presence
 - Optional hole filling during LOT generation
 - Project Doctor for paths, missing tilesets, and project cleanup
@@ -40,7 +50,15 @@ Important additions include:
 - OpenStreetMap project generation with terrain, vegetation, buildings,
   streets, roads, markings, and typed zones
 - Regions and Street Names editors
-- InGameMap Forest export with the Forest pyramid
+- InGameMap Forest export with the Forest pyramid and strict Build 42.20
+  binary-header validation before existing files are replaced
+- InGameMap building outlines from both placed TBX lots and RoomDefs embedded
+  directly in cell TMX maps
+- Non-destructive `worldmap.xml` and `worldmap-forest.xml` overlays in the
+  World view
+- Structured editing of Build 42.20 `worldmap-annotations.lua` text symbols
+  from the first entry in **InGameMap**, the annotation button on the main
+  toolbar, or **Ctrl+Alt+A**
 - Basement entrance placement preview and visual access picker
 - Vertical building-lot placement with selected underground outlines and a
   confirmed ground-opening action for basement stairs
@@ -55,12 +73,26 @@ Important additions include:
 - Complete recursive tileset discovery with 2x, 1x, and custom sources
 - Dockable BMP and Brush windows with saved placement
 - Rules and Blends replacement for older embedded TMX snapshots
+- Indexed Rules and Blends brush updates with sparse dirty-region processing
+- Exact rule-tile resolution when similarly named custom or test sheets exist
+- Safe, undoable tileset removal with MiniMap synchronization and automatic
+  Rules and Blends layer rebuilding
 - Layer-aware and floor-aware tile selection
+- Copy and cut immediately switch tile selections to a translucent,
+  pointer-following preview. One click places every selected layer and level.
+- Stamp and Fill previews retain their tilesets until the preview is replaced
+  or cleared, including when Undo removes a newly introduced tileset from the
+  TMX.
+- Partial Chunks mode shared with WorldEd for Native256 TMX maps
 - Depth Map primitive editing with pixel dimensions and reusable presets
 - TileDef comparison and Snow, Burnt, and custom replacement editing
 - Fast pack extraction for individual tiles, tilesets, and multi-tile objects
 - Optional orphan-pixel cleanup during extraction
 - Lua mapping tools with transactional Undo
+- BuildingEd actions and TBX opening launch the standalone `BuildingEd`
+  process. TileZed does not host a second embedded editor.
+- Narrow Tilesets docks retain every command through the toolbar overflow
+  menu.
 
 ### BuildingEd
 
@@ -74,6 +106,20 @@ Important additions include:
 
 - Complete tileset discovery shared with TileZed and WorldEd
 - Layer-aware and floor-aware tile selection
+- Copy and cut preserve RoomDefs and room layouts together with selected tile
+  layers. Paste without a destination selection provides a translucent,
+  click-to-place preview in the Ortho and isometric views.
+- Copied RoomDefs are recreated as building-owned rooms during placement, so
+  replacing the clipboard cannot invalidate pasted room floors.
+- The placement preview uses a validated, immutable snapshot of copied tiles
+  and rooms instead of traversing live clipboard grids on every mouse move.
+- Pasting beyond an edge expands the building while preserving and shifting
+  existing rooms, user tiles, square properties, objects, and basement access.
+  One Undo restores the complete pre-paste state.
+- Copy checkpoints the recoverable autosave when the document already contains
+  unsaved changes. Timed autosave remains paused while a cut or paste
+  transaction is incomplete and resumes only after the coherent final state is
+  available.
 - Preserved room-floor definitions across save and reopen
 - Procedural-loot inspection and project overrides
 - Lua building automation with transactional Undo
@@ -106,13 +152,73 @@ Access...** to browse the available access names with a visual preview.
 Each application provides an autosave interval in Preferences. WorldEd and
 TileZed save only an existing modified PZW or TMX. BuildingEd retains its
 recoverable `.autosave` copy workflow. Untitled projects are never assigned a
-path automatically.
+path automatically. Copy checkpoints autosave when unsaved edits exist.
+Autosave pauses during complete cut, paste, paint, and resize transactions and
+resumes only after the document is coherent.
+
+## Partial chunk LOT export
+
+Native256 maps can use **Partial Chunks** when a cell should contain only a
+small building, zone, or playable area. Open the cell TMX in TileZed or open
+the WorldEd cell view, then use the dedicated **Partial Chunks** menu or
+toolbar. The 256 x 256 cell remains the normal editing canvas while a 32 x 32
+chunk grid shows the export mask.
+
+Each grid square represents one complete 8 x 8-square game chunk. Click a
+chunk to toggle it. Drag across the grid to select or clear a rectangular
+group. The state of the starting chunk determines whether the dragged group
+is included or omitted, and the overlay previews the result until release.
+Included chunks use a light tint and omitted chunks are darkened. **Ctrl+A**
+or **Select All Chunks** includes all 1024 chunks while the mode is active.
+**Clear Chunk Selection** omits all of them. These actions select export
+coverage, not the tiles inside the TMX, and do not delete or rewrite source
+layers. The grid line and included-chunk tint use the existing **Grid color**
+from Preferences, so WorldEd and TileZed can each display the mask in a
+user-selected color.
+
+**How Partial Chunks Works...** in either Partial Chunks menu shows the same
+workflow and export rules inside the application. Disable the mode while
+performing normal tile or object editing, then re-enable it before partial LOT
+generation. The saved chunk choices are retained while the mode is disabled.
+
+The selection is stored beside the TMX as `map-name.tmx.pzchunks`. Keep this file
+with the TMX when moving or sharing the source project. A map without an
+enabled sidecar retains conventional whole-cell behavior.
+
+While Partial Chunks is enabled, Hole Detection and automatic hole filling
+are disabled for that cell. Generate Lots writes selected chunks normally and
+encodes omitted chunks as absent LOT data and null navigation chunks. RoomDefs,
+room objects, used-tile headers, and zombie intensity are limited to the
+selected chunks. A selected chunk may be empty by design. An omitted chunk is
+absent from the exported LOT even if its TMX area contains tiles. This mode is
+available only for Native256 projects.
 
 In **Preferences > Window Setup**, **Use 1920 x 1080** immediately resizes and
 centers only the current application. **Apply to Current Application** does the
 same with the entered custom dimensions. **Apply to All Three Applications**
 also starts the other two tools with that size. These actions are temporary and
 the previous saved layouts return on the next normal start.
+
+## World-map XML overlays
+
+Open **View > World Map Overlays** to load `worldmap.xml` or
+`worldmap-forest.xml` over the World view without importing their features
+into the PZW. Loading `worldmap.xml` also loads an adjacent
+`worldmap-forest.xml` when present. The two overlays can then be shown,
+hidden, or cleared independently. Forest geometry is green. Buildings, water,
+roads, railways, and other world-map geometry use distinct colors. Loaded
+overlays are read-only and never change project data or exported files. The
+overlay renderer spatially batches geometry and skips batches outside the
+visible World view.
+
+**InGameMap > Generate Building Features** detects placed TBX lots and
+RoomDefs embedded directly in assigned cell TMX maps. Room rectangles are
+merged into building outlines. Disconnected footprints remain separate and
+negative basement levels are excluded from the surface outline.
+
+**InGameMap > Create World Image** uses the packaged `MapToPNG.txt` color
+rules. This file is different from terrain `Rules.txt`. The dialog selects the
+packaged file by default and replaces an invalid remembered rules path.
 
 ## Tileset compatibility
 
@@ -127,6 +233,13 @@ All three applications discover valid PNG sheets recursively.
 TMX files retain their complete ordered tileset headers. This is required for
 older maps, adjacent cells with different `firstgid` values, and embedded BMP
 rules that reference tiles not currently painted on a normal tile layer.
+
+A fully transparent cell in a resolved sheet is valid and remains distinct
+from a missing PNG. With **Show Invisible Tiles** enabled, transparent and
+explicitly invisible tiles use a crossed-eye marker. Unresolved sources use a
+separate red missing-source marker. Tile makers should assign the `invisible`
+TileDef property to intentional transparent placeholders so Check Maps can
+distinguish them from accidental empty artwork.
 
 ## Portable configuration
 
@@ -150,6 +263,16 @@ Preferences and logs are stored under `settings`. Logs include OS, CPU, RAM,
 display-adapter, Qt, and process information useful for support without
 recording a username, hostname, serial number, IP address, or stable machine
 identifier.
+
+Packaged themes are refreshed automatically when the release provides a newer
+QSS definition. Built-in dark and colored themes also apply matching Qt
+palette colors to application-drawn text, menus, selections, and tooltips.
+BuildingEd welcome content, tileset lists, editable zoom controls, and tile
+preview canvases follow the active dark palette unless the user selected a
+custom tile-preview background color. High-contrast SVG artwork is used for
+tools whose original black silhouettes were unreadable on dark backgrounds.
+Additional QSS files placed in `themes` remain user-managed and are not
+overwritten.
 
 ## Project safety
 
@@ -187,6 +310,7 @@ You're welcome. It was my pleasure.
 - [Pack comparator and extractor](docs/PZ-Pack-Comparator-and-Extractor.md)
 - [TileDef tools](docs/PZ-TileDef-Comparator-and-Snow-Editor.md)
 - [Logs and issue reports](docs/Diagnostics-and-Logs.md)
+- [Feature provenance](FEATURE_PROVENANCE.md)
 - [Upstream history](UPSTREAM-HISTORY.md)
 - [Current release changes](RELEASE_CHANGELOG.md)
 
@@ -205,6 +329,8 @@ toolchains.
 
 - **Tim Baker** for the original WorldEd and TileZed work that remains the
   upstream foundation of these tools.
+- **Alree / Unjammer** for the unofficial Qt 5 continuation, current
+  maintenance, new features, fixes, integrations, and releases.
 - The map-style import workflow is documented as existing since at least 2023
   with the [Google Maps Styling Wizard](https://mapstyle.withgoogle.com/) and
   custom JSON. It later evolved toward OpenStreetMap in the native tools.
@@ -217,7 +343,8 @@ toolchains.
   workflow feedback.
 
 Legal authorship and third-party attribution are documented in
-`UPSTREAM-HISTORY.md` and the bundled license notices.
+`AUTHORS.txt`, `FEATURE_PROVENANCE.md`, `UPSTREAM-HISTORY.md`, and the bundled
+license notices.
 
 ## Licenses and assets
 
@@ -226,7 +353,7 @@ are distributed as modified GPL applications. `libtiled`, `tmxviewer`, Qt,
 and other bundled components retain their own licenses.
 
 The release includes `COPYING.txt`, `THIRD_PARTY_NOTICES.txt`,
-`SOURCE-OFFER.txt`, `UPSTREAM-HISTORY.md`, and the complete `licenses`
+`SOURCE-OFFER.txt`, `FEATURE_PROVENANCE.md`, `UPSTREAM-HISTORY.md`, and the complete `licenses`
 directory. Corresponding source is published at
 <https://github.com/Unjammer/PZ_Mapping_Tools>.
 

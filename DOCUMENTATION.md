@@ -7,10 +7,12 @@ and BuildingEd.
 
 - [PZTools user guide](docs/TileZed/PZToolsGuide.html)
 - [Feature reference](docs/Feature-Reference.md)
+- [Troubleshooting FAQ](docs/FAQ.md)
 - [Logs and useful issue reports](docs/Diagnostics-and-Logs.md)
 - [Configuration files](docs/PZTools-Configuration-Files.md)
 - [Current release changes](RELEASE_CHANGELOG.md)
 - [Build instructions](BUILDING.md)
+- [Feature-level provenance](FEATURE_PROVENANCE.md)
 - [Upstream history and source provenance](UPSTREAM-HISTORY.md)
 
 ## WorldEd
@@ -44,11 +46,11 @@ The complete Automapper example is under `TileZed/examples/sewer_automap`.
 The BuildingEd manual is installed under `docs/BuildingEd` in the portable
 release.
 
-- [BuildingEd manual](TileZed/src/tiled/BuildingEditor/manual/index.html)
-- [Lua scripting](TileZed/src/tiled/BuildingEditor/manual/LuaScripting.html)
-- [Tools](TileZed/src/tiled/BuildingEditor/manual/Tools.html)
-- [Tile mode](TileZed/src/tiled/BuildingEditor/manual/TileEditingMode.html)
-- [Tiles dialog](TileZed/src/tiled/BuildingEditor/manual/TilesDialog.html)
+- [BuildingEd manual](docs/BuildingEd/index.html)
+- [Lua scripting](docs/BuildingEd/LuaScripting.html)
+- [Tools](docs/BuildingEd/Tools.html)
+- [Tile mode](docs/BuildingEd/TileEditingMode.html)
+- [Tiles dialog](docs/BuildingEd/TilesDialog.html)
 
 ## Terminology
 

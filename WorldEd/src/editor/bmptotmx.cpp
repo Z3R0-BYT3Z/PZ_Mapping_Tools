@@ -42,17 +42,23 @@
 #include "tileset.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDebug>
 #include <QtXml/QDomDocument>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
 #include <QMessageBox>
 #include <QPainter>
+#include <QSaveFile>
 #include <QSet>
 #include <QStringList>
+#include <QTemporaryFile>
 #include <QUndoStack>
+#include <QXmlStreamReader>
 #include <QXmlStreamWriter>
+#include <algorithm>
 
 using namespace Tiled;
 
@@ -121,6 +127,254 @@ bool validateBitmapColorRepair(QString *error)
     }
     return true;
 }
+
+QString xmlAttribute(QString value)
+{
+    value.replace(QLatin1Char('&'), QLatin1String("&amp;"));
+    value.replace(QLatin1Char('<'), QLatin1String("&lt;"));
+    value.replace(QLatin1Char('>'), QLatin1String("&gt;"));
+    value.replace(QLatin1Char('"'), QLatin1String("&quot;"));
+    value.replace(QLatin1Char('\''), QLatin1String("&apos;"));
+    return value;
+}
+
+QString rgbString(QRgb color)
+{
+    return QStringLiteral("%1 %2 %3")
+            .arg(qRed(color)).arg(qGreen(color)).arg(qBlue(color));
+}
+
+QString relativeMetadataPath(const QString &fileName,
+                             const QString &tmxFileName)
+{
+    return QDir(QFileInfo(tmxFileName).absolutePath())
+            .relativeFilePath(fileName);
+}
+
+QMap<QString, QByteArray> metadataElements(
+        const QString &tmxFileName,
+        const QString &rulesFileName,
+        const QString &blendsFileName,
+        const QList<BmpAlias *> &aliases,
+        const QList<BmpRule *> &rules,
+        const QList<BmpBlend *> &blends,
+        const QByteArray &lineEnding)
+{
+    QMap<QString, QByteArray> elements;
+    const auto encoded = [](const QString &value) {
+        return xmlAttribute(value).toUtf8();
+    };
+    elements.insert(QStringLiteral("rules-file"),
+                    QByteArray("<rules-file file=\"") +
+                    encoded(relativeMetadataPath(rulesFileName, tmxFileName)) +
+                    QByteArray("\"/>"));
+    elements.insert(QStringLiteral("blends-file"),
+                    QByteArray("<blends-file file=\"") +
+                    encoded(relativeMetadataPath(blendsFileName, tmxFileName)) +
+                    QByteArray("\"/>"));
+    QByteArray aliasesXml("<aliases>");
+    for (BmpAlias *alias : aliases) {
+        aliasesXml += lineEnding + QByteArray(" <alias name=\"") +
+                encoded(alias->name) + QByteArray("\" tiles=\"") +
+                encoded(alias->tiles.join(QLatin1String(" "))) +
+                QByteArray("\"/>");
+    }
+    aliasesXml += lineEnding + QByteArray("</aliases>");
+    elements.insert(QStringLiteral("aliases"), aliasesXml);
+    QByteArray rulesXml("<rules>");
+    for (BmpRule *rule : rules) {
+        QStringList choices;
+        for (QString choice : rule->tileChoices) {
+            if (choice.isEmpty())
+                choice = QStringLiteral("null");
+            choices += choice;
+        }
+        rulesXml += lineEnding + QByteArray(" <rule label=\"") +
+                encoded(rule->label) + QByteArray("\" bitmapIndex=\"") +
+                QByteArray::number(rule->bitmapIndex) +
+                QByteArray("\" color=\"") + encoded(rgbString(rule->color)) +
+                QByteArray("\" tileChoices=\"") +
+                encoded(choices.join(QLatin1String(" "))) +
+                QByteArray("\" targetLayer=\"") +
+                encoded(rule->targetLayer) + QByteArray("\" condition=\"") +
+                encoded(rgbString(rule->condition)) + QByteArray("\"");
+        if (rule->obsolete)
+            rulesXml += QByteArray(" obsolete=\"true\"");
+        rulesXml += QByteArray("/>");
+    }
+    rulesXml += lineEnding + QByteArray("</rules>");
+    elements.insert(QStringLiteral("rules"), rulesXml);
+    QByteArray blendsXml("<blends>");
+    for (BmpBlend *blend : blends) {
+        blendsXml += lineEnding + QByteArray(" <blend targetLayer=\"") +
+                encoded(blend->targetLayer) + QByteArray("\" mainTile=\"") +
+                encoded(blend->mainTile) + QByteArray("\" blendTile=\"") +
+                encoded(blend->blendTile) + QByteArray("\" dir=\"") +
+                encoded(blend->dirAsString()) +
+                QByteArray("\" ExclusionList=\"") +
+                encoded(blend->ExclusionList.join(QLatin1String(" "))) +
+                QByteArray("\" exclude2=\"") +
+                encoded(blend->exclude2.join(QLatin1String(" "))) +
+                QByteArray("\"/>");
+    }
+    blendsXml += lineEnding + QByteArray("</blends>");
+    elements.insert(QStringLiteral("blends"), blendsXml);
+    return elements;
+}
+
+bool findElementRange(const QByteArray &xml, const QByteArray &name,
+                      int scopeStart, int scopeEnd,
+                      int *start, int *end, QString *error)
+{
+    const QByteArray opening = QByteArray("<") + name;
+    int found = scopeStart;
+    while ((found = xml.indexOf(opening, found)) >= 0 && found < scopeEnd) {
+        const int boundary = found + opening.size();
+        if (boundary < xml.size() &&
+                (xml.at(boundary) == '>' || xml.at(boundary) == '/' ||
+                 xml.at(boundary) == ' ' || xml.at(boundary) == '\t' ||
+                 xml.at(boundary) == '\r' || xml.at(boundary) == '\n'))
+            break;
+        found = boundary;
+    }
+    if (found < 0 || found >= scopeEnd) {
+        if (error)
+            *error = QStringLiteral("Missing <%1> element")
+                    .arg(QString::fromLatin1(name));
+        return false;
+    }
+    const int tagEnd = xml.indexOf('>', found + opening.size());
+    if (tagEnd < 0 || tagEnd >= scopeEnd) {
+        if (error)
+            *error = QStringLiteral("Incomplete <%1> element")
+                    .arg(QString::fromLatin1(name));
+        return false;
+    }
+    if (tagEnd > found && xml.at(tagEnd - 1) == '/') {
+        *start = found;
+        *end = tagEnd + 1;
+        return true;
+    }
+    const QByteArray closing = QByteArray("</") + name + QByteArray(">");
+    const int closeStart = xml.indexOf(closing, tagEnd + 1);
+    if (closeStart < 0 || closeStart >= scopeEnd) {
+        if (error)
+            *error = QStringLiteral("Missing closing </%1> element")
+                    .arg(QString::fromLatin1(name));
+        return false;
+    }
+    *start = found;
+    *end = closeStart + closing.size();
+    return true;
+}
+
+bool replaceMetadataElements(
+        const QByteArray &source,
+        const QMap<QString, QByteArray> &elements,
+        QByteArray *updated, QString *error)
+{
+    const int settingsStart = source.indexOf("<bmp-settings");
+    if (settingsStart < 0) {
+        if (error)
+            *error = QStringLiteral("The TMX has no <bmp-settings> element");
+        return false;
+    }
+    const int settingsTagEnd = source.indexOf('>', settingsStart);
+    const int settingsEnd = source.indexOf("</bmp-settings>", settingsTagEnd);
+    if (settingsTagEnd < 0 || settingsEnd < 0) {
+        if (error)
+            *error = QStringLiteral("The TMX has an incomplete <bmp-settings> element");
+        return false;
+    }
+    struct Replacement {
+        int start;
+        int end;
+        QByteArray value;
+    };
+    QList<Replacement> replacements;
+    const QStringList names = QStringList()
+            << QStringLiteral("rules-file")
+            << QStringLiteral("blends-file")
+            << QStringLiteral("aliases")
+            << QStringLiteral("rules")
+            << QStringLiteral("blends");
+    for (const QString &name : names) {
+        int start = 0;
+        int end = 0;
+        if (!findElementRange(source, name.toLatin1(), settingsTagEnd,
+                              settingsEnd, &start, &end, error))
+            return false;
+        QByteArray indentation;
+        int lineStart = source.lastIndexOf('\n', start - 1);
+        lineStart = lineStart < 0 ? 0 : lineStart + 1;
+        for (int i = lineStart; i < start; ++i) {
+            if (source.at(i) != ' ' && source.at(i) != '\t')
+                break;
+            indentation += source.at(i);
+        }
+        QByteArray value = elements.value(name);
+        const QByteArray lineEnding = source.contains("\r\n")
+                ? QByteArray("\r\n") : QByteArray("\n");
+        value.replace(lineEnding + QByteArray(" "),
+                      lineEnding + indentation + QByteArray(" "));
+        value.replace(lineEnding + QByteArray("</"),
+                      lineEnding + indentation + QByteArray("</"));
+        replacements += Replacement{start, end, value};
+    }
+    std::sort(replacements.begin(), replacements.end(),
+              [](const Replacement &left, const Replacement &right) {
+        return left.start > right.start;
+    });
+    *updated = source;
+    for (const Replacement &replacement : replacements) {
+        updated->replace(replacement.start,
+                         replacement.end - replacement.start,
+                         replacement.value);
+    }
+    QXmlStreamReader reader(*updated);
+    while (!reader.atEnd())
+        reader.readNext();
+    if (reader.hasError()) {
+        if (error)
+            *error = reader.errorString();
+        return false;
+    }
+    return true;
+}
+
+bool readBinaryFile(const QString &fileName, QByteArray *data, QString *error)
+{
+    QFile file(fileName);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error)
+            *error = file.errorString();
+        return false;
+    }
+    *data = file.readAll();
+    if (file.error() != QFile::NoError) {
+        if (error)
+            *error = file.errorString();
+        return false;
+    }
+    return true;
+}
+
+bool writeBinaryFile(const QString &fileName, const QByteArray &data,
+                     QString *error)
+{
+    QSaveFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly)) {
+        if (error)
+            *error = file.errorString();
+        return false;
+    }
+    if (file.write(data) != data.size() || !file.commit()) {
+        if (error)
+            *error = file.errorString();
+        return false;
+    }
+    return true;
+}
 }
 BMPToTMX *BMPToTMX::mInstance = 0;
 
@@ -178,10 +432,315 @@ bool BMPToTMX::validateGenerationInputs(WorldDocument *worldDoc)
     }
     return true;
 }
+
+bool BMPToTMX::validateMetadataOnly(QString *summary, QString *error)
+{
+    QTemporaryFile oldRulesFile;
+    const QByteArray oldRules(
+                "0,1,2,3,floors_01_0,0_Floor\r\n");
+    if (!oldRulesFile.open() ||
+            oldRulesFile.write(oldRules) != oldRules.size() ||
+            !oldRulesFile.flush()) {
+        if (error)
+            *error = QStringLiteral("Could not create the old Rules.txt validation file");
+        return false;
+    }
+    const QString oldRulesPath = oldRulesFile.fileName();
+    oldRulesFile.close();
+    Tiled::Internal::BmpRulesFile oldFormatRules;
+    if (!oldFormatRules.read(oldRulesPath, false)) {
+        if (error)
+            *error = QStringLiteral("Could not read old Rules.txt without conversion: %1")
+                    .arg(oldFormatRules.errorString());
+        return false;
+    }
+    QByteArray preservedOldRules;
+    QString oldRulesError;
+    if (!readBinaryFile(oldRulesPath, &preservedOldRules, &oldRulesError) ||
+            preservedOldRules != oldRules) {
+        if (error)
+            *error = QStringLiteral("Metadata-only validation modified old Rules.txt: %1")
+                    .arg(oldRulesError);
+        return false;
+    }
+    BmpAlias alias(QStringLiteral("Grass & Stone"),
+                   QStringList() << QStringLiteral("floors_01_000")
+                                 << QStringLiteral("floors_01_001"));
+    BmpRule rule(QStringLiteral("Ground \"A\""), 0, qRgb(10, 20, 30),
+                 QStringList() << alias.name << QString(),
+                 QStringLiteral("0_Floor"), qRgb(0, 0, 0), true);
+    BmpBlend blend(QStringLiteral("0_FloorOverlay"), alias.name,
+                   QStringLiteral("blends_01_000"), BmpBlend::NW,
+                   QStringList() << QStringLiteral("exclude_01_000"),
+                   QStringList() << QStringLiteral("tileset")
+                                 << QStringLiteral("0_Floor"));
+    const QList<BmpAlias *> aliases = QList<BmpAlias *>() << &alias;
+    const QList<BmpRule *> rules = QList<BmpRule *>() << &rule;
+    const QList<BmpBlend *> blends = QList<BmpBlend *>() << &blend;
+    const QByteArray source(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+                "<map marker=\"outside\">\r\n"
+                " <layer name=\"Floor\"><data>UNCHANGED-DATA</data></layer>\r\n"
+                " <bmp-settings version=\"1\">\r\n"
+                "  <rules-file file=\"old-rules.txt\"/>\r\n"
+                "  <blends-file file=\"old-blends.txt\"/>\r\n"
+                "  <edges-everywhere value=\"true\"/>\r\n"
+                "  <aliases><alias name=\"old\" tiles=\"old_01_000\"/></aliases>\r\n"
+                "  <rules><rule label=\"old\" bitmapIndex=\"0\" color=\"1 1 1\" tileChoices=\"old\" targetLayer=\"0_Floor\" condition=\"0 0 0\"/></rules>\r\n"
+                "  <blends><blend targetLayer=\"0_Floor\" mainTile=\"old\" blendTile=\"old\" dir=\"n\" ExclusionList=\"\" exclude2=\"\"/></blends>\r\n"
+                " </bmp-settings>\r\n"
+                " <bmp-image index=\"0\"><color rgb=\"1 2 3\">PIXELS</color></bmp-image>\r\n"
+                " <bmp-noblend layer=\"0_Floor\">MASK</bmp-noblend>\r\n"
+                "</map>\r\n");
+    const QMap<QString, QByteArray> elements = metadataElements(
+                QStringLiteral("C:/project/cell.tmx"),
+                QStringLiteral("C:/config/Rules.txt"),
+                QStringLiteral("C:/config/Blends.txt"),
+                aliases, rules, blends, QByteArray("\r\n"));
+    QByteArray updated;
+    QString updateError;
+    if (!replaceMetadataElements(source, elements, &updated, &updateError)) {
+        if (error)
+            *error = updateError;
+        return false;
+    }
+    const QList<QByteArray> preserved = QList<QByteArray>()
+            << QByteArray("<map marker=\"outside\">")
+            << QByteArray("<layer name=\"Floor\"><data>UNCHANGED-DATA</data></layer>")
+            << QByteArray("<edges-everywhere value=\"true\"/>")
+            << QByteArray("<bmp-image index=\"0\"><color rgb=\"1 2 3\">PIXELS</color></bmp-image>")
+            << QByteArray("<bmp-noblend layer=\"0_Floor\">MASK</bmp-noblend>");
+    for (const QByteArray &value : preserved) {
+        if (!updated.contains(value)) {
+            if (error)
+                *error = QStringLiteral("Metadata-only validation changed preserved TMX content");
+            return false;
+        }
+    }
+    if (!updated.contains("<rules-file file=\"../config/Rules.txt\"/>") ||
+            !updated.contains("<blends-file file=\"../config/Blends.txt\"/>") ||
+            !updated.contains("name=\"Grass &amp; Stone\"") ||
+            !updated.contains("label=\"Ground &quot;A&quot;\"") ||
+            !updated.contains("tileChoices=\"Grass &amp; Stone null\"") ||
+            !updated.contains("obsolete=\"true\"") ||
+            !updated.contains("dir=\"nw\"")) {
+        if (error)
+            *error = QStringLiteral("Metadata-only validation did not serialize the expected snapshot");
+        return false;
+    }
+    QByteArray secondPass;
+    if (!replaceMetadataElements(updated, elements, &secondPass, &updateError) ||
+            secondPass != updated) {
+        if (error)
+            *error = QStringLiteral("Metadata-only validation is not idempotent: %1")
+                    .arg(updateError);
+        return false;
+    }
+    QByteArray invalidOutput;
+    if (replaceMetadataElements(
+                QByteArray("<map><layer/></map>"), elements,
+                &invalidOutput, &updateError)) {
+        if (error)
+            *error = QStringLiteral("Metadata-only validation accepted a TMX without bmp-settings");
+        return false;
+    }
+    if (summary) {
+        *summary = QStringLiteral(
+                    "five metadata elements replaced, preserved content unchanged, old Rules.txt unchanged, XML valid, and repeated application was a no-op");
+    }
+    return true;
+}
+
+bool BMPToTMX::updateMetadataOnly(BMPToTMX::GenerateMode mode)
+{
+    World *world = mWorldDoc ? mWorldDoc->world() : nullptr;
+    if (!world) {
+        mError = tr("No WorldEd project is available.");
+        return false;
+    }
+    const BMPToTMXSettings &settings = world->getBMPToTMXSettings();
+    const QString rulesPath = settings.rulesFile.isEmpty()
+            ? defaultRulesFile() : settings.rulesFile;
+    const QString blendsPath = settings.blendsFile.isEmpty()
+            ? defaultBlendsFile() : settings.blendsFile;
+    Tiled::Internal::BmpRulesFile rulesFile;
+    if (!rulesFile.read(rulesPath, false)) {
+        mError = rulesFile.errorString() +
+                tr("\n(while reading Rules.txt)");
+        return false;
+    }
+    Tiled::Internal::BmpBlendsFile blendsFile;
+    if (!blendsFile.read(blendsPath, rulesFile.aliases())) {
+        mError = blendsFile.errorString() +
+                tr("\n(while reading Blends.txt)");
+        return false;
+    }
+    QList<WorldCell *> cells;
+    if (mode == GenerateSelected) {
+        cells = mWorldDoc->selectedCells();
+    } else {
+        for (int y = 0; y < world->height(); ++y)
+            for (int x = 0; x < world->width(); ++x)
+                cells += world->cellAt(x, y);
+    }
+    struct Change {
+        QString path;
+        QByteArray source;
+        QByteArray updated;
+        QString backupPath;
+    };
+    QList<Change> changes;
+    QSet<QString> seenPaths;
+    int unchangedCount = 0;
+    int skippedCount = 0;
+    PROGRESS scanProgress(tr("Checking TMX Rules/Blends metadata"));
+    for (int cellIndex = 0; cellIndex < cells.size(); ++cellIndex) {
+        WorldCell *cell = cells.at(cellIndex);
+        if (cellIndex % 25 == 0) {
+            scanProgress.update(
+                        tr("Checking TMX Rules/Blends metadata (%1 of %2)")
+                        .arg(cellIndex + 1).arg(cells.size()));
+        }
+        if (!cell || cell->mapFilePath().isEmpty() ||
+                !QFileInfo(cell->mapFilePath()).isFile()) {
+            ++skippedCount;
+            continue;
+        }
+        const QFileInfo pathInfo(cell->mapFilePath());
+        const QString canonicalPath = pathInfo.canonicalFilePath();
+        const QString path = canonicalPath.isEmpty()
+                ? pathInfo.absoluteFilePath() : canonicalPath;
+        const QString pathKey = QDir::cleanPath(path).toLower();
+        if (seenPaths.contains(pathKey))
+            continue;
+        seenPaths.insert(pathKey);
+        if (MapInfo *mapInfo = MapManager::instance()->mapInfo(path)) {
+            if (mapInfo->isBeingEdited()) {
+                mError = tr("Close the TMX map before updating its Rules/Blends metadata:\n%1")
+                        .arg(QDir::toNativeSeparators(path));
+                return false;
+            }
+        }
+        Change change;
+        change.path = path;
+        QString fileError;
+        if (!readBinaryFile(path, &change.source, &fileError)) {
+            mError = tr("Could not read the TMX file:\n%1\n\n%2")
+                    .arg(QDir::toNativeSeparators(path), fileError);
+            return false;
+        }
+        const QByteArray lineEnding = change.source.contains("\r\n")
+                ? QByteArray("\r\n") : QByteArray("\n");
+        const QMap<QString, QByteArray> elements = metadataElements(
+                    path, rulesPath, blendsPath, rulesFile.aliases(),
+                    rulesFile.rules(), blendsFile.blends(), lineEnding);
+        if (!replaceMetadataElements(change.source, elements,
+                                     &change.updated, &fileError)) {
+            mError = tr("Could not prepare the TMX metadata update:\n%1\n\n%2")
+                    .arg(QDir::toNativeSeparators(path), fileError);
+            return false;
+        }
+        if (change.updated == change.source) {
+            ++unchangedCount;
+            continue;
+        }
+        changes += change;
+    }
+    scanProgress.release();
+    if (changes.isEmpty()) {
+        QMessageBox::information(
+                    MainWindow::instance(), tr("Rules/Blends Metadata"),
+                    tr("No TMX file needs to be changed.\n\n%1 file(s) are already current. %2 selected or project cell(s) do not have an existing assigned TMX file.")
+                    .arg(unchangedCount).arg(skippedCount));
+        return true;
+    }
+    QStringList fileNames;
+    for (const Change &change : changes)
+        fileNames += change.path;
+    BMPToTMXConfirmDialog dialog(fileNames, MainWindow::instance());
+    dialog.metadataOnly(unchangedCount, skippedCount);
+    if (dialog.exec() != QDialog::Accepted)
+        return true;
+    PROGRESS writeProgress(tr("Backing up TMX files"));
+    const QString projectDirectory = mWorldDoc->fileName().isEmpty()
+            ? QFileInfo(changes.first().path).absolutePath()
+            : QFileInfo(mWorldDoc->fileName()).absolutePath();
+    const QString timestamp = QDateTime::currentDateTime().toString(
+                QStringLiteral("yyyyMMdd-HHmmss-zzz"));
+    const QString backupRoot = QDir(projectDirectory).filePath(
+                QStringLiteral(".pztools-backups/bmp-metadata-%1")
+                .arg(timestamp));
+    if (!QDir().mkpath(backupRoot)) {
+        mError = tr("Could not create the Rules/Blends metadata backup directory:\n%1")
+                .arg(QDir::toNativeSeparators(backupRoot));
+        return false;
+    }
+    for (int index = 0; index < changes.size(); ++index) {
+        writeProgress.update(tr("Backing up TMX files (%1 of %2)")
+                             .arg(index + 1).arg(changes.size()));
+        Change &change = changes[index];
+        change.backupPath = QDir(backupRoot).filePath(
+                    QStringLiteral("%1_%2")
+                    .arg(index + 1, 5, 10, QLatin1Char('0'))
+                    .arg(QFileInfo(change.path).fileName()));
+        if (!QFile::copy(change.path, change.backupPath)) {
+            mError = tr("Could not back up the TMX file before updating metadata:\n%1\n\nBackup destination:\n%2\n\nNo TMX file was changed.")
+                    .arg(QDir::toNativeSeparators(change.path),
+                         QDir::toNativeSeparators(change.backupPath));
+            return false;
+        }
+    }
+    int writtenCount = 0;
+    for (Change &change : changes) {
+        writeProgress.update(tr("Updating TMX Rules/Blends metadata (%1 of %2)")
+                             .arg(writtenCount + 1).arg(changes.size()));
+        QString fileError;
+        if (!writeBinaryFile(change.path, change.updated, &fileError)) {
+            QStringList rollbackFailures;
+            for (int index = 0; index < writtenCount; ++index) {
+                QString rollbackError;
+                if (!writeBinaryFile(changes[index].path,
+                                     changes[index].source,
+                                     &rollbackError)) {
+                    rollbackFailures += QStringLiteral("%1: %2")
+                            .arg(QDir::toNativeSeparators(
+                                     changes[index].path), rollbackError);
+                }
+            }
+            mError = tr("Could not update Rules/Blends metadata in:\n%1\n\n%2\n\nCompleted files were restored from memory. Backups remain in:\n%3")
+                    .arg(QDir::toNativeSeparators(change.path), fileError,
+                         QDir::toNativeSeparators(backupRoot));
+            if (!rollbackFailures.isEmpty())
+                mError += tr("\n\nAutomatic restore failures:\n%1")
+                        .arg(rollbackFailures.join(QLatin1Char('\n')));
+            return false;
+        }
+        ++writtenCount;
+        qInfo() << "BMP to TMX metadata-only updated" << change.path
+                << "backup" << change.backupPath;
+    }
+    qInfo() << "BMP to TMX metadata-only finished:" << writtenCount
+            << "updated," << unchangedCount << "already current,"
+            << skippedCount << "without an existing assigned TMX, backup"
+            << backupRoot;
+    writeProgress.release();
+    QMessageBox::information(
+                MainWindow::instance(), tr("Rules/Blends Metadata"),
+                tr("Updated %1 TMX file(s).\n\n%2 file(s) were already current. %3 selected or project cell(s) did not have an existing assigned TMX file.\n\nBackups:\n%4")
+                .arg(writtenCount).arg(unchangedCount).arg(skippedCount)
+                .arg(QDir::toNativeSeparators(backupRoot)));
+    return true;
+}
+
 bool BMPToTMX::generateWorld(WorldDocument *worldDoc, BMPToTMX::GenerateMode mode)
 {
     mWorldDoc = worldDoc;
     World *world = mWorldDoc->world();
+
+    if (world->getBMPToTMXSettings().metadataOnly) {
+        mError.clear();
+        return updateMetadataOnly(mode);
+    }
 
     QString tilesDirectory = TileMetaInfoMgr::instance()->tilesDirectory();
     if (tilesDirectory.isEmpty() || !QFileInfo(tilesDirectory).exists()) {

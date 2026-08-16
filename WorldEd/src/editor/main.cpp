@@ -51,9 +51,12 @@
 #include "streetnamesdock.h"
 #include "regionsdock.h"
 #include "InGameMap/ingamemapreader.h"
+#include "InGameMap/ingamemapfeaturegenerator.h"
 #include "InGameMap/ingamemapwriterbinary.h"
 #include "world.h"
 #include "worlddocument.h"
+#include "worldscene.h"
+#include "worldview.h"
 #include "zlevelrenderer.h"
 #include "worldgenpreviewdialog.h"
 #include "tilesetcleanupdialog.h"
@@ -94,13 +97,44 @@ int main(int argc, char *argv[])
     QString auditTilesetCleanupPath;
     QString rebuildTilesetCatalogPath;
     QString validateNative256RoomDefsTmx;
+    QString validateInGameMapBuildingGeneration;
+    QString validateWorldMapOverlays;
     bool validateTilesetCleanup = false;
     for (const QString &argument : commandLineArguments) {
+        if (argument == QLatin1String(
+                    "--validate-bmp-metadata-only")) {
+            QString summary;
+            QString error;
+            if (!BMPToTMX::validateMetadataOnly(&summary, &error)) {
+                qCritical().noquote()
+                        << "BMP to TMX metadata-only validation failed:"
+                        << error;
+                return 41;
+            }
+            qInfo().noquote()
+                    << "BMP to TMX metadata-only validation passed:"
+                    << summary;
+            return 0;
+        }
         const QString nativeRoomDefsPrefix =
                 QLatin1String("--validate-native-256-roomdefs=");
         if (argument.startsWith(nativeRoomDefsPrefix)) {
             validateNative256RoomDefsTmx =
                     argument.mid(nativeRoomDefsPrefix.size());
+            continue;
+        }
+        const QString buildingGenerationPrefix =
+                QLatin1String("--validate-ingamemap-building-generation=");
+        if (argument.startsWith(buildingGenerationPrefix)) {
+            validateInGameMapBuildingGeneration =
+                    argument.mid(buildingGenerationPrefix.size());
+            continue;
+        }
+        const QString worldMapOverlaysPrefix =
+                QLatin1String("--validate-worldmap-overlays=");
+        if (argument.startsWith(worldMapOverlaysPrefix)) {
+            validateWorldMapOverlays =
+                    argument.mid(worldMapOverlaysPrefix.size());
             continue;
         }
         const QString osmWizardRenderPrefix =
@@ -200,6 +234,17 @@ int main(int argc, char *argv[])
                 return 18;
             }
             qInfo() << "Native-256 lot geometry validation passed";
+            return 0;
+        }
+        if (argument == QLatin1String(
+                    "--validate-partial-chunks")) {
+            QString error;
+            if (!PZTools::PartialChunkSelection::validate(&error)) {
+                qCritical().noquote()
+                        << "Partial Chunks validation failed:" << error;
+                return 42;
+            }
+            qInfo() << "Partial Chunks validation passed";
             return 0;
         }
         if (argument == QLatin1String("--validate-hole-repair")) {
@@ -495,6 +540,8 @@ int main(int argc, char *argv[])
             || !auditTilesetCleanupPath.isEmpty()
             || !rebuildTilesetCatalogPath.isEmpty()
             || !validateNative256RoomDefsTmx.isEmpty()
+            || !validateInGameMapBuildingGeneration.isEmpty()
+            || !validateWorldMapOverlays.isEmpty()
             || !renderTilesetCleanupRoot.isEmpty()
             || validateTilesetCleanup;
     if (configuredCommand && !w.InitConfigFiles())
@@ -510,6 +557,134 @@ int main(int argc, char *argv[])
         }
         qInfo().noquote()
                 << "Tileset cleanup validation passed:" << summary;
+        return 0;
+    }
+    if (!validateInGameMapBuildingGeneration.isEmpty()) {
+        const int separator =
+                validateInGameMapBuildingGeneration.lastIndexOf(
+                    QLatin1String("::"));
+        const QString coordinates = separator > 0
+                ? validateInGameMapBuildingGeneration.mid(separator + 2)
+                : QString();
+        const QStringList coordinateParts =
+                coordinates.split(QLatin1Char(','));
+        bool xOk = false;
+        bool yOk = false;
+        const int x = coordinateParts.size() == 2
+                ? coordinateParts.at(0).toInt(&xOk) : -1;
+        const int y = coordinateParts.size() == 2
+                ? coordinateParts.at(1).toInt(&yOk) : -1;
+        if (separator <= 0 || !xOk || !yOk) {
+            qCritical() << "InGameMap building-generation validation expects "
+                           "<project.pzw>::<cell-x>,<cell-y>";
+            return 43;
+        }
+        const QString projectFile =
+                validateInGameMapBuildingGeneration.left(separator);
+        if (!w.openFile(projectFile)) {
+            qCritical() << "InGameMap building-generation validation could "
+                           "not open:" << projectFile;
+            return 44;
+        }
+        Document *document =
+                DocumentManager::instance()->currentDocument();
+        WorldDocument *worldDocument =
+                document ? document->asWorldDocument() : nullptr;
+        WorldCell *cell = worldDocument
+                ? worldDocument->world()->cellAt(x, y) : nullptr;
+        if (!cell || cell->mapFilePath().isEmpty()) {
+            qCritical() << "InGameMap building-generation validation could "
+                           "not find a mapped cell:" << x << y;
+            return 45;
+        }
+        worldDocument->setSelectedCells(QList<WorldCell*>() << cell);
+        InGameMapFeatureGenerator generator;
+        if (!generator.generateWorld(
+                    worldDocument,
+                    InGameMapFeatureGenerator::GenerateSelected,
+                    InGameMapFeatureGenerator::FeatureBuilding)) {
+            qCritical().noquote()
+                    << "InGameMap building-generation validation failed:"
+                    << generator.errorString();
+            return 46;
+        }
+        int buildingFeatureCount = 0;
+        for (InGameMapFeature *feature : cell->inGameMap().features()) {
+            if (feature->properties().containsKey(
+                        QStringLiteral("building"))) {
+                ++buildingFeatureCount;
+            }
+        }
+        if (buildingFeatureCount == 0) {
+            qCritical() << "InGameMap building-generation validation failed: "
+                           "no building feature was generated for cell"
+                        << x << y;
+            return 47;
+        }
+        qInfo() << "InGameMap building-generation validation passed: cell"
+                << x << y << "lots" << cell->lots().size()
+                << "building features" << buildingFeatureCount;
+        return 0;
+    }
+    if (!validateWorldMapOverlays.isEmpty()) {
+        const QStringList paths = validateWorldMapOverlays.split(
+                    QLatin1String("::"));
+        if (paths.size() != 3) {
+            qCritical() << "World-map overlay validation expects "
+                           "<project.pzw>::<worldmap.xml>::"
+                           "<worldmap-forest.xml>";
+            return 48;
+        }
+        if (!w.openFile(paths.at(0))) {
+            qCritical() << "World-map overlay validation could not open:"
+                        << paths.at(0);
+            return 49;
+        }
+        Document *document =
+                DocumentManager::instance()->currentDocument();
+        WorldDocument *worldDocument =
+                document ? document->asWorldDocument() : nullptr;
+        WorldView *view = worldDocument
+                ? dynamic_cast<WorldView *>(worldDocument->view()) : nullptr;
+        QString error;
+        if (!view
+                || !view->scene()->loadWorldMapOverlay(
+                    paths.at(1), false, &error)
+                || !view->scene()->loadWorldMapOverlay(
+                    paths.at(2), true, &error)) {
+            qCritical().noquote()
+                    << "World-map overlay validation failed:" << error;
+            return 50;
+        }
+        const int worldFeatureCount =
+                view->scene()->worldMapOverlayFeatureCount(false);
+        const int forestFeatureCount =
+                view->scene()->worldMapOverlayFeatureCount(true);
+        if (worldFeatureCount == 0 || forestFeatureCount == 0) {
+            qCritical() << "World-map overlay validation failed: "
+                           "one loaded overlay contained no visible features";
+            return 51;
+        }
+        view->scene()->setWorldMapOverlayVisible(false, false);
+        if (view->scene()->worldMapOverlayVisible(false)
+                || !view->scene()->worldMapOverlayVisible(true)) {
+            qCritical() << "World-map overlay validation failed: "
+                           "independent visibility state was not retained";
+            return 52;
+        }
+        view->scene()->setWorldMapOverlayVisible(false, true);
+        view->scene()->clearWorldMapOverlays();
+        if (view->scene()->hasWorldMapOverlay(false)
+                || view->scene()->hasWorldMapOverlay(true)) {
+            qCritical() << "World-map overlay validation failed: "
+                           "clear did not remove both overlays";
+            return 53;
+        }
+        qInfo() << "World-map overlay validation passed:"
+                << QFileInfo(paths.at(1)).fileName()
+                << worldFeatureCount
+                << QFileInfo(paths.at(2)).fileName()
+                << forestFeatureCount;
         return 0;
     }
     if (!validateNative256RoomDefsTmx.isEmpty()) {

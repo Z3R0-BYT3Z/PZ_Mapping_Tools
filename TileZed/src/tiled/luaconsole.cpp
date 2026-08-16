@@ -161,7 +161,7 @@ void LuaConsole::write(const QString &s, QColor color)
     ui->textEdit->insertPlainText(s);
 
 //    ui->textEdit->moveCursor(QTextCursor::End);
-    ui->textEdit->setTextColor(Qt::black);
+    ui->textEdit->setTextColor(ui->textEdit->palette().color(QPalette::Text));
     ui->textEdit->insertPlainText(QLatin1String("\n"));
 }
 

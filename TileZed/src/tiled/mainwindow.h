@@ -32,6 +32,7 @@
 
 class QComboBox;
 class QLabel;
+class QToolBar;
 class QToolButton;
 #ifdef ZOMBOID
 class QSplitter;
@@ -49,9 +50,6 @@ class KeyboardShortcutWindow;
 class SnowEditor;
 class TileOverlayDialog;
 
-namespace BuildingEditor {
-class BuildingEditorWindow;
-}
 #endif
 
 namespace Tiled {
@@ -247,7 +245,6 @@ public slots:
     void showBuildingEditor();
     void checkBuildings();
     void checkMaps();
-    void buildingTilePicked(const QString &tileName);
     void tilesetMetaInfoDialog();
     void rearrangeTiles();
     void tilePropertiesEditor();
@@ -304,6 +301,9 @@ public:
     void startSettingsAutoSave();
     void updateDocumentAutoSaveTimer();
     void autoSaveCurrentDocument();
+    void checkpointDocumentAutoSave();
+    void beginDocumentTransaction();
+    void endDocumentTransaction();
 #ifdef ZOMBOID
     void readSettings();
 private:
@@ -371,6 +371,7 @@ private:
 #endif
 
     ClipboardManager *mClipboardManager;
+    int mDocumentTransactionDepth = 0;
 
     enum { MaxRecentFiles = 8 };
     QAction *mRecentFiles[MaxRecentFiles];
@@ -382,7 +383,6 @@ private:
     DocumentManager *mDocumentManager;
 
 #ifdef ZOMBOID
-    BuildingEditor::BuildingEditorWindow *mBuildingEditor;
     TileDefDialog *mTileDefDialog;
     ContainerOverlayDialog *mContainerOverlayDialog;
     TileOverlayDialog *mTileOverlayDialog = nullptr;
@@ -395,6 +395,11 @@ private:
     QAction *mBMPBrushSizeMinus = nullptr;
     QAction *mBMPBrushSizePlus = nullptr;
     QAction *mDepthMapEditorAction = nullptr;
+    QMenu *mPartialChunksMenu = nullptr;
+    QToolBar *mPartialChunksToolBar = nullptr;
+    QAction *mPartialChunksAction = nullptr;
+    QAction *mSelectAllPartialChunksAction = nullptr;
+    QAction *mClearPartialChunksAction = nullptr;
 #endif
 };
 

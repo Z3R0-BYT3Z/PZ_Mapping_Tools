@@ -36,6 +36,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScrollBar>
+#include <QSet>
 #include <QWheelEvent>
 #include <qmath.h>
 
@@ -848,11 +849,24 @@ void GraphicsFloorItem::mapResized()
 void GraphicsFloorItem::floorEdited()
 {
     mBmp->fill(Qt::black);
+    const QSet<Room *> rooms(mFloor->building()->rooms().cbegin(),
+                             mFloor->building()->rooms().cend());
+    int invalidRoomCells = 0;
     for (int x = 0; x < mFloor->width(); x++) {
         for (int y = 0; y < mFloor->height(); y++) {
-            if (Room *room = mFloor->GetRoomAt(x, y))
+            if (Room *room = mFloor->GetRoomAt(x, y)) {
+                if (!rooms.contains(room)) {
+                    ++invalidRoomCells;
+                    continue;
+                }
                 mBmp->setPixel(x, y, room->Color);
+            }
         }
+    }
+    if (invalidRoomCells) {
+        qWarning() << "BuildingEd deferred floor refresh skipped"
+                   << invalidRoomCells << "stale room cells on level"
+                   << mFloor->level();
     }
     update();
 }

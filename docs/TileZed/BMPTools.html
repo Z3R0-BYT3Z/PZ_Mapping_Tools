@@ -16,10 +16,14 @@ files. They are separate systems even though older projects may use the
 ambiguous filename <code>rules.txt</code> for an Automapper manifest.</p>
 <p>Once BMP Rules are loaded, changes on a target layer can require nearby
 terrain and blend tiles to be regenerated. PZTools restricts that work to the
-actual dirty bounds plus the two-tile blend border; it does not intentionally
-reprocess the complete 300 x 300 map after each small brush stroke. A remaining
+actual changed regions plus the two-tile blend border. Disconnected parts of a
+fast stroke remain separate instead of becoming one large rectangular update.
+Resolved tiles and blend candidates are indexed, while the temporary ground
+eraser performs only its local calculation. A remaining
 recalculation of 250 ms or more is written to the TileZed log with the requested,
-dirty, and processed bounds.</p>
+dirty, and processed bounds. Exact rule-tile references take priority over
+similarly named custom or test sheets, so a sheet name ending in a non-numeric
+suffix cannot replace one of a rule's numbered tiles.</p>
 <h2>Setting up your map for the BMP tools</h2>
 <ol>
   <li>Click on one of the BMP tools.&nbsp; This will display the floating Bmp Tool Window.</li>
@@ -96,6 +100,10 @@ erasing and selecting only affects one BMP image at a time.&nbsp; It
 doesn't matter which tile is selected if a rule has more than one tile;
 the tiles of a rule all use the same pixel color and which tile is
 actually placed in the map is always randomly determined.<br>
+Removing a tileset from the Tilesets window is undoable.&nbsp; TileZed
+stops MiniMap rendering before the removal and rebuilds the automatic Rules
+and Blends layers afterward.&nbsp; Embedded Rules and Blends metadata is kept,
+so its references become active again when the tileset is restored.<br>
 <h2>The BMP Tools</h2>
 Use the BMP tools to draw and erase pixels in a map's BMP images.&nbsp;
 The selected rule determines which BMP image is the current one

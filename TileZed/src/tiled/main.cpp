@@ -23,18 +23,22 @@
 #include "commandlineparser.h"
 #include "automappingmanager.h"
 #include "bmpblender.h"
+#include "bucketfilltool.h"
 #include "bmptool.h"
 #include "bmptooldialog.h"
 #include "depthmapeditor.h"
 #include "lootdistributiondialog.h"
 #include "mainwindow.h"
+#include "minimap.h"
 #include "packcompare.h"
 #include "packextractdialog.h"
 #include "languagemanager.h"
 #include "preferences.h"
+#include "stampbrush.h"
 #include "tiledapplication.h"
 #include "tiledefcompare.h"
 #include "tilesetdock.h"
+#include "tmxmapreader.h"
 #include "../firstlaunchdialog.h"
 #include "../portablesettings.h"
 #ifdef ZOMBOID
@@ -52,9 +56,13 @@
 #include "BuildingEditor/buildingtiles.h"
 #include "BuildingEditor/buildingtilesdialog.h"
 #include "BuildingEditor/buildingtilesetdock.h"
+#include "BuildingEditor/buildingtiletools.h"
+#include "BuildingEditor/tileeditmode.h"
+#include "tileselectionscope.h"
 #include "BuildingEditor/buildingwriter.h"
 #include "BuildingEditor/categorydock.h"
 #include "BuildingEditor/furnituregroups.h"
+#include "BuildingEditor/newbuildingdialog.h"
 #include "tilemetainfomgr.h"
 #include "tiledeffile.h"
 #include "tilesetmanager.h"
@@ -63,17 +71,23 @@
 #include "tile.h"
 #include "tilelayer.h"
 #include "tileset.h"
+#include "map.h"
 #include <QDataStream>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QGroupBox>
+#include <QGraphicsSceneMouseEvent>
+#include <QGraphicsView>
+#include <QImage>
 #include <QMessageBox>
 #include <QSettings>
 #include <QSet>
 #include <QTemporaryFile>
 #include <QTemporaryDir>
 #include <QUndoStack>
+#include <algorithm>
 #endif
 
 #include <QDebug>
@@ -100,6 +114,80 @@ bool gStartupBlockRendering = true;
 namespace {
 
 #ifdef ZOMBOID
+static Tiled::Tileset *createToolReferenceTileset(const QString &name)
+{
+    Tiled::Tileset *tileset = new Tiled::Tileset(name, 64, 128);
+    QImage image(64, 128, QImage::Format_ARGB32);
+    image.fill(Qt::white);
+    if (!tileset->loadFromImage(image, QString())) {
+        delete tileset;
+        return nullptr;
+    }
+    return tileset;
+}
+
+static bool validateToolTilesetReferences(QString *errorString)
+{
+    TilesetManager *manager = TilesetManager::instance();
+    {
+        Tiled::Tileset *tileset = createToolReferenceTileset(
+                    QStringLiteral("stamp-reference-validation"));
+        if (!tileset) {
+            *errorString = QStringLiteral(
+                        "Could not create the stamp reference tileset");
+            return false;
+        }
+        manager->addReference(tileset, false);
+        Tiled::TileLayer *layer = new Tiled::TileLayer(
+                    QStringLiteral("Floor"), 0, 0, 1, 1);
+        layer->setCell(0, 0, Tiled::Cell(tileset->tileAt(0)));
+        StampBrush brush;
+        brush.setLayerStamps(QList<Tiled::TileLayer *>() << layer, 0);
+        manager->removeReference(tileset);
+        if (!manager->tilesets().contains(tileset) ||
+                !brush.stamp() || brush.stamp()->cellAt(0, 0).isEmpty()) {
+            *errorString = QStringLiteral(
+                        "The stamp preview released its live tileset");
+            return false;
+        }
+        brush.setStamp(nullptr);
+        if (manager->tilesets().contains(tileset)) {
+            *errorString = QStringLiteral(
+                        "The cleared stamp retained its tileset");
+            return false;
+        }
+    }
+    {
+        Tiled::Tileset *tileset = createToolReferenceTileset(
+                    QStringLiteral("fill-reference-validation"));
+        if (!tileset) {
+            *errorString = QStringLiteral(
+                        "Could not create the fill reference tileset");
+            return false;
+        }
+        manager->addReference(tileset, false);
+        Tiled::TileLayer *layer = new Tiled::TileLayer(
+                    QStringLiteral("Floor"), 0, 0, 1, 1);
+        layer->setCell(0, 0, Tiled::Cell(tileset->tileAt(0)));
+        BucketFillTool fill;
+        fill.setStamp(layer);
+        manager->removeReference(tileset);
+        if (!manager->tilesets().contains(tileset) ||
+                !fill.stamp() || fill.stamp()->cellAt(0, 0).isEmpty()) {
+            *errorString = QStringLiteral(
+                        "The fill preview released its live tileset");
+            return false;
+        }
+        fill.setStamp(nullptr);
+        if (manager->tilesets().contains(tileset)) {
+            *errorString = QStringLiteral(
+                        "The cleared fill preview retained its tileset");
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool validateSingleRowTilesetCatalog(QString *errorString)
 {
     TileMetaInfoMgr *manager = TileMetaInfoMgr::instance();
@@ -137,6 +225,63 @@ static bool validateSingleRowTilesetCatalog(QString *errorString)
                 .arg(giblet->columnCount());
         return false;
     }
+    return true;
+}
+static bool validateTransparentTileContract(QString *errorString)
+{
+    QImage transparentImage(64, 128, QImage::Format_ARGB32_Premultiplied);
+    transparentImage.fill(Qt::transparent);
+    Tiled::Tileset tileset(QStringLiteral("transparent-validation"),
+                           64, 128);
+    if (!tileset.loadFromImage(transparentImage,
+                               QStringLiteral("transparent-validation.png"))) {
+        *errorString = QStringLiteral("Could not load transparent test image");
+        return false;
+    }
+    Tiled::Tile *tile = tileset.tileAt(0);
+    if (!tile || !tile->image().isNull() || !tile->hasResolvedSource()) {
+        *errorString = QStringLiteral(
+                    "Transparent source cell was not retained as a valid tile");
+        return false;
+    }
+    const QImage invisible(QStringLiteral(":/images/invisible-tile.svg"));
+    const QImage missing(QStringLiteral(":/images/missing-tile.svg"));
+    if (invisible.size() != QSize(64, 128)
+            || missing.size() != QSize(64, 128)) {
+        *errorString = QStringLiteral(
+                    "Diagnostic tile resources are unavailable or invalid");
+        return false;
+    }
+    tileset.setMissing(true);
+    if (tile->hasResolvedSource()) {
+        *errorString = QStringLiteral(
+                    "Missing tileset was reported as a resolved source");
+        return false;
+    }
+    return true;
+}
+static bool validateNewBuildingDialogLayout(QWidget *parent,
+                                            QString *errorString)
+{
+    BuildingEditor::NewBuildingDialog dialog(parent);
+    dialog.show();
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    const QList<QGroupBox *> groups = dialog.findChildren<QGroupBox *>();
+    for (QGroupBox *group : groups) {
+        if (!group || group->height() < group->minimumSizeHint().height()) {
+            *errorString = QStringLiteral(
+                        "New Building dialog contains a clipped group box");
+            dialog.close();
+            return false;
+        }
+    }
+    if (groups.count() != 2) {
+        *errorString = QStringLiteral(
+                    "New Building dialog does not expose both option groups");
+        dialog.close();
+        return false;
+    }
+    dialog.close();
     return true;
 }
 static void addEntryTiles(QSet<BuildingEditor::BuildingTile *> &tiles,
@@ -197,8 +342,7 @@ static bool validateBuildingTemplateTiles(BuildingEditor::Building *building,
             return false;
         }
         Tiled::Tile *tile = tileset->tileAt(buildingTile->mIndex);
-        if (!tile || tile == TilesetManager::instance()->missingTile()
-                || tile->image().isNull()) {
+        if (!tile || !tile->hasResolvedSource()) {
             *errorString = QStringLiteral("Template tile has no image: %1")
                     .arg(buildingTile->name());
             return false;
@@ -413,8 +557,300 @@ static bool validateRoomFloorsInFixture(const QString &fixturePath,
     }
     return valid;
 }
+
+static bool validateBuildingClipboard(
+        BuildingEditor::BuildingEditorWindow *window,
+        BuildingEditor::BuildingDocument *document,
+        QString *errorString)
+{
+    using namespace BuildingEditor;
+    Building *building = document->building();
+    BuildingFloor *floor = building->floor(0);
+    const QSize originalSize = building->size();
+    const int originalRoomCount = building->roomCount();
+
+    Room *sourceRoom = new Room();
+    sourceRoom->Name = QStringLiteral("Clipboard room");
+    sourceRoom->internalName = QStringLiteral("clipboard_test");
+    sourceRoom->Color = qRgb(19, 83, 151);
+    document->insertRoom(building->roomCount(), sourceRoom);
+    floor->SetRoomAt(1, 1, sourceRoom);
+
+    QList<BuildingDocument::ClipboardTileLayer> tileLayers;
+    BuildingDocument::ClipboardTileLayer tileLayer;
+    tileLayer.level = 0;
+    tileLayer.layerName = QStringLiteral("Floor");
+    tileLayer.tiles = new FloorTileGrid(2, 2);
+    tileLayer.tiles->replace(0, 0,
+                             QStringLiteral("blends_natural_01_0"));
+    tileLayers.append(tileLayer);
+    QList<Room *> rooms;
+    rooms.append(new Room(sourceRoom));
+    BuildingDocument::ClipboardRoomLayer roomLayer;
+    roomLayer.level = 0;
+    roomLayer.rooms.resize(2);
+    roomLayer.rooms[0] = QVector<int>(2, -2);
+    roomLayer.rooms[1] = QVector<int>(2, -2);
+    roomLayer.rooms[0][0] = 0;
+    roomLayer.rooms[1][0] = -1;
+    document->setClipboardTileLayers(
+                tileLayers, QRegion(QRect(0, 0, 2, 2)), 0,
+                rooms,
+                QList<BuildingDocument::ClipboardRoomLayer>() << roomLayer);
+    DrawTileTool::instance()->makeCurrent();
+    DrawTileTool::instance()->setClipboardPlacement();
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    const bool pasted = window->pasteClipboardAt(QPoint(-1, -1));
+    Room *pastedRoom = building->roomCount() > originalRoomCount + 1
+            ? building->room(originalRoomCount + 1) : nullptr;
+    bool valid = pasted
+            && building->size() == originalSize + QSize(1, 1)
+            && building->roomCount() == originalRoomCount + 2
+            && floor->GetRoomAt(0, 0) == pastedRoom
+            && floor->GetRoomAt(2, 2) == sourceRoom
+            && pastedRoom
+            && pastedRoom->Name == sourceRoom->Name
+            && pastedRoom->internalName == sourceRoom->internalName
+            && pastedRoom->Color == sourceRoom->Color;
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    QSet<Room *> validRooms(building->rooms().cbegin(),
+                            building->rooms().cend());
+    for (BuildingFloor *candidateFloor : building->floors()) {
+        for (const QVector<Room *> &column : candidateFloor->grid()) {
+            for (Room *room : column) {
+                valid = valid && (!room || validRooms.contains(room));
+            }
+        }
+    }
+    if (!valid) {
+        *errorString = QStringLiteral(
+                    "Free paste did not clone rooms or expand the building");
+    }
+
+    QList<Room *> replacementRooms;
+    replacementRooms.append(new Room(sourceRoom));
+    QList<BuildingDocument::ClipboardTileLayer> replacementTileLayers;
+    BuildingDocument::ClipboardTileLayer replacementTileLayer;
+    replacementTileLayer.level = tileLayer.level;
+    replacementTileLayer.layerName = tileLayer.layerName;
+    replacementTileLayer.tiles = tileLayer.tiles->clone();
+    replacementTileLayers.append(replacementTileLayer);
+    document->setClipboardTileLayers(
+                replacementTileLayers, QRegion(QRect(0, 0, 2, 2)), 0,
+                replacementRooms,
+                QList<BuildingDocument::ClipboardRoomLayer>() << roomLayer);
+    DrawTileTool::instance()->setClipboardPlacement();
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    valid = valid && floor->GetRoomAt(0, 0) == pastedRoom
+            && pastedRoom && pastedRoom->Color == sourceRoom->Color;
+
+    const int roomsBeforeRepeat = building->roomCount();
+    valid = valid && window->pasteClipboardAt(QPoint(4, 4));
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    validRooms = QSet<Room *>(building->rooms().cbegin(),
+                              building->rooms().cend());
+    valid = valid && building->roomCount() == roomsBeforeRepeat + 1;
+    for (BuildingFloor *candidateFloor : building->floors()) {
+        for (const QVector<Room *> &column : candidateFloor->grid()) {
+            for (Room *room : column) {
+                valid = valid && (!room || validRooms.contains(room));
+            }
+        }
+    }
+    document->undoStack()->undo();
+    document->undoStack()->redo();
+    document->undoStack()->undo();
+
+    document->undoStack()->undo();
+    valid = valid
+            && building->size() == originalSize
+            && building->roomCount() == originalRoomCount + 1
+            && floor->GetRoomAt(1, 1) == sourceRoom;
+    if (!valid && errorString->isEmpty()) {
+        *errorString = QStringLiteral(
+                    "Undo did not restore the complete pre-paste state");
+    }
+
+    document->undoStack()->redo();
+    Room *redoneRoom = building->roomCount() > originalRoomCount + 1
+            ? building->room(originalRoomCount + 1) : nullptr;
+    valid = valid
+            && building->size() == originalSize + QSize(1, 1)
+            && building->roomCount() == originalRoomCount + 2
+            && floor->GetRoomAt(0, 0) == redoneRoom;
+    if (!valid && errorString->isEmpty()) {
+        *errorString = QStringLiteral(
+                    "Redo did not restore the complete pasted state");
+    }
+    document->undoStack()->undo();
+    return valid;
+}
+
+static bool validateBuildingClipboardFixture(
+        BuildingEditor::BuildingEditorWindow *window,
+        const QString &fileName,
+        QString *errorString)
+{
+    using namespace BuildingEditor;
+    QString readError;
+    BuildingDocument *document = BuildingDocument::read(fileName, readError);
+    if (!document) {
+        *errorString = readError;
+        return false;
+    }
+    QSet<Room *> initialRooms(document->building()->rooms().cbegin(),
+                              document->building()->rooms().cend());
+    int initialInvalidRooms = 0;
+    for (BuildingFloor *candidateFloor : document->building()->floors()) {
+        for (const QVector<Room *> &column : candidateFloor->grid()) {
+            for (Room *room : column) {
+                if (room && !initialRooms.contains(room))
+                    ++initialInvalidRooms;
+            }
+        }
+    }
+    qInfo() << "BuildingEd fixture initial room references"
+            << "rooms" << initialRooms.size()
+            << "invalid cells" << initialInvalidRooms;
+    BuildingDocumentMgr::instance()->addDocument(document);
+    BuildingDocumentMgr::instance()->setCurrentDocument(document);
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    TileEditMode *tileMode = window->findChild<TileEditMode *>();
+    if (!tileMode) {
+        *errorString = QStringLiteral("Tile mode is unavailable");
+        return false;
+    }
+    ModeManager::instance().setCurrentMode(tileMode);
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    for (QAction *action : window->findChildren<QAction *>()) {
+        if (action->text() == QStringLiteral("Visible Layers")) {
+            action->trigger();
+            break;
+        }
+    }
+
+    BuildingFloor *floor = document->currentFloor();
+    const QSize selectionSize(qMin(14, floor->width()),
+                              qMin(16, floor->height()));
+    const QRect bounds(QPoint(qMax(0, floor->width()
+                                  - selectionSize.width()), 0),
+                       selectionSize);
+    const QRegion selection(bounds);
+    document->setTileSelection(selection);
+    if (!QMetaObject::invokeMethod(window, "editCopy",
+                                   Qt::DirectConnection)
+            || !document->clipboardHasContent()) {
+        *errorString = QStringLiteral("Tile-mode copy did not capture content");
+        return false;
+    }
+
+    DrawTileTool *tool = DrawTileTool::instance();
+    QPointF previous;
+    for (int pass = 0; pass < 48; ++pass) {
+        const QPointF position(80 + (pass % 12) * 45,
+                               60 + (pass / 12) * 90);
+        QGraphicsSceneMouseEvent move(QEvent::GraphicsSceneMouseMove);
+        move.setLastScenePos(previous);
+        move.setScenePos(position);
+        tool->mouseMoveEvent(&move);
+        previous = position;
+        for (QGraphicsView *view : window->findChildren<QGraphicsView *>()) {
+            view->viewport()->update();
+            view->viewport()->repaint();
+        }
+        QCoreApplication::processEvents();
+    }
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    const int roomCount = document->building()->roomCount();
+    const QSize initialSize = document->building()->size();
+    bool valid = true;
+    const QList<QPoint> targets = {
+        bounds.topLeft(),
+        QPoint(16, 48),
+        QPoint(0, 38),
+        QPoint(1, 55),
+        QPoint(initialSize.width() + 4, initialSize.height() + 4)
+    };
+    for (int cycle = 0; cycle < 3 && valid; ++cycle) {
+        for (const QPoint &target : targets) {
+            if (!valid)
+                break;
+            valid = valid && window->pasteClipboardAt(target);
+            QSet<Room *> validRooms(document->building()->rooms().cbegin(),
+                                    document->building()->rooms().cend());
+            int invalidRoomCells = 0;
+            for (BuildingFloor *candidateFloor :
+                 document->building()->floors()) {
+                for (const QVector<Room *> &column : candidateFloor->grid()) {
+                    for (Room *room : column) {
+                        if (room && !validRooms.contains(room))
+                            ++invalidRoomCells;
+                    }
+                }
+            }
+            valid = valid && invalidRoomCells == 0;
+            if (!valid)
+                break;
+            for (QGraphicsView *view : window->findChildren<QGraphicsView *>()) {
+                view->viewport()->update();
+                view->viewport()->repaint();
+            }
+            QCoreApplication::processEvents();
+            const QSet<Room *> roomsAfterEvents(
+                        document->building()->rooms().cbegin(),
+                        document->building()->rooms().cend());
+            int retainedInitialRooms = 0;
+            for (Room *room : initialRooms) {
+                if (roomsAfterEvents.contains(room))
+                    ++retainedInitialRooms;
+            }
+            int invalidAfterEvents = 0;
+            for (BuildingFloor *candidateFloor :
+                 document->building()->floors()) {
+                for (const QVector<Room *> &column : candidateFloor->grid()) {
+                    for (Room *room : column) {
+                        if (room && !roomsAfterEvents.contains(room))
+                            ++invalidAfterEvents;
+                    }
+                }
+            }
+            valid = valid
+                    && retainedInitialRooms == initialRooms.size()
+                    && invalidAfterEvents == 0;
+        }
+        for (int index = 0; index < targets.size(); ++index) {
+            document->undoStack()->undo();
+            QCoreApplication::processEvents();
+        }
+        for (int index = 0; index < targets.size(); ++index) {
+            document->undoStack()->redo();
+            QCoreApplication::processEvents();
+        }
+    }
+    valid = valid && document->building()->roomCount() >= roomCount;
+    while (document->undoStack()->canUndo()) {
+        document->undoStack()->undo();
+        QCoreApplication::processEvents();
+    }
+    if (!valid)
+        *errorString = QStringLiteral("Fixture copy-paste state is invalid");
+    return valid;
+}
 static bool validateBrushUndoBuffers(QString *errorString)
 {
+    if (!validateToolTilesetReferences(errorString))
+        return false;
+    const QString testSheetName = QStringLiteral("blends_natural_01_TEST");
+    if (BuildingEditor::BuildingTilesMgr::normalizeTileName(testSheetName)
+            != testSheetName) {
+        *errorString = QStringLiteral(
+                    "A non-tile sheet name was normalized as a tile reference");
+        return false;
+    }
     Tiled::Tileset tileset(QStringLiteral("brush-validation"), 64, 128);
     Tiled::Tile tile(64, 128, 0, &tileset);
     Tiled::TileLayer layer(QStringLiteral("brush-undo"), 0, 0, 1, 1);
@@ -446,6 +882,39 @@ static bool validateBrushUndoBuffers(QString *errorString)
                     "Merged brush undo buffer lost its tileset references");
         return false;
     }
+    const QRgb imageStrokeColor = qRgb(40, 120, 220);
+    ResizableImage imageStroke(QSize(1, 1));
+    imageStroke.fill(Qt::black);
+    imageStroke.setPixel(0, 0, imageStrokeColor);
+    for (int size = 2; size <= 300; ++size) {
+        imageStroke.resize(QSize(size, size), QPoint(1, 1));
+        imageStroke.setPixel(0, 0, imageStrokeColor);
+    }
+    for (int index = 0; index < 300; ++index) {
+        if (imageStroke.pixel(index, index) != imageStrokeColor) {
+            *errorString = QStringLiteral(
+                        "Merged BMP undo buffer lost pixel %1,%1")
+                    .arg(index);
+            return false;
+        }
+    }
+    ResizableImage imagePatch(QSize(4, 4));
+    imagePatch.fill(Qt::black);
+    for (int y = 1; y <= 2; ++y)
+        for (int x = 1; x <= 2; ++x)
+            imagePatch.setPixel(x, y, imageStrokeColor);
+    ResizableImage mergedImage(QSize(16, 16));
+    mergedImage.fill(Qt::black);
+    mergedImage.merge(QPoint(5, 6), &imagePatch,
+                      QRegion(QRect(1, 1, 2, 2)));
+    if (mergedImage.pixel(6, 7) != imageStrokeColor
+            || mergedImage.pixel(5, 6) != qRgb(0, 0, 0)) {
+        *errorString = QStringLiteral(
+                    "BMP undo patch merge changed the wrong pixels");
+        return false;
+    }
+    if (!MiniMapItem::validateBmpPatchTransfer(errorString))
+        return false;
     QImage brushImage(32, 32, QImage::Format_ARGB32);
     brushImage.fill(Qt::transparent);
     brushImage.setPixel(0, 0, qRgba(0, 0, 0, 255));
@@ -482,6 +951,299 @@ static bool validateBrushUndoBuffers(QString *errorString)
         return false;
     qInfo() << "Validated 300-tile diagonal brush undo growth in"
             << elapsedMs << "ms and a centered 32x32 PNG brush mask";
+    return true;
+}
+static qreal percentileMilliseconds(QVector<qint64> values, qreal percentile)
+{
+    if (values.isEmpty())
+        return 0.0;
+    std::sort(values.begin(), values.end());
+    const int index = qBound(
+                0, int((values.size() - 1) * percentile),
+                values.size() - 1);
+    return values.at(index) / 1000000.0;
+}
+
+static bool compareBmpBlenderOutput(BmpBlender &first,
+                                    BmpBlender &second,
+                                    const QString &label,
+                                    QString *errorString)
+{
+    const QStringList firstNames = first.tileLayerNames();
+    const QStringList secondNames = second.tileLayerNames();
+    if (firstNames != secondNames) {
+        *errorString = QStringLiteral("%1 has different layer names")
+                .arg(label);
+        return false;
+    }
+    const QList<Tiled::TileLayer*> firstLayers = first.tileLayers();
+    const QList<Tiled::TileLayer*> secondLayers = second.tileLayers();
+    for (int index = 0; index < firstLayers.size(); ++index) {
+        if (!firstLayers.at(index)->computeDiffRegion(
+                    secondLayers.at(index)).isEmpty()) {
+            *errorString = QStringLiteral("%1 differs on layer %2")
+                    .arg(label, firstNames.at(index));
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool validateBrushMapPerformance(const QString &fileName,
+                                        QString *summary,
+                                        QString *errorString)
+{
+    TmxMapReader reader;
+    QScopedPointer<Tiled::Map> map(reader.read(fileName));
+    if (!map) {
+        *errorString = QStringLiteral("Could not read brush benchmark map: %1")
+                .arg(reader.errorString());
+        return false;
+    }
+    QList<QRgb> groundColors;
+    for (Tiled::BmpRule *rule : map->bmpSettings()->rules()) {
+        if (rule && rule->bitmapIndex == 0 &&
+                rule->targetLayer == QLatin1String("0_Floor") &&
+                !groundColors.contains(rule->color)) {
+            groundColors += rule->color;
+        }
+    }
+    if (groundColors.isEmpty()) {
+        *errorString = QStringLiteral(
+                    "Brush benchmark map has no ground Rules");
+        return false;
+    }
+    Tiled::BmpRule *sandRule = nullptr;
+    for (Tiled::BmpRule *rule : map->bmpSettings()->rules()) {
+        if (rule && rule->bitmapIndex == 0
+                && rule->targetLayer == QLatin1String("0_Floor")
+                && rule->label.compare(
+                    QStringLiteral("Sand"), Qt::CaseInsensitive) == 0) {
+            sandRule = rule;
+            break;
+        }
+    }
+    if (sandRule) {
+        QSet<QString> expectedSandTiles;
+        for (const QString &choice : sandRule->tileChoices) {
+            if (BuildingEditor::BuildingTilesMgr::legalTileName(choice)) {
+                expectedSandTiles += BuildingEditor::BuildingTilesMgr::
+                        normalizeTileName(choice);
+                continue;
+            }
+            for (Tiled::BmpAlias *alias : map->bmpSettings()->aliases()) {
+                if (!alias || alias->name != choice)
+                    continue;
+                for (const QString &tileName : alias->tiles) {
+                    if (BuildingEditor::BuildingTilesMgr::
+                            legalTileName(tileName))
+                        expectedSandTiles +=
+                                BuildingEditor::BuildingTilesMgr::
+                                normalizeTileName(tileName);
+                }
+            }
+        }
+        Tiled::Map sandMap(
+                    map->orientation(), 8, 8,
+                    map->tileWidth(), map->tileHeight());
+        sandMap.rbmpSettings()->clone(*map->bmpSettings());
+        for (Tiled::Tileset *tileset : map->tilesets())
+            sandMap.addTileset(tileset);
+        sandMap.rbmpMain().rimage().fill(sandRule->color);
+        BmpBlender sandBlender(&sandMap);
+        if (expectedSandTiles.isEmpty()) {
+            *errorString = QStringLiteral(
+                        "Sand brush validation could not resolve its floor tiles");
+            return false;
+        }
+        const auto validateSandFloor = [&sandBlender, &expectedSandTiles,
+                errorString]() {
+            const QStringList layerNames = sandBlender.tileLayerNames();
+            const int floorLayerIndex = layerNames.indexOf(
+                        QStringLiteral("0_Floor"));
+            if (floorLayerIndex == -1) {
+                *errorString = QStringLiteral(
+                            "Sand brush validation has no floor layer");
+                return false;
+            }
+            Tiled::TileLayer *sandFloor =
+                    sandBlender.tileLayers().at(floorLayerIndex);
+            for (int y = 2; y < 6; ++y) {
+                for (int x = 2; x < 6; ++x) {
+                    Tiled::Tile *tile = sandFloor->cellAt(x, y).tile;
+                    const QString actual = tile
+                            ? BuildingEditor::BuildingTilesMgr::nameForTile(tile)
+                            : QString();
+                    if (!expectedSandTiles.contains(actual)) {
+                        *errorString = QStringLiteral(
+                                    "Sand brush resolved unexpected tile %1 at %2,%3")
+                                .arg(actual).arg(x).arg(y);
+                        return false;
+                    }
+                }
+            }
+            return true;
+        };
+
+        sandBlender.flush(QRect(QPoint(), sandMap.size()));
+        if (!validateSandFloor())
+            return false;
+
+        QString sandTilesetName;
+        int sandTileID;
+        for (const QString &tileName : expectedSandTiles) {
+            if (BuildingEditor::BuildingTilesMgr::parseTileName(
+                        tileName, sandTilesetName, sandTileID))
+                break;
+        }
+        if (sandTilesetName.isEmpty()
+                || !sandBlender.referencesTileset(sandTilesetName)) {
+            *errorString = QStringLiteral(
+                        "Sand BMP tileset reference was not detected");
+            return false;
+        }
+
+        const QString testSheetName =
+                QStringLiteral("blends_natural_01_TEST");
+        int testSheetIndex = -1;
+        Tiled::Tileset *testSheet = nullptr;
+        for (int index = 0; index < sandMap.tilesets().size(); ++index) {
+            Tiled::Tileset *tileset = sandMap.tilesets().at(index);
+            if (tileset && tileset->name() == testSheetName) {
+                testSheetIndex = index;
+                testSheet = tileset;
+                break;
+            }
+        }
+        if (testSheet) {
+            if (sandBlender.referencesTileset(testSheetName)) {
+                *errorString = QStringLiteral(
+                            "Unrelated TEST sheet was reported as a Sand reference");
+                return false;
+            }
+            sandMap.removeTilesetAt(testSheetIndex);
+            sandBlender.tilesetRemoved(testSheetName);
+            sandBlender.flush(QRect(QPoint(), sandMap.size()));
+            if (!validateSandFloor())
+                return false;
+            sandMap.insertTileset(testSheetIndex, testSheet);
+            sandBlender.tilesetAdded(testSheet);
+            sandBlender.flush(QRect(QPoint(), sandMap.size()));
+            if (!validateSandFloor())
+                return false;
+        }
+    }
+    const QRect mapBounds(QPoint(), map->size());
+    BmpBlender blender(map.data());
+    QElapsedTimer timer;
+    timer.start();
+    blender.flush(mapBounds);
+    const qint64 coldNanoseconds = timer.nsecsElapsed();
+    BmpBlender linearBlender(map.data());
+    linearBlender.setHack(true);
+    linearBlender.setUseBlendCandidateIndex(false);
+    linearBlender.flush(mapBounds);
+    if (!compareBmpBlenderOutput(
+                blender, linearBlender,
+                QStringLiteral("Indexed blend output"), errorString))
+        return false;
+    QVector<qint64> redrawSamples;
+    const int sampleCount = 48;
+    for (int index = 0; index < sampleCount; ++index) {
+        const QPoint center(
+                    map->width() / 2 - sampleCount / 4 + index / 2,
+                    map->height() / 2 - sampleCount / 4 + index / 2);
+        const QRect region(center - QPoint(1, 1), QSize(3, 3));
+        const QRgb color = index % 2
+                ? groundColors.first() : qRgb(0, 0, 0);
+        for (int y = region.top(); y <= region.bottom(); ++y)
+            for (int x = region.left(); x <= region.right(); ++x)
+                map->rbmpMain().setPixel(x, y, color);
+        blender.markDirty(region);
+        timer.restart();
+        blender.flush(mapBounds);
+        redrawSamples += timer.nsecsElapsed();
+    }
+    QVector<qint64> temporarySamples;
+    const int floorIndex = map->indexOfLayer(
+                QStringLiteral("0_Floor"), Tiled::Layer::TileLayerType);
+    const QRect paintRegion(
+                QPoint(map->width() / 2 - 2, map->height() / 2 - 2),
+                QSize(5, 5));
+    for (int index = 0; index < 12; ++index) {
+        timer.restart();
+        Tiled::Map temporary(
+                    map->orientation(), map->width(), map->height(),
+                    map->tileWidth(), map->tileHeight());
+        temporary.rbmpSettings()->clone(*map->bmpSettings());
+        for (Tiled::Tileset *tileset : map->tilesets())
+            temporary.addTileset(tileset);
+        if (floorIndex != -1)
+            temporary.addLayer(map->layerAt(floorIndex)->clone());
+        for (int y = paintRegion.top(); y <= paintRegion.bottom(); ++y)
+            for (int x = paintRegion.left(); x <= paintRegion.right(); ++x)
+                temporary.rbmpMain().setPixel(
+                            x, y, groundColors.first());
+        BmpBlender temporaryBlender(&temporary);
+        temporaryBlender.setHack(true);
+        temporaryBlender.setUseBlendCandidateIndex(false);
+        temporaryBlender.tilesToPixels(
+                    paintRegion.left() - 2, paintRegion.top() - 2,
+                    paintRegion.right() + 2, paintRegion.bottom() + 2);
+        temporaryBlender.flush(paintRegion);
+        temporarySamples += timer.nsecsElapsed();
+    }
+    BmpBlender boundedBlender(map.data());
+    boundedBlender.setHack(true);
+    boundedBlender.setUseSparseWorkRegions(false);
+    boundedBlender.flush(mapBounds);
+    QRegion sparseRegion;
+    const int sparseCount = qMax(2, qMin(64,
+                qMin(map->width(), map->height()) - 16));
+    for (int index = 0; index < sparseCount; ++index) {
+        const int x = 8 + index * (map->width() - 17)
+                / (sparseCount - 1);
+        const int y = map->height() - 9
+                - index * (map->height() - 17) / (sparseCount - 1);
+        sparseRegion += QRect(x, y, 1, 1);
+        const QRgb oldColor = map->rbmpMain().pixel(x, y);
+        map->rbmpMain().setPixel(
+                    x, y, oldColor == groundColors.first()
+                    ? qRgb(0, 0, 0) : groundColors.first());
+    }
+    blender.markDirty(sparseRegion);
+    timer.restart();
+    blender.flush(mapBounds);
+    const qint64 sparseNanoseconds = timer.nsecsElapsed();
+    boundedBlender.markDirty(sparseRegion);
+    timer.restart();
+    boundedBlender.flush(mapBounds);
+    const qint64 boundedNanoseconds = timer.nsecsElapsed();
+    if (!compareBmpBlenderOutput(
+                blender, boundedBlender,
+                QStringLiteral("Sparse-region output"), errorString))
+        return false;
+    qint64 redrawTotal = 0;
+    for (qint64 value : redrawSamples)
+        redrawTotal += value;
+    qint64 temporaryTotal = 0;
+    for (qint64 value : temporarySamples)
+        temporaryTotal += value;
+    *summary = QStringLiteral(
+                "%1x%2, %3 tilesets, %4 rules, %5 blends, indexed and sparse outputs verified, cold %6 ms, small redraw avg %7 ms p95 %8 ms, temporary ground-paint blender avg %9 ms p95 %10 ms, sparse stroke %11 ms versus bounded %12 ms")
+            .arg(map->width()).arg(map->height())
+            .arg(map->tilesets().size())
+            .arg(map->bmpSettings()->rules().size())
+            .arg(map->bmpSettings()->blends().size())
+            .arg(coldNanoseconds / 1000000.0, 0, 'f', 2)
+            .arg(redrawTotal / qreal(redrawSamples.size()) / 1000000.0,
+                 0, 'f', 2)
+            .arg(percentileMilliseconds(redrawSamples, 0.95), 0, 'f', 2)
+            .arg(temporaryTotal / qreal(temporarySamples.size()) / 1000000.0,
+                  0, 'f', 2)
+            .arg(percentileMilliseconds(temporarySamples, 0.95), 0, 'f', 2)
+            .arg(sparseNanoseconds / 1000000.0, 0, 'f', 2)
+            .arg(boundedNanoseconds / 1000000.0, 0, 'f', 2);
     return true;
 }
 static bool validateTileDefSplitting(QString *errorString)
@@ -759,6 +1521,7 @@ public:
     bool showedVersion;
     bool disableOpenGL;
     bool validateBuildingCategories;
+    bool validateBuildingClipboard;
     bool validateBrushPerformance;
     bool validateDepthMapEditor;
     bool validateLootDistributions;
@@ -776,6 +1539,7 @@ private:
     void justQuit();
     void setDisableOpenGL();
     void setValidateBuildingCategories();
+    void setValidateBuildingClipboard();
     void setValidateBrushPerformance();
     void setValidateDepthMapEditor();
     void setValidateLootDistributions();
@@ -809,6 +1573,7 @@ CommandLineHandler::CommandLineHandler()
     , showedVersion(false)
     , disableOpenGL(false)
     , validateBuildingCategories(false)
+    , validateBuildingClipboard(false)
     , validateBrushPerformance(false)
     , validateDepthMapEditor(false)
     , validateLootDistributions(false)
@@ -840,10 +1605,14 @@ CommandLineHandler::CommandLineHandler()
                 QChar(),
                 QLatin1String("--validate-building-categories"),
                 QLatin1String("Load and validate every BuildingEd tile category"));
+    option<&CommandLineHandler::setValidateBuildingClipboard>(
+                QChar(),
+                QLatin1String("--validate-building-clipboard"),
+                QLatin1String("Validate BuildingEd clipboard placement with a TBX fixture"));
     option<&CommandLineHandler::setValidateBrushPerformance>(
                 QChar(),
                 QLatin1String("--validate-brush-performance"),
-                QLatin1String("Validate sparse undo growth for tile painting"));
+                QLatin1String("Validate brush buffers and optional TMX Rules/Blends performance"));
     option<&CommandLineHandler::setValidateDepthMapEditor>(
                 QChar(),
                 QLatin1String("--validate-depthmap-editor"),
@@ -916,6 +1685,10 @@ void CommandLineHandler::setDisableOpenGL()
 void CommandLineHandler::setValidateBuildingCategories()
 {
     validateBuildingCategories = true;
+}
+void CommandLineHandler::setValidateBuildingClipboard()
+{
+    validateBuildingClipboard = true;
 }
 void CommandLineHandler::setValidateBrushPerformance()
 {
@@ -1031,7 +1804,8 @@ int main(int argc, char *argv[])
         return 0;
     if (commandLine.quit)
         return 0;
-    if (commandLine.validateBrushPerformance) {
+    if (commandLine.validateBrushPerformance &&
+            commandLine.filesToOpen().isEmpty()) {
         QString error;
         const bool valid = validateBrushUndoBuffers(&error);
         qInfo().noquote()
@@ -1217,6 +1991,23 @@ int main(int argc, char *argv[])
                 QCoreApplication::exit(valid ? 0 : 3);
                 return;
             }
+            if (commandLine.validateBuildingClipboard) {
+                QString error;
+                const bool valid = !commandLine.filesToOpen().isEmpty()
+                        && validateBuildingClipboardFixture(
+                            &buildingEditor,
+                            commandLine.filesToOpen().first(), &error);
+                if (commandLine.filesToOpen().isEmpty())
+                    error = QStringLiteral("A TBX fixture path is required");
+                qInfo().noquote()
+                        << "BuildingEd fixture copy-paste validation:"
+                        << (valid ? QStringLiteral("PASS")
+                                  : QStringLiteral("FAIL: %1").arg(error));
+                BuildingEditor::BuildingDocumentMgr::instance()
+                        ->closeAllDocuments();
+                QCoreApplication::exit(valid ? 0 : 2);
+                return;
+            }
             if (commandLine.validateBuildingCategories) {
                 BuildingEditor::BuildingTemplate *buildingTemplate = nullptr;
                 BuildingEditor::BuildingTemplates *templates =
@@ -1254,6 +2045,26 @@ int main(int argc, char *argv[])
                             ? QStringLiteral("PASS")
                             : QStringLiteral("FAIL: %1")
                               .arg(templateTilesError));
+                QString transparentTileError;
+                const bool transparentTileValid =
+                        validateTransparentTileContract(
+                            &transparentTileError);
+                qInfo().noquote()
+                        << "BuildingEd transparent-tile validation:"
+                        << (transparentTileValid
+                            ? QStringLiteral("PASS")
+                            : QStringLiteral("FAIL: %1")
+                              .arg(transparentTileError));
+                QString newBuildingDialogError;
+                const bool newBuildingDialogValid =
+                        validateNewBuildingDialogLayout(
+                            &buildingEditor, &newBuildingDialogError);
+                qInfo().noquote()
+                        << "BuildingEd New Building dialog validation:"
+                        << (newBuildingDialogValid
+                            ? QStringLiteral("PASS")
+                            : QStringLiteral("FAIL: %1")
+                              .arg(newBuildingDialogError));
                 QString roomFloorError;
                 const bool roomFloorValid =
                         validateRoomFloorRoundTrip(&roomFloorError);
@@ -1335,6 +2146,8 @@ int main(int argc, char *argv[])
                 const bool valid = tileModeValid
                         && tilesDialogValid
                         && templateTilesValid
+                        && transparentTileValid
+                        && newBuildingDialogValid
                         && roomFloorValid
                         && fixtureFloorValid
                         && furnitureValid
@@ -1349,7 +2162,31 @@ int main(int argc, char *argv[])
                             ? QStringLiteral("PASS")
                             : QStringLiteral("FAIL: %1")
                               .arg(luaFurnitureError));
-                const bool allValid = valid && luaFurnitureValid;
+                QString clipboardError;
+                const bool clipboardValid = validateBuildingClipboard(
+                            &buildingEditor, document, &clipboardError);
+                qInfo().noquote()
+                        << "BuildingEd copy-paste validation:"
+                        << (clipboardValid
+                            ? QStringLiteral("PASS")
+                            : QStringLiteral("FAIL: %1")
+                              .arg(clipboardError));
+                bool fixtureClipboardValid = true;
+                if (!commandLine.filesToOpen().isEmpty()) {
+                    QString fixtureClipboardError;
+                    fixtureClipboardValid = validateBuildingClipboardFixture(
+                                &buildingEditor,
+                                commandLine.filesToOpen().first(),
+                                &fixtureClipboardError);
+                    qInfo().noquote()
+                            << "BuildingEd fixture copy-paste validation:"
+                            << (fixtureClipboardValid
+                                ? QStringLiteral("PASS")
+                                : QStringLiteral("FAIL: %1")
+                                  .arg(fixtureClipboardError));
+                }
+                const bool allValid = valid && luaFurnitureValid
+                        && clipboardValid && fixtureClipboardValid;
                 qInfo() << "BuildingEd category validation result:"
                         << (allValid ? "PASS" : "FAIL");
                 BuildingEditor::BuildingDocumentMgr::instance()
@@ -1387,13 +2224,29 @@ int main(int argc, char *argv[])
 
     if (!w.InitConfigFiles())
         return 0;
+    if (commandLine.validateBrushPerformance) {
+        QString error;
+        QString summary;
+        const bool coreValid = validateBrushUndoBuffers(&error);
+        const bool mapValid = coreValid && validateBrushMapPerformance(
+                    commandLine.filesToOpen().first(), &summary, &error);
+        qInfo().noquote()
+                << "TileZed brush-performance validation:"
+                << (mapValid
+                    ? QStringLiteral("PASS: %1").arg(summary)
+                    : QStringLiteral("FAIL: %1").arg(error));
+        return mapValid ? 0 : 1;
+    }
     if (commandLine.validateTilesetCatalog) {
         QString catalogError;
         QString tagError;
+        QString transparentTileError;
         const bool catalogValid = validateSingleRowTilesetCatalog(
                     &catalogError);
         const bool tagsValid = TilesetDock::validateResolutionTags(
                     &tagError);
+        const bool transparentTileValid = validateTransparentTileContract(
+                    &transparentTileError);
         qInfo().noquote()
                 << "TileZed one-row tileset validation:"
                 << (catalogValid ? QStringLiteral("PASS")
@@ -1403,7 +2256,13 @@ int main(int argc, char *argv[])
                 << "TileZed tileset resolution-tag validation:"
                 << (tagsValid ? QStringLiteral("PASS")
                               : QStringLiteral("FAIL: %1").arg(tagError));
-        return catalogValid && tagsValid ? 0 : 3;
+        qInfo().noquote()
+                << "TileZed transparent-tile validation:"
+                << (transparentTileValid
+                    ? QStringLiteral("PASS")
+                    : QStringLiteral("FAIL: %1")
+                      .arg(transparentTileError));
+        return catalogValid && tagsValid && transparentTileValid ? 0 : 3;
     }
     QSettings sessionSettings(QSettings::IniFormat, QSettings::UserScope,
                               QLatin1String("TheIndieStone"),

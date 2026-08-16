@@ -231,8 +231,11 @@ void CheckMapsWindow::check(MapDocument *doc)
                 foreach (const Cell *cell, cells) {
                     if (cell->isEmpty())
                         continue;
-                    if (cell->tile->image().isNull()) {
-                        issue(Issue::Bogus, tr("invisible tile"), x, y, level);
+                    if (cell->tile->image().isNull() && !cell->tile->hasResolvedSource()) {
+                        issue(Issue::Bogus, tr("missing tile source"), x, y, level);
+                    } else if (cell->tile->image().isNull()
+                               && !cell->tile->properties().contains(QLatin1String("invisible"))) {
+                        issue(Issue::Bogus, tr("transparent tile without invisible property"), x, y, level);
                     } else if (cell->tile->tileset()->name() == QLatin1String("vegetation_groundcover_01")) {
                         if ((cell->tile->id() < 6) || (cell->tile->id() >= 44 && cell->tile->id() <= 46)) {
                             if (oldGrass < 10) {

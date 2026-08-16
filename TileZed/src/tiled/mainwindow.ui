@@ -271,7 +271,7 @@
      <normaloff>:/images/16x16/help-about.png</normaloff>:/images/16x16/help-about.png</iconset>
    </property>
    <property name="text">
-    <string>&amp;About Tiled</string>
+    <string>&amp;About TileZed</string>
    </property>
    <property name="menuRole">
     <enum>QAction::AboutRole</enum>
@@ -515,8 +515,11 @@
      <normaloff>:/BuildingEditor/icons/icon_pencil.png</normaloff>:/BuildingEditor/icons/icon_pencil.png</iconset>
    </property>
    <property name="text">
-    <string>Building Editor</string>
-   </property>
+     <string>Launch BuildingEd...</string>
+    </property>
+    <property name="toolTip">
+     <string>Open the standalone BuildingEd application</string>
+    </property>
   </action>
   <action name="actionTilesetMetaInfo">
    <property name="text">

@@ -23,6 +23,7 @@
 #include "sceneoverlay.h"
 #include "worldcell.h"
 #include "worldconstants.h"
+#include "partialchunkselection.h"
 
 #include "map.h"
 #include "tile.h"
@@ -949,6 +950,14 @@ public:
     bool isAdjacentLot(WorldCellLot *lot) const;
 
     void checkHolesOnLevelZero();
+    bool supportsPartialChunks() const;
+    bool partialChunksEnabled() const;
+    int selectedPartialChunkCount() const;
+    const PZTools::PartialChunkSelection &partialChunks() const;
+    bool partialChunkPreviewSelected(int x, int y) const;
+    void setPartialChunksEnabled(bool enabled);
+    void selectAllPartialChunks();
+    void clearPartialChunks();
     int autoFixHolesOnLevelZero(QString *backupPath, QString *error);
     static bool validateHoleRepair(QString *error);
     int basementGroundOpeningCount(WorldCellLot *lot) const;
@@ -974,6 +983,8 @@ protected:
     typedef Tiled::Tileset Tileset;
 signals:
     void mapContentsChanged();
+    void partialChunkSelectionChanged();
+    void partialChunkSaveFailed(const QString &message);
 
 public slots:
     void tilesetChanged(Tiled::Tileset *tileset);
@@ -1146,6 +1157,16 @@ private:
     OverlappingLots mOverlappingLots;
 
     QVector<QPoint> mHoleInFloor;
+    PZTools::PartialChunkSelection mPartialChunks;
+    bool mPartialChunkLassoActive = false;
+    bool mPartialChunkLassoSelect = false;
+    QPoint mPartialChunkLassoStart = QPoint(-1, -1);
+    QPoint mPartialChunkLassoCurrent = QPoint(-1, -1);
+
+    void loadPartialChunks();
+    void savePartialChunks();
+    QPoint partialChunkAt(const QPointF &scenePos, bool clamp) const;
+    QRect partialChunkLassoRect() const;
 };
 
 Q_DECLARE_OPERATORS_FOR_FLAGS(CellScene::PendingFlags)

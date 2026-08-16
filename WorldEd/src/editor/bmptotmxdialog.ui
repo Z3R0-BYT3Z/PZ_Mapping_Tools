@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>438</width>
-    <height>540</height>
+    <width>470</width>
+    <height>620</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -34,6 +34,26 @@
       <widget class="QRadioButton" name="updateExisting">
        <property name="text">
         <string>Update existing maps</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="1">
+      <widget class="QRadioButton" name="metadataOnly">
+       <property name="toolTip">
+        <string>Replace only the embedded Rules.txt and Blends.txt metadata in existing assigned TMX maps.</string>
+       </property>
+       <property name="text">
+        <string>Update Rules/Blends metadata only</string>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="1">
+      <widget class="QLabel" name="metadataOnlyExplanation">
+       <property name="text">
+        <string>Preserves bitmap pixels, layers, objects, tilesets, no-blend masks, and edge settings. Only existing TMX maps assigned to the chosen world cells are considered.</string>
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
        </property>
       </widget>
      </item>

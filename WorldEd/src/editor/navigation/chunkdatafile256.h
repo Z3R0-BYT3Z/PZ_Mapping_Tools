@@ -20,6 +20,8 @@
 
 #include "lotfilesmanager256.h"
 
+#include <QBitArray>
+
 class GenerateLotsSettings;
 class MapComposite;
 
@@ -30,7 +32,7 @@ class ChunkDataFile256
 {
 public:
     ChunkDataFile256();
-    void fromMap(CombinedCellMaps& combinedMaps, MapComposite *mapComposite, const LotFile::RectLookup<LotFile::RoomRect> &roomRectLookup, const GenerateLotsSettings &settings);
+    void fromMap(CombinedCellMaps& combinedMaps, MapComposite *mapComposite, const LotFile::RectLookup<LotFile::RoomRect> &roomRectLookup, const GenerateLotsSettings &settings, const QBitArray *selectedChunks = nullptr);
     bool isPositionNull(MapComposite *mapComposite, int squareX, int squareY);
 };
 

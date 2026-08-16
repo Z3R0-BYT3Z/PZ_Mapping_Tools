@@ -71,12 +71,12 @@ void ClipboardManager::setMap(const Map *map)
     mClipboard->setMimeData(mimeData);
 }
 
-void ClipboardManager::copySelection(const MapDocument *mapDocument,
+bool ClipboardManager::copySelection(const MapDocument *mapDocument,
                                      const TileSelectionScope *scope)
 {
     const Layer *currentLayer = mapDocument->currentLayer();
     if (!currentLayer)
-        return;
+        return false;
 
     const Map *map = mapDocument->map();
     const QRegion &tileSelection = mapDocument->tileSelection();
@@ -107,7 +107,7 @@ void ClipboardManager::copySelection(const MapDocument *mapDocument,
             sourceLayers.append(candidate);
         }
         if (sourceLayers.isEmpty())
-            return;
+            return false;
 
         QRect bounds = tileSelection.boundingRect();
         Map copyMap(map->orientation(),
@@ -134,7 +134,7 @@ void ClipboardManager::copySelection(const MapDocument *mapDocument,
         }
 
         setMap(&copyMap);
-        return;
+        return true;
     } else if (!selectedObjects.isEmpty()) {
         // Create a new object group with clones of the selected objects
         ObjectGroup *objectGroup = new ObjectGroup;
@@ -142,7 +142,7 @@ void ClipboardManager::copySelection(const MapDocument *mapDocument,
             objectGroup->addObject(mapObject->clone());
         copyLayer = objectGroup;
     } else {
-        return;
+        return false;
     }
 
     // Create a temporary map to write to the clipboard
@@ -157,6 +157,7 @@ void ClipboardManager::copySelection(const MapDocument *mapDocument,
     copyMap.addLayer(copyLayer);
 
     setMap(&copyMap);
+    return false;
 }
 
 void ClipboardManager::updateHasMap()

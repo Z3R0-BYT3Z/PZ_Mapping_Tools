@@ -1055,10 +1055,10 @@ BmpRulesFile::~BmpRulesFile()
     qDeleteAll(mRules);
 }
 
-bool BmpRulesFile::read(const QString &fileName)
+bool BmpRulesFile::read(const QString &fileName, bool convertOldFormat)
 {
     if (isOldFormat(fileName))
-        return readOldFormat(fileName);
+        return readOldFormat(fileName, convertOldFormat);
 
     SimpleFile simpleFile;
     if (!simpleFile.read(fileName)) {
@@ -1381,7 +1381,8 @@ bool BmpRulesFile::isOldFormat(const QString &fileName)
     return false;
 }
 
-bool BmpRulesFile::readOldFormat(const QString &fileName)
+bool BmpRulesFile::readOldFormat(const QString &fileName,
+                                 bool convertOldFormat)
 {
     QFile file(fileName);
     if (!file.open(QIODevice::ReadOnly)) {
@@ -1456,7 +1457,8 @@ bool BmpRulesFile::readOldFormat(const QString &fileName)
     }
 
     file.close();
-    write(fileName);
+    if (convertOldFormat)
+        write(fileName);
 
     return true;
 }

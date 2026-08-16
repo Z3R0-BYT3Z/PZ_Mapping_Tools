@@ -314,7 +314,8 @@ QString BuildingTilesMgr::normalizeTileName(const QString &tileName)
         return tileName;
     QString tilesetName;
     int index;
-    parseTileName(tileName, tilesetName, index);
+    if (!parseTileName(tileName, tilesetName, index))
+        return tileName;
     return nameForTile(tilesetName, index);
 }
 

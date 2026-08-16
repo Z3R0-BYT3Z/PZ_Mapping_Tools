@@ -63,6 +63,8 @@
 #include <QFileInfo>
 #include <QRect>
 #include <QUndoStack>
+
+#include <cstring>
 #ifdef ZOMBOID
 #include <QDebug>
 #include <QDir>
@@ -672,7 +674,12 @@ void MapDocument::insertTileset(int index, Tileset *tileset)
  */
 void MapDocument::removeTilesetAt(int index)
 {
+    if (index < 0 || index >= mMap->tilesets().size()) {
+        qWarning() << "Cannot remove tileset at invalid index" << index;
+        return;
+    }
     Tileset *tileset = mMap->tilesets().at(index);
+    emit tilesetAboutToBeRemoved(tileset);
     mMap->removeTilesetAt(index);
 #ifdef ZOMBOID
     mMapComposite->bmpBlender()->tilesetRemoved(tileset->name());
@@ -730,11 +737,23 @@ void MapDocument::paintBmp(int bmpIndex, int px, int py, const QImage &source,
 {
     MapBmp &bmp = mMap->rbmp(bmpIndex);
     QRegion region = paintRgn & QRect(0, 0, bmp.width(), bmp.height());
+    QImage &destination = bmp.rimage();
+    const QRect sourceBounds(px, py, source.width(), source.height());
 
     for (QRect r : region) {
-        for (int y = r.top(); y <= r.bottom(); y++) {
-            for (int x = r.left(); x <= r.right(); x++) {
-                bmp.setPixel(x, y, source.pixel(x - px, y - py));
+        if (destination.depth() == 32
+                && destination.format() == source.format()
+                && sourceBounds.contains(r)) {
+            for (int y = r.top(); y <= r.bottom(); ++y) {
+                std::memcpy(destination.scanLine(y) + r.left() * 4,
+                            source.constScanLine(y - py)
+                            + (r.left() - px) * 4,
+                            size_t(r.width()) * 4);
+            }
+        } else {
+            for (int y = r.top(); y <= r.bottom(); y++) {
+                for (int x = r.left(); x <= r.right(); x++)
+                    bmp.setPixel(x, y, source.pixel(x - px, y - py));
             }
         }
     }
