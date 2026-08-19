@@ -22,8 +22,13 @@
 #include "buildingdocumentmgr.h"
 #include "buildingfloor.h"
 #include "buildingmap.h"
+#include "buildingpreferences.h"
+
+#include <QSettings>
 
 using namespace BuildingEditor;
+
+static const char *KEY_LAYER_VISIBILITY = "Layers/Visibility";
 
 BuildingLayersDock::BuildingLayersDock(QWidget *parent) :
     QDockWidget(parent),
@@ -93,15 +98,29 @@ void BuildingLayersDock::setLayersList()
         }
     }
 
-    ui->visibility->setRange(0, ui->layers->count() - 1);
-    ui->visibility->setValue(ui->visibility->maximum());
+    ui->visibility->setRange(0, qMax(0, ui->layers->count() - 1));
+    int visibility = ui->visibility->maximum();
     if (!topVisibleLayer.isEmpty()) {
         QStringList layerNames = BuildingMap::layerNames(mDocument->currentLevel());
         int n = layerNames.indexOf(topVisibleLayer);
-        ui->visibility->setValue(n);
+        visibility = n;
     }
+    QSettings &settings = BuildingPreferences::instance()->settings();
+    const bool restoreVisibility = mDocument
+            && settings.contains(QLatin1String(KEY_LAYER_VISIBILITY));
+    if (restoreVisibility) {
+        visibility = qBound(ui->visibility->minimum(),
+                            settings.value(
+                                QLatin1String(KEY_LAYER_VISIBILITY),
+                                visibility).toInt(),
+                            ui->visibility->maximum());
+    }
+    ui->visibility->setValue(visibility);
 
     mSynching = false;
+
+    if (restoreVisibility)
+        visibilityChanged(visibility);
 
     updateActions();
 }
@@ -120,6 +139,9 @@ void BuildingLayersDock::visibilityChanged(int value)
 {
     if (mSynching || !mDocument)
         return;
+
+    BuildingPreferences::instance()->settings().setValue(
+                QLatin1String(KEY_LAYER_VISIBILITY), value);
 
     for (int i = ui->layers->count() - 1; i >= 0; i--)
         mDocument->setLayerVisibility(mDocument->currentFloor(),

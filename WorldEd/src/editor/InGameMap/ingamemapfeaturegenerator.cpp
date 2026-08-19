@@ -43,6 +43,7 @@
 #include <QFileInfo>
 #include <QHash>
 #include <QMessageBox>
+#include <QSet>
 #include <QUndoStack>
 
 #include "clipper.hpp"
@@ -56,6 +57,244 @@ struct pzPolygon
     ClipperLib::Path outer;
     ClipperLib::Paths inner; // holes
 };
+
+struct RoadMaskRules
+{
+    int minimumArea;
+    int minimumSpan;
+    int maximumHoleArea;
+};
+
+const RoadMaskRules highwayRoadMaskRules = {6, 6, 4};
+const RoadMaskRules trailRoadMaskRules = {12, 10, 4};
+const RoadMaskRules railwayRoadMaskRules = {4, 6, 2};
+
+QSet<QString> featureTileSet(const QStringList &tiles)
+{
+    QSet<QString> result;
+    for (const QString &tile : tiles)
+        result.insert(tile);
+    return result;
+}
+
+QString featureTileName(const Tiled::Tile *tile)
+{
+    if (!tile || !tile->tileset())
+        return QString();
+    return tile->tileset()->name() + QLatin1Char('_') +
+            QString::number(tile->id());
+}
+
+struct RoadMaskCleanup
+{
+    int bridgedTiles = 0;
+    int filledHoleTiles = 0;
+    int removedComponents = 0;
+    int removedTiles = 0;
+};
+
+class RoadMask
+{
+public:
+    explicit RoadMask(const QSize &size) :
+        mSize(size),
+        mTiles(qMax(0, size.width() * size.height()), 0)
+    {
+    }
+
+    QSize size() const
+    {
+        return mSize;
+    }
+
+    bool contains(int x, int y) const
+    {
+        return x >= 0 && y >= 0 &&
+                x < mSize.width() && y < mSize.height();
+    }
+
+    bool value(int x, int y) const
+    {
+        return contains(x, y) && mTiles.at(index(x, y)) != 0;
+    }
+
+    void setValue(int x, int y, bool value = true)
+    {
+        if (contains(x, y))
+            mTiles[index(x, y)] = value ? 1 : 0;
+    }
+
+    int index(int x, int y) const
+    {
+        return y * mSize.width() + x;
+    }
+
+    QPoint point(int index) const
+    {
+        return QPoint(index % mSize.width(), index / mSize.width());
+    }
+
+    int tileCount() const
+    {
+        int count = 0;
+        for (quint8 value : mTiles)
+            count += value != 0;
+        return count;
+    }
+
+private:
+    QSize mSize;
+    QVector<quint8> mTiles;
+};
+
+void bridgeSingleTileBreaks(RoadMask &mask, RoadMaskCleanup &cleanup)
+{
+    RoadMask source = mask;
+    for (int y = 0; y < source.size().height(); ++y) {
+        for (int x = 0; x < source.size().width(); ++x) {
+            if (source.value(x, y))
+                continue;
+            const bool horizontal = source.value(x - 1, y) &&
+                    source.value(x + 1, y);
+            const bool vertical = source.value(x, y - 1) &&
+                    source.value(x, y + 1);
+            if (horizontal || vertical) {
+                mask.setValue(x, y);
+                ++cleanup.bridgedTiles;
+            }
+        }
+    }
+}
+
+QVector<int> connectedMaskRegion(const RoadMask &mask, int start,
+                                 bool occupied, QVector<quint8> &visited,
+                                 bool *touchesBoundary)
+{
+    QVector<int> region;
+    QVector<int> pending;
+    pending += start;
+    visited[start] = 1;
+    *touchesBoundary = false;
+    const int width = mask.size().width();
+    const int height = mask.size().height();
+    const QPoint directions[] = {
+        QPoint(-1, 0), QPoint(1, 0), QPoint(0, -1), QPoint(0, 1)
+    };
+    while (!pending.isEmpty()) {
+        const int current = pending.takeLast();
+        region += current;
+        const QPoint point = mask.point(current);
+        if (point.x() == 0 || point.y() == 0 ||
+                point.x() == width - 1 || point.y() == height - 1)
+            *touchesBoundary = true;
+        for (const QPoint &direction : directions) {
+            const QPoint adjacent = point + direction;
+            if (!mask.contains(adjacent.x(), adjacent.y()))
+                continue;
+            const int adjacentIndex = mask.index(adjacent.x(), adjacent.y());
+            if (visited.at(adjacentIndex) ||
+                    mask.value(adjacent.x(), adjacent.y()) != occupied)
+                continue;
+            visited[adjacentIndex] = 1;
+            pending += adjacentIndex;
+        }
+    }
+    return region;
+}
+
+void removeSmallRoadComponents(RoadMask &mask, const RoadMaskRules &rules,
+                               RoadMaskCleanup &cleanup)
+{
+    QVector<quint8> visited(mask.size().width() * mask.size().height(), 0);
+    for (int y = 0; y < mask.size().height(); ++y) {
+        for (int x = 0; x < mask.size().width(); ++x) {
+            const int start = mask.index(x, y);
+            if (!mask.value(x, y) || visited.at(start))
+                continue;
+            bool touchesBoundary = false;
+            const QVector<int> region = connectedMaskRegion(
+                        mask, start, true, visited, &touchesBoundary);
+            int minimumX = x;
+            int maximumX = x;
+            int minimumY = y;
+            int maximumY = y;
+            for (int index : region) {
+                const QPoint point = mask.point(index);
+                minimumX = qMin(minimumX, point.x());
+                maximumX = qMax(maximumX, point.x());
+                minimumY = qMin(minimumY, point.y());
+                maximumY = qMax(maximumY, point.y());
+            }
+            const int span = qMax(maximumX - minimumX + 1,
+                                  maximumY - minimumY + 1);
+            const bool keep = region.size() >= rules.minimumArea ||
+                    span >= rules.minimumSpan ||
+                    (touchesBoundary && region.size() >= 2);
+            if (keep)
+                continue;
+            for (int index : region) {
+                const QPoint point = mask.point(index);
+                mask.setValue(point.x(), point.y(), false);
+            }
+            ++cleanup.removedComponents;
+            cleanup.removedTiles += region.size();
+        }
+    }
+}
+
+void fillSmallRoadHoles(RoadMask &mask, const RoadMaskRules &rules,
+                        RoadMaskCleanup &cleanup)
+{
+    QVector<quint8> visited(mask.size().width() * mask.size().height(), 0);
+    for (int y = 0; y < mask.size().height(); ++y) {
+        for (int x = 0; x < mask.size().width(); ++x) {
+            const int start = mask.index(x, y);
+            if (mask.value(x, y) || visited.at(start))
+                continue;
+            bool touchesBoundary = false;
+            const QVector<int> region = connectedMaskRegion(
+                        mask, start, false, visited, &touchesBoundary);
+            if (touchesBoundary || region.size() > rules.maximumHoleArea)
+                continue;
+            for (int index : region) {
+                const QPoint point = mask.point(index);
+                mask.setValue(point.x(), point.y());
+            }
+            cleanup.filledHoleTiles += region.size();
+        }
+    }
+}
+
+RoadMaskCleanup normalizeRoadMask(RoadMask &mask, const RoadMaskRules &rules)
+{
+    RoadMaskCleanup cleanup;
+    bridgeSingleTileBreaks(mask, cleanup);
+    removeSmallRoadComponents(mask, rules, cleanup);
+    fillSmallRoadHoles(mask, rules, cleanup);
+    return cleanup;
+}
+
+void addRoadMaskToClipper(const RoadMask &mask, ClipperLib::Clipper &clipper)
+{
+    for (int y = 0; y < mask.size().height(); ++y) {
+        int x = 0;
+        while (x < mask.size().width()) {
+            while (x < mask.size().width() && !mask.value(x, y))
+                ++x;
+            const int start = x;
+            while (x < mask.size().width() && mask.value(x, y))
+                ++x;
+            if (start == x)
+                continue;
+            ClipperLib::Path path;
+            path << ClipperLib::IntPoint(start, y)
+                 << ClipperLib::IntPoint(x, y)
+                 << ClipperLib::IntPoint(x, y + 1)
+                 << ClipperLib::IntPoint(start, y + 1);
+            clipper.AddPath(path, ClipperLib::ptSubject, true);
+        }
+    }
+}
 
 int PIXELS_PER_CELL = 48;
 bool tmxContainsRoomDefs(const QString &fileName)
@@ -110,6 +349,101 @@ bool validateGeneratedPolygon(ClipperLib::Path &path, WorldCell *cell,
 InGameMapFeatureGenerator::InGameMapFeatureGenerator(QObject *parent) :
     QObject(parent)
 {
+}
+
+bool InGameMapFeatureGenerator::validateRoadMaskProcessing(QString *summary,
+                                                           QString *error)
+{
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+
+    RoadMask trail(QSize(24, 24));
+    for (int x = 2; x <= 16; ++x) {
+        if (x != 8)
+            trail.setValue(x, 4);
+    }
+    for (int y = 14; y <= 15; ++y) {
+        for (int x = 14; x <= 15; ++x)
+            trail.setValue(x, y);
+    }
+    const RoadMaskCleanup trailCleanup = normalizeRoadMask(
+                trail, trailRoadMaskRules);
+    if (!trail.value(8, 4) || trail.tileCount() != 15)
+        return fail(QStringLiteral("a one-tile trail break was not closed"));
+    if (trail.value(14, 14) || trailCleanup.removedComponents != 1 ||
+            trailCleanup.removedTiles != 4)
+        return fail(QStringLiteral("a short isolated trail was retained"));
+
+    RoadMask road(QSize(12, 12));
+    for (int y = 3; y <= 6; ++y) {
+        for (int x = 3; x <= 6; ++x) {
+            if (x == 3 || x == 6 || y == 3 || y == 6)
+                road.setValue(x, y);
+        }
+    }
+    const RoadMaskCleanup roadCleanup = normalizeRoadMask(
+                road, highwayRoadMaskRules);
+    if (roadCleanup.filledHoleTiles != 4 || road.tileCount() != 16)
+        return fail(QStringLiteral("a four-tile enclosed road hole was not filled"));
+
+    ClipperLib::Clipper clipper;
+    addRoadMaskToClipper(trail, clipper);
+    ClipperLib::PolyTree tree;
+    if (!clipper.Execute(ClipperLib::ctUnion, tree,
+                         ClipperLib::pftNonZero, ClipperLib::pftNonZero))
+        return fail(QStringLiteral("the normalized trail mask could not be unioned"));
+    int outerPolygons = 0;
+    int holes = 0;
+    for (ClipperLib::PolyNode *node = tree.GetFirst(); node;
+         node = node->GetNext()) {
+        if (node->IsHole())
+            ++holes;
+        else
+            ++outerPolygons;
+    }
+    if (outerPolygons != 1 || holes != 0)
+        return fail(QStringLiteral("the normalized trail did not produce one continuous polygon"));
+
+    const QSet<QString> treeDefaults = featureTileSet(
+                Preferences::defaultTreeFeatureTiles());
+    if (treeDefaults.size() != 53 ||
+            !treeDefaults.contains(QStringLiteral("jumbo_tree_01_0")) ||
+            !treeDefaults.contains(
+                QStringLiteral("e_americanhollyJUMBOXL_1_0")) ||
+            !treeDefaults.contains(
+                QStringLiteral("e_yellowwoodJUMBOXXL_1_0"))) {
+        return fail(QStringLiteral("the default Tree tile catalogue is incomplete"));
+    }
+    const QSet<QString> primaryDefaults = featureTileSet(
+                Preferences::defaultPrimaryRoadFeatureTiles());
+    const QSet<QString> secondaryDefaults = featureTileSet(
+                Preferences::defaultSecondaryRoadFeatureTiles());
+    const QSet<QString> tertiaryDefaults = featureTileSet(
+                Preferences::defaultTertiaryRoadFeatureTiles());
+    if (primaryDefaults.size() != 8 || secondaryDefaults.size() != 4 ||
+            tertiaryDefaults.size() != 6 ||
+            !primaryDefaults.contains(QStringLiteral("blends_street_01_32")) ||
+            !secondaryDefaults.contains(QStringLiteral("blends_street_01_96")) ||
+            !tertiaryDefaults.contains(QStringLiteral("blends_street_01_16"))) {
+        return fail(QStringLiteral("the default Road tile catalogues are incomplete"));
+    }
+    if (!featureTileSet(QStringList()).isEmpty())
+        return fail(QStringLiteral("an empty detection catalogue was not disabled"));
+    if (Preferences::canonicalFeatureTileName(
+                QStringLiteral("blends_street_01_032")) !=
+            QStringLiteral("blends_street_01_32")) {
+        return fail(QStringLiteral("a padded tile ID was not normalized"));
+    }
+
+    if (summary) {
+        *summary = QStringLiteral("single-tile breaks closed, small enclosed holes filled, short isolated fragments removed, long narrow trails retained, one continuous polygon produced, configurable Tree and Road tile catalogues validated");
+    }
+    if (error)
+        error->clear();
+    return true;
 }
 
 bool InGameMapFeatureGenerator::generateWorld(WorldDocument *worldDoc, InGameMapFeatureGenerator::GenerateMode mode, FeatureType type)
@@ -798,45 +1132,93 @@ bool InGameMapFeatureGenerator::doRoads(WorldCell *worldCell, MapInfo *mapInfo)
     if (!layerGroup)
         return true;
     layerGroup->prepareDrawing2();
-    ClipperLib::Clipper primary, secondary, tertiary, trail, railway;
-    const QSet<int> primaryIds = {32, 37, 38, 39, 80, 85, 86, 87};
-    const QSet<int> secondaryIds = {96, 101, 102, 103};
-    const QSet<int> tertiaryIds = {16, 21, 48, 53, 54, 55};
-    const QSet<int> trailIds = {64, 69, 70, 71, 80, 85, 86, 87};
     const QSize mapSize = mapInfo->map()->size();
+    RoadMask primaryMask(mapSize);
+    RoadMask secondaryMask(mapSize);
+    RoadMask tertiaryMask(mapSize);
+    RoadMask trailMask(mapSize);
+    RoadMask railwayMask(mapSize);
+    const QSet<int> trailIds = {64, 69, 70, 71, 80, 85, 86, 87};
+    const Preferences *preferences = Preferences::instance();
+    const QSet<QString> primaryTiles = featureTileSet(
+                preferences->primaryRoadFeatureTiles());
+    const QSet<QString> secondaryTiles = featureTileSet(
+                preferences->secondaryRoadFeatureTiles());
+    const QSet<QString> tertiaryTiles = featureTileSet(
+                preferences->tertiaryRoadFeatureTiles());
+    const bool generateTrails = preferences->generateTrailFeatures();
     OrderedCellsTemporaries orderedCellsTemporaries;
     QVector<const Tiled::Cell*> cells;
     cells.reserve(40);
-    auto addSquare = [](ClipperLib::Clipper &clipper, int x, int y) {
-        ClipperLib::Path path;
-        path << ClipperLib::IntPoint(x, y)
-             << ClipperLib::IntPoint(x + 1, y)
-             << ClipperLib::IntPoint(x + 1, y + 1)
-             << ClipperLib::IntPoint(x, y + 1);
-        clipper.AddPath(path, ClipperLib::ptSubject, true);
-    };
     for (int y = 0; y < mapSize.height(); ++y) {
         for (int x = 0; x < mapSize.width(); ++x) {
             cells.clear();
             layerGroup->orderedCellsAt2(QPoint(x, y), orderedCellsTemporaries, cells);
+            bool trailCandidate = false;
+            bool water = false;
             for (const Tiled::Cell *cell : qAsConst(cells)) {
                 if (cell->isEmpty())
                     continue;
                 const QString tilesetName = cell->tile->tileset()->name();
                 const int tileId = cell->tile->id();
-                if (tilesetName == QStringLiteral("blends_street_01")) {
-                    if (primaryIds.contains(tileId)) addSquare(primary, x, y);
-                    else if (secondaryIds.contains(tileId)) addSquare(secondary, x, y);
-                    else if (tertiaryIds.contains(tileId)) addSquare(tertiary, x, y);
+                const QString tileName = featureTileName(cell->tile);
+                if (primaryTiles.contains(tileName)) {
+                    primaryMask.setValue(x, y);
+                } else if (secondaryTiles.contains(tileName)) {
+                    secondaryMask.setValue(x, y);
+                } else if (tertiaryTiles.contains(tileName)) {
+                    tertiaryMask.setValue(x, y);
                 } else if (tilesetName == QStringLiteral("blends_natural_01") &&
                            trailIds.contains(tileId)) {
-                    addSquare(trail, x, y);
+                    trailCandidate = true;
                 } else if (tilesetName == QStringLiteral("industry_railroad_01")) {
-                    addSquare(railway, x, y);
+                    railwayMask.setValue(x, y);
+                }
+                const QString waterProperty =
+                        cell->tile->property(QStringLiteral("water"))
+                        .trimmed().toLower();
+                if ((tilesetName == QStringLiteral("blends_natural_02") &&
+                     tileId < 8) ||
+                        (!waterProperty.isEmpty() &&
+                         waterProperty != QStringLiteral("false") &&
+                         waterProperty != QStringLiteral("0"))) {
+                    water = true;
                 }
             }
+            if (generateTrails && trailCandidate && !water)
+                trailMask.setValue(x, y);
         }
     }
+    ClipperLib::Clipper primary, secondary, tertiary, trail, railway;
+    auto prepareMask = [&](RoadMask &mask, const RoadMaskRules &rules,
+                           const QString &type, ClipperLib::Clipper &clipper) {
+        const int originalTiles = mask.tileCount();
+        const RoadMaskCleanup cleanup = normalizeRoadMask(mask, rules);
+        addRoadMaskToClipper(mask, clipper);
+        if (cleanup.bridgedTiles || cleanup.filledHoleTiles ||
+                cleanup.removedComponents) {
+            qInfo().noquote()
+                    << QStringLiteral("Generate Road Features normalized mask: type=%1 cell=%2,%3 tiles=%4->%5 bridged=%6 filled-holes=%7 removed-components=%8 removed-tiles=%9")
+                       .arg(type)
+                       .arg(worldCell->x()).arg(worldCell->y())
+                       .arg(originalTiles).arg(mask.tileCount())
+                       .arg(cleanup.bridgedTiles)
+                       .arg(cleanup.filledHoleTiles)
+                       .arg(cleanup.removedComponents)
+                       .arg(cleanup.removedTiles);
+        }
+    };
+    prepareMask(primaryMask, highwayRoadMaskRules,
+                QStringLiteral("primary"), primary);
+    prepareMask(secondaryMask, highwayRoadMaskRules,
+                QStringLiteral("secondary"), secondary);
+    prepareMask(tertiaryMask, highwayRoadMaskRules,
+                QStringLiteral("tertiary"), tertiary);
+    if (generateTrails)
+        prepareMask(trailMask, trailRoadMaskRules,
+                    QStringLiteral("trail"), trail);
+    prepareMask(railwayMask, railwayRoadMaskRules,
+                QStringLiteral("railway"), railway);
     auto createFeatures = [&](ClipperLib::Clipper &clipper,
                               const QString &key, const QString &value,
                               double simplificationTolerance,
@@ -894,7 +1276,6 @@ bool InGameMapFeatureGenerator::doRoads(WorldCell *worldCell, MapInfo *mapInfo)
         }
         qDeleteAll(polygons);
     };
-    const Preferences *preferences = Preferences::instance();
     createFeatures(primary, QStringLiteral("highway"), QStringLiteral("primary"),
                    preferences->roadSimplificationHighway(),
                    preferences->roadPointSpacingHighway());
@@ -904,9 +1285,11 @@ bool InGameMapFeatureGenerator::doRoads(WorldCell *worldCell, MapInfo *mapInfo)
     createFeatures(tertiary, QStringLiteral("highway"), QStringLiteral("tertiary"),
                    preferences->roadSimplificationHighway(),
                    preferences->roadPointSpacingHighway());
-    createFeatures(trail, QStringLiteral("highway"), QStringLiteral("trail"),
-                   preferences->roadSimplificationTrail(),
-                   preferences->roadPointSpacingTrail());
+    if (generateTrails) {
+        createFeatures(trail, QStringLiteral("highway"), QStringLiteral("trail"),
+                       preferences->roadSimplificationTrail(),
+                       preferences->roadPointSpacingTrail());
+    }
     createFeatures(railway, QStringLiteral("railway"), QStringLiteral("*"),
                    preferences->roadSimplificationRailway(),
                    preferences->roadPointSpacingRailway());
@@ -923,6 +1306,11 @@ bool InGameMapFeatureGenerator::doTrees(WorldCell *cell, MapInfo *mapInfo)
             mWorldDoc->removeInGameMapFeature(cell, feature->index());
         }
     }
+
+    const QSet<QString> treeTiles = featureTileSet(
+                Preferences::instance()->treeFeatureTiles());
+    if (treeTiles.isEmpty())
+        return true;
 
     DelayedMapLoader mapLoader;
     mapLoader.addMap(mapInfo);
@@ -949,7 +1337,7 @@ bool InGameMapFeatureGenerator::doTrees(WorldCell *cell, MapInfo *mapInfo)
         for (auto* cell : std::as_const(cells)) {
             if (cell->isEmpty())
                 continue;
-            if (cell->tile->id() >= 8 && cell->tile->id() <= 15 && cell->tile->tileset()->name() == QStringLiteral("vegetation_trees_01")) {
+            if (treeTiles.contains(featureTileName(cell->tile))) {
                 return true;
             }
         }

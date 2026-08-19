@@ -104,6 +104,8 @@ WorldDocument::WorldDocument(World *world, const QString &fileName)
 
     connect(&mUndoRedo, &WorldDocumentUndoRedo::generateLotSettingsChanged,
             this, &WorldDocument::generateLotSettingsChanged);
+    connect(&mUndoRedo, &WorldDocumentUndoRedo::otherWorldsChanged,
+            this, &WorldDocument::otherWorldsChanged);
 
     connect(&mUndoRedo, &WorldDocumentUndoRedo::cellAdded,
             this, &WorldDocument::cellAdded);
@@ -234,6 +236,7 @@ bool WorldDocument::save(const QString &filePath, QString &error)
         return false;
     }
 
+    QStringList exportWarnings;
     QString luaFileName = world()->getLuaSettings().spawnPointsFile;
     if (!luaFileName.isEmpty()) {
         LuaWriter writer;
@@ -243,6 +246,7 @@ bool WorldDocument::save(const QString &filePath, QString &error)
                                  .arg(writer.errorString())
                                  .arg(QDir::toNativeSeparators(luaFileName)));
         }
+        exportWarnings += writer.warnings();
     }
 
     luaFileName = world()->getLuaSettings().worldObjectsFile;
@@ -254,6 +258,21 @@ bool WorldDocument::save(const QString &filePath, QString &error)
                                  .arg(writer.errorString())
                                  .arg(QDir::toNativeSeparators(luaFileName)));
         }
+        exportWarnings += writer.warnings();
+    }
+
+    exportWarnings.removeDuplicates();
+    if (!exportWarnings.isEmpty()) {
+        for (const QString &warning : std::as_const(exportWarnings))
+            qWarning().noquote() << "Lua export skipped invalid record:" << warning;
+        QMessageBox message(MainWindow::instance());
+        message.setIcon(QMessageBox::Warning);
+        message.setWindowTitle(tr("Invalid zones skipped"));
+        message.setText(tr("The project was saved and the LOT export remains available, but %1 invalid zone or spawn record(s) were omitted from the Lua exports.")
+                        .arg(exportWarnings.size()));
+        message.setInformativeText(tr("The objects remain in the PZW project. Correct their type, size or properties, then save again to include them."));
+        message.setDetailedText(exportWarnings.join(QLatin1Char('\n')));
+        message.exec();
     }
 
 #if 0
@@ -965,6 +984,18 @@ void WorldDocument::changeGenerateLotsSettings(const GenerateLotsSettings &setti
 void WorldDocument::changeLuaSettings(const LuaSettings &settings)
 {
     undoStack()->push(new ChangeLuaSettings(this, settings));
+}
+
+void WorldDocument::changeOtherWorlds(const QStringList &paths)
+{
+    if (paths == mWorld->otherWorlds())
+        return;
+    undoStack()->push(new ChangeOtherWorlds(this, paths));
+}
+
+void WorldDocument::refreshOtherWorlds()
+{
+    emit otherWorldsChanged();
 }
 
 void WorldDocument::setInGameMapXMLFileName(const QString &fileName)
@@ -1720,6 +1751,14 @@ LuaSettings WorldDocumentUndoRedo::changeLuaSettings(const LuaSettings &settings
 {
     LuaSettings old = mWorld->getLuaSettings();
     mWorld->setLuaSettings(settings);
+    return old;
+}
+
+QStringList WorldDocumentUndoRedo::changeOtherWorlds(const QStringList &paths)
+{
+    const QStringList old = mWorld->otherWorlds();
+    mWorld->setOtherWorlds(paths);
+    emit otherWorldsChanged();
     return old;
 }
 

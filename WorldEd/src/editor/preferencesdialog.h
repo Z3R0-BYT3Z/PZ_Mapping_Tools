@@ -23,6 +23,7 @@
 class WorldDocument;
 
 class QListWidgetItem;
+class QListWidget;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -41,6 +42,7 @@ public:
 private slots:
     void browseTilesDirectory();
     void browseProjectZomboidDirectory();
+    void rebuildVehicleAtlas();
     void themeChanged(int index);
     void gridColorChanged(const QColor &gridColor);
 
@@ -56,10 +58,18 @@ private:
     QSpinBox *mRoadPointSpacingHighway;
     QDoubleSpinBox *mRoadSimplificationTrail;
     QSpinBox *mRoadPointSpacingTrail;
+    QCheckBox *mGenerateTrailFeatures;
     QDoubleSpinBox *mRoadSimplificationRailway;
     QSpinBox *mRoadPointSpacingRailway;
     QCheckBox *mSyncThemeCheckBox;
     QComboBox *mAutoSaveCombo;
+    QListWidget *mTreeFeatureTiles;
+    QListWidget *mPrimaryRoadFeatureTiles;
+    QListWidget *mSecondaryRoadFeatureTiles;
+    QListWidget *mTertiaryRoadFeatureTiles;
+
+    void updateVehicleAtlasStatus();
+    QStringList tileNames(QListWidget *list) const;
 };
 
 #endif // PREFERENCESDIALOG_H

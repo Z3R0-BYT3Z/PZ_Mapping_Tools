@@ -29,6 +29,7 @@
 #include <QPoint>
 #include <QRegion>
 #include <QSize>
+#include <QStringList>
 
 class BMPToTMXSettings;
 class GenerateLotsSettings;
@@ -145,6 +146,7 @@ public:
     TMXToBMPSettings changeTMXToBMPSettings(const TMXToBMPSettings &settings);
     GenerateLotsSettings changeGenerateLotsSettings(const GenerateLotsSettings &settings);
     LuaSettings changeLuaSettings(const LuaSettings &settings);
+    QStringList changeOtherWorlds(const QStringList &paths);
 
     QPoint moveBMP(WorldBMP *bmp, const QPoint &topLeft);
     void insertBMP(int index, WorldBMP *bmp);
@@ -191,6 +193,7 @@ signals:
     void worldResized(const QSize &oldSize);
 
     void generateLotSettingsChanged();
+    void otherWorldsChanged();
 
     void cellAdded(WorldCell *cell);
     void cellAboutToBeRemoved(WorldCell *cell);
@@ -427,6 +430,8 @@ public:
     void changeTMXToBMPSettings(const TMXToBMPSettings &settings);
     void changeGenerateLotsSettings(const GenerateLotsSettings &settings);
     void changeLuaSettings(const LuaSettings &settings);
+    void changeOtherWorlds(const QStringList &paths);
+    void refreshOtherWorlds();
 
     void setInGameMapXMLFileName(const QString &fileName);
     QString getInGameMapXMLFileName() const;
@@ -493,6 +498,7 @@ signals:
     void worldResized(const QSize &oldSize);
 
     void generateLotSettingsChanged();
+    void otherWorldsChanged();
 
     void cellAdded(WorldCell *cell);
     void cellAboutToBeRemoved(WorldCell *cell);

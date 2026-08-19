@@ -144,8 +144,17 @@ RoomsDialog::RoomsDialog(BuildingDocument *doc, Room *initialRoom, QWidget *pare
     connect(ui->actionMoveUp, &QAction::triggered, this, &RoomsDialog::moveRoomUp);
     connect(ui->actionMoveDown, &QAction::triggered, this, &RoomsDialog::moveRoomDown);
 
-    connect(ui->name, &QComboBox::currentTextChanged, this, &RoomsDialog::nameEdited);
-    connect(ui->internalName, &QComboBox::currentTextChanged, this, &RoomsDialog::internalNameEdited);
+    connect(ui->name, qOverload<const QString &>(&QComboBox::activated),
+            this, &RoomsDialog::nameEdited);
+    connect(ui->name->lineEdit(), &QLineEdit::editingFinished,
+            this, [this]() { nameEdited(ui->name->currentText()); });
+    connect(ui->internalName,
+            qOverload<const QString &>(&QComboBox::activated),
+            this, &RoomsDialog::internalNameEdited);
+    connect(ui->internalName->lineEdit(), &QLineEdit::editingFinished,
+            this, [this]() {
+        internalNameEdited(ui->internalName->currentText());
+    });
     connect(ui->color, &Tiled::Internal::ColorButton::colorChanged, this, &RoomsDialog::colorChanged);
     connect(ui->tilesList, &QListWidget::itemSelectionChanged,
             this, &RoomsDialog::tileSelectionChanged);

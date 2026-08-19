@@ -19,6 +19,7 @@
 #define LUAWRITER_H
 
 #include <QString>
+#include <QStringList>
 
 class LuaWriterPrivate;
 class World;
@@ -36,6 +37,10 @@ public:
     bool writeWorldObjects(World *world, const QString &filePath);
     bool writeRoomTones(World *world, const QString &filePath);
     QString errorString() const;
+    QStringList warnings() const;
+
+    static bool validateSpawnPointExport(QString *summary, QString *error);
+    static bool validateZoneExport(QString *summary, QString *error);
 
 private:
     void writeWorld(World *world, QIODevice *device, const QString &absDirPath);

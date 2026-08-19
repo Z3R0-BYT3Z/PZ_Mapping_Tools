@@ -16,7 +16,6 @@ enum
 {
     name = Professions
     values = [
-        all
         burglar
         burgerflipper
         carpenter
@@ -56,8 +55,8 @@ property
 property
 {
     name = Professions
-    default = all
-    description = Professions allowed to use this spawn point. Choose one or more values; all allows every profession.
+    default = unemployed
+    description = Professions allowed to use this spawn point. Choose one or more explicit values.
     enum = Professions
 }
 
@@ -68,7 +67,7 @@ template
     property
     {
         name = Professions
-        value = all
+        value = unemployed
     }
 }
 
@@ -368,6 +367,21 @@ template
     {
         name = WaterSpeed
         value = 1.0
+    }
+}
+
+template
+{
+    name = WaterFlow
+    property
+    {
+        name = WaterDirection
+        value = 0
+    }
+    property
+    {
+        name = WaterSpeed
+        value = 0.0
     }
 }
 

@@ -652,11 +652,32 @@
 
   <h2 id="features">InGameMap feature generation</h2>
 
+  <h3>Generate Tree Features</h3>
+  <p>Select cells, then use
+  <strong>InGameMap &gt; Generate Tree Features</strong>. Tree detection uses
+  the exact tile names listed under
+  <strong>Preferences &gt; Feature Generation &gt; Trees</strong>. The default
+  catalogue includes the recognized classic vegetation trees,
+  <code>jumbo_tree_01_0</code>, and the Build 42 species-specific Jumbo, XL,
+  and XXL tree tiles.</p>
+
   <h3>Generate Road Features</h3>
   <p>Select cells, then use
   <strong>InGameMap &gt; Generate Road Features</strong>. The generator derives
-  polygons for primary, secondary and tertiary roads, trails and railways from
-  recognized map tiles.</p>
+  polygons for primary, secondary and tertiary roads and railways from
+  recognized map tiles. Trail generation from generic dirt tiles is disabled
+  by default because those tiles can also represent bare ground, fields,
+  construction areas or riverbeds. Enable it explicitly in Preferences only
+  when the project uses those dirt tiles exclusively as paths. Squares covered
+  by recognized water tiles or water tile properties are always excluded from
+  inferred trails.</p>
+
+  <p>Before polygon conversion, each road-type mask closes isolated straight
+  one-tile breaks and fills only small enclosed holes. Short disconnected
+  fragments are discarded, while long narrow paths and sections continuing
+  across a cell edge remain valid. Larger holes and genuinely separate roads
+  remain separate so the cleanup does not merge distinct streets or erase
+  intentional islands.</p>
 
   <h3>Feature Generation preferences</h3>
   <table>
@@ -664,12 +685,18 @@
     <tbody>
       <tr><td>Simplification tolerance</td><td>How far the simplified contour may deviate, in tiles.</td><td>Higher values reduce vertices but can soften corners or narrow roads.</td></tr>
       <tr><td>Maximum point spacing</td><td>Prevents very long contour segments.</td><td>Lower values preserve long-shape detail but create more points.</td></tr>
+      <tr><td>Generate Trail features from dirt tiles</td><td>Enables the ambiguous dirt-tile trail heuristic.</td><td>Leave disabled unless those tiles represent paths throughout the selected cells.</td></tr>
+      <tr><td>Tree tile catalogue</td><td>Exact tiles recognized by Generate Tree Features.</td><td>Custom tree tiles can be added. An empty list disables Tree detection.</td></tr>
+      <tr><td>Primary, Secondary, and Tertiary Road catalogues</td><td>Exact tiles assigned to each generated highway class.</td><td>A tile can be reclassified by moving it between lists. An empty list disables only that road class.</td></tr>
     </tbody>
   </table>
 
   <p>Separate settings are stored for normal roads, trails and railways because
   their shapes and expected precision differ. Defaults are deliberately
-  conservative.</p>
+  conservative. Tile catalogues provide Add Tile, Remove Selected, and Restore
+  Defaults controls. They are stored in the portable WorldEd INI. A padded
+  tile ID such as <code>blends_street_01_032</code> is accepted and normalized
+  to the game-style name <code>blends_street_01_32</code>.</p>
 
   <h3>Polygon repair and export safety</h3>
   <p>Generated or manually edited geometry is normalized before XML or binary

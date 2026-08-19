@@ -170,6 +170,9 @@ public:
 
     QPolygonF createPolylineOutline();
 
+    bool hasVehicleMeshPreview() const;
+    void paintVehicleMeshPreviews(QPainter *painter) const;
+
 protected:
     friend class ObjectPointHandle;
     friend class EditPolygonObjectTool;
@@ -355,6 +358,9 @@ public:
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *);
     bool isSpawnPoint() const { return true; }
     bool hoverToolCurrent() const;
+
+private:
+    QPointF renderPosition() const;
 };
 
 /////

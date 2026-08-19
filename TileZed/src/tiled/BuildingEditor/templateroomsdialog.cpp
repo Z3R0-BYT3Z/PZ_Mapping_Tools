@@ -149,8 +149,17 @@ TemplateRoomsDialog::TemplateRoomsDialog(TemplateDocument *doc, Room *initialRoo
     connect(ui->actionMoveUp, &QAction::triggered, this, &TemplateRoomsDialog::moveRoomUp);
     connect(ui->actionMoveDown, &QAction::triggered, this, &TemplateRoomsDialog::moveRoomDown);
 
-    connect(ui->name, &QComboBox::currentTextChanged, this, &TemplateRoomsDialog::nameEdited);
-    connect(ui->internalName, &QComboBox::currentTextChanged, this, &TemplateRoomsDialog::internalNameEdited);
+    connect(ui->name, qOverload<const QString &>(&QComboBox::activated),
+            this, &TemplateRoomsDialog::nameEdited);
+    connect(ui->name->lineEdit(), &QLineEdit::editingFinished,
+            this, [this]() { nameEdited(ui->name->currentText()); });
+    connect(ui->internalName,
+            qOverload<const QString &>(&QComboBox::activated),
+            this, &TemplateRoomsDialog::internalNameEdited);
+    connect(ui->internalName->lineEdit(), &QLineEdit::editingFinished,
+            this, [this]() {
+        internalNameEdited(ui->internalName->currentText());
+    });
     connect(ui->color, &Tiled::Internal::ColorButton::colorChanged, this, &TemplateRoomsDialog::colorChanged);
     connect(ui->tilesList, &QListWidget::itemSelectionChanged,
             this, &TemplateRoomsDialog::tileSelectionChanged);

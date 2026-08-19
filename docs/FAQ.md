@@ -334,6 +334,23 @@ other programs using the Lua file.
 **How to avoid it:** keep generated Lua outputs inside the writable project and
 deploy copies only after WorldEd finishes saving.
 
+### `Invalid zones skipped` or `Saved with invalid zones skipped`
+
+**Why it appears:** WorldEd found a SpawnPoint, WaterFlow, WaterZone, or
+RoomTone record that the Build 42 Lua loader cannot use safely. The detailed
+list identifies missing properties, unsupported SpawnPoint profession `all`,
+non-integral coordinates, an invalid geometry type, or an incorrect size.
+
+**What to do:** open each listed object, correct its geometry and properties,
+then save or export again. WaterFlow and RoomTone must be 1 x 1 rectangles.
+WaterZone can cover a larger rectangle but requires boolean `WaterGround` and
+`WaterShore`. SpawnPoint requires one or more explicit professions.
+
+**How to avoid it:** create these records with their matching object group or
+dedicated placement tool. WorldEd then supplies valid default properties.
+Invalid records are omitted from the Lua file, but remain in the PZW and do
+not disable LOT generation.
+
 ### Biomemap messages
 
 | Message | Why it appears | What to do | How to avoid it |

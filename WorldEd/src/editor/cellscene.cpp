@@ -32,6 +32,7 @@
 #include "scenetools.h"
 #include "tilesetmanager.h"
 #include "undoredo.h"
+#include "vehiclemeshpreview.h"
 #include "world.h"
 #include "worldcell.h"
 #include "worldconstants.h"
@@ -83,6 +84,31 @@
 using namespace Tiled;
 
 namespace {
+
+qreal vehicleMeshPreviewScale()
+{
+    return Preferences::instance()->vehicleMeshPreviewScale();
+}
+
+qreal vehicleMeshPreviewQuality()
+{
+    return Preferences::instance()->vehicleMeshPreviewQuality();
+}
+
+qreal vehicleMeshPreviewMargin()
+{
+    return 140.0 * vehicleMeshPreviewScale();
+}
+
+quint32 mixedVehiclePreviewSeed(quint32 value)
+{
+    value ^= value >> 16;
+    value *= 0x7feb352dU;
+    value ^= value >> 15;
+    value *= 0x846ca68bU;
+    value ^= value >> 16;
+    return value;
+}
 
 struct BasementGroundOpening
 {
@@ -1936,6 +1962,323 @@ static void resolveProperties(PropertyHolder *ph, PropertyList &result)
     }
 }
 
+bool ObjectItem::hasVehicleMeshPreview() const
+{
+    const QString group = mObject->group()
+            ? mObject->group()->name() : QString();
+    const QString type = mObject->type()
+            ? mObject->type()->name() : QString();
+    return group.compare(QLatin1String("ParkingStall"),
+                         Qt::CaseInsensitive) == 0
+            || type.compare(QLatin1String("ParkingStall"),
+                            Qt::CaseInsensitive) == 0
+            || type.compare(QLatin1String("Vehicle"),
+                            Qt::CaseInsensitive) == 0
+            || group.contains(QLatin1String("TrafficJam"),
+                              Qt::CaseInsensitive)
+            || type.contains(QLatin1String("TrafficJam"),
+                             Qt::CaseInsensitive);
+}
+
+void ObjectItem::paintVehicleMeshPreviews(QPainter *painter) const
+{
+    if (!painter || !hasVehicleMeshPreview()
+            || !Preferences::instance()->showVehicleMeshPreviews()) {
+        return;
+    }
+    const QString gameDirectory =
+            Preferences::instance()->projectZomboidDirectory();
+    if (gameDirectory.isEmpty())
+        return;
+
+    PropertyList properties;
+    resolveProperties(mObject, properties);
+    auto propertyValue = [&properties](const QString &name) {
+        for (Property *property : qAsConst(properties)) {
+            if (property && property->mDefinition
+                    && property->mDefinition->mName.compare(
+                        name, Qt::CaseInsensitive) == 0) {
+                return property->mValue.trimmed();
+            }
+        }
+        return QString();
+    };
+    auto angleForDirection = [](const QString &direction) {
+        if (direction.compare(QLatin1String("E"),
+                              Qt::CaseInsensitive) == 0)
+            return qreal(M_PI_2);
+        if (direction.compare(QLatin1String("S"),
+                              Qt::CaseInsensitive) == 0)
+            return qreal(M_PI);
+        if (direction.compare(QLatin1String("W"),
+                              Qt::CaseInsensitive) == 0)
+            return qreal(M_PI * 1.5);
+        return qreal(0.0);
+    };
+    auto angleForVector = [](const QPointF &vector) {
+        return qAtan2(vector.x(), -vector.y());
+    };
+
+    struct Placement
+    {
+        QPointF tile;
+        qreal angle = 0.0;
+        qreal minimumAngleJitter = 0.0;
+        qreal maximumAngleJitter = 0.0;
+        int variant = 0;
+        bool mayReverse = false;
+    };
+    QVector<Placement> placements;
+    const int maximumPlacements = 96;
+    QString zoneName = mObject->name().trimmed();
+    if (zoneName.isEmpty()) {
+        const QString group = mObject->group()
+                ? mObject->group()->name() : QString();
+        const QString type = mObject->type()
+                ? mObject->type()->name() : QString();
+        if (group.contains(QLatin1String("TrafficJam"),
+                           Qt::CaseInsensitive)) {
+            zoneName = group;
+        } else if (type.contains(QLatin1String("TrafficJam"),
+                                 Qt::CaseInsensitive)) {
+            zoneName = type;
+        } else {
+            zoneName = QStringLiteral("parkingstall");
+        }
+    }
+    const QString zoneNameLower = zoneName.toLower();
+    const bool trafficJam = zoneNameLower.contains(
+                QLatin1String("trafficjam"));
+
+    if (mObject->isPolyline() && mObject->points().size() >= 2) {
+        qreal totalPolylineLength = 0.0;
+        for (int pointIndex = 0;
+             pointIndex + 1 < mObject->points().size();
+             ++pointIndex) {
+            const WorldCellObjectPoint first =
+                    mObject->points().at(pointIndex);
+            const WorldCellObjectPoint second =
+                    mObject->points().at(pointIndex + 1);
+            totalPolylineLength += QLineF(
+                        QPointF(first.x, first.y),
+                        QPointF(second.x, second.y)).length();
+        }
+        qreal distanceFromStart = 0.0;
+        int variant = 0;
+        for (int pointIndex = 0;
+             pointIndex + 1 < mObject->points().size()
+             && placements.size() < maximumPlacements;
+             ++pointIndex) {
+            const WorldCellObjectPoint first =
+                    mObject->points().at(pointIndex);
+            const WorldCellObjectPoint second =
+                    mObject->points().at(pointIndex + 1);
+            const QPointF start(first.x, first.y);
+            const QPointF vector(second.x - first.x,
+                                 second.y - first.y);
+            const qreal length = QLineF(start, start + vector).length();
+            if (length < 0.001)
+                continue;
+            const QPointF unit = vector / length;
+            const QPointF perpendicular(-unit.y(), unit.x());
+            const qreal spacing = trafficJam ? 6.0 : 5.0;
+            const qreal firstDistance = trafficJam ? 3.0 : 2.5;
+            for (qreal distance = firstDistance;
+                 distance < length - (trafficJam ? 2.9 : 0.0)
+                 && placements.size() < maximumPlacements;
+                 distance += spacing) {
+                QVector<qreal> laneOffsets;
+                laneOffsets.append(0.0);
+                if (trafficJam) {
+                    for (qreal lane = 2.0;
+                         lane + 1.5 <= mObject->polylineWidth() / 2.0;
+                         lane += 2.0) {
+                        laneOffsets.append(lane);
+                        laneOffsets.append(-lane);
+                    }
+                }
+                for (qreal lane : qAsConst(laneOffsets)) {
+                    if (placements.size() >= maximumPlacements)
+                        break;
+                    Placement placement;
+                    placement.tile = start + unit * distance
+                            + perpendicular * lane + mDragOffset;
+                    placement.angle = angleForVector(vector);
+                    if (trafficJam && totalPolylineLength > 0.0) {
+                        const qreal angleRange = M_PI_2
+                                * qMin(1.0,
+                                       (distanceFromStart + distance)
+                                       / totalPolylineLength);
+                        placement.minimumAngleJitter = -angleRange;
+                        placement.maximumAngleJitter = angleRange;
+                    }
+                    placement.variant = variant++;
+                    placements.append(placement);
+                }
+            }
+            distanceFromStart += length;
+        }
+    } else {
+        const QRectF bounds(mObject->pos() + mDragOffset,
+                            mObject->size() + mResizeDelta);
+        QString direction = propertyValue(QStringLiteral("Direction"));
+        direction = direction.trimmed().toUpper();
+        if (trafficJam) {
+            if (zoneNameLower.endsWith(QLatin1Char('e')))
+                direction = QStringLiteral("E");
+            else if (zoneNameLower.endsWith(QLatin1Char('s')))
+                direction = QStringLiteral("S");
+            else if (zoneNameLower.endsWith(QLatin1Char('n')))
+                direction = QStringLiteral("N");
+            else
+                direction = QStringLiteral("W");
+            const bool vertical = direction == QLatin1String("N")
+                    || direction == QLatin1String("S");
+            const qreal xStart = bounds.left() + (vertical ? 1.5 : 3.5);
+            const qreal yStart = bounds.top() + (vertical ? 3.5 : 1.5);
+            const qreal xSpacing = vertical ? 3.0 : 6.0;
+            const qreal ySpacing = vertical ? 6.0 : 3.0;
+            int variant = 0;
+            for (qreal y = yStart;
+                 y < bounds.bottom()
+                 && placements.size() < maximumPlacements;
+                 y += ySpacing) {
+                for (qreal x = xStart;
+                     x < bounds.right()
+                     && placements.size() < maximumPlacements;
+                     x += xSpacing) {
+                    Placement placement;
+                    placement.tile = QPointF(x, y);
+                    placement.angle = angleForDirection(direction);
+                    qreal angleRange = 0.0;
+                    if (direction == QLatin1String("W"))
+                        angleRange = qAbs(bounds.right() - x) / 20.0;
+                    else if (direction == QLatin1String("E"))
+                        angleRange = qAbs(x - bounds.left()) / 20.0;
+                    else if (direction == QLatin1String("S"))
+                        angleRange = qAbs(y - bounds.top()) / 20.0;
+                    else
+                        angleRange = qAbs(bounds.bottom() - y) / 20.0;
+                    angleRange = qMin(2.0, angleRange);
+                    placement.minimumAngleJitter = -0.25;
+                    placement.maximumAngleJitter = angleRange - 0.25;
+                    placement.variant = variant++;
+                    placements.append(placement);
+                }
+            }
+        } else {
+            int stallWidth = 3;
+            int stallLength = 4;
+            QString defaultDirection = QStringLiteral("N");
+            if (!((int(bounds.width()) != stallLength
+                   && int(bounds.width()) != stallLength + 1
+                   && int(bounds.width()) != stallLength + 2)
+                  || (bounds.height() > stallWidth
+                      && bounds.height() < stallLength + 2))) {
+                defaultDirection = QStringLiteral("W");
+            }
+            if (direction.isEmpty())
+                direction = defaultDirection;
+            stallLength = 5;
+            if (direction.compare(QLatin1String("N"),
+                                  Qt::CaseInsensitive) != 0
+                    && direction.compare(QLatin1String("S"),
+                                         Qt::CaseInsensitive) != 0) {
+                stallLength = 3;
+                stallWidth = 5;
+            }
+            const bool faceDirection = propertyValue(
+                        QStringLiteral("FaceDirection"))
+                    .compare(QLatin1String("true"),
+                             Qt::CaseInsensitive) == 0;
+            int variant = 0;
+            for (qreal y = bounds.top() + stallLength / 2.0;
+                 y < bounds.bottom()
+                 && placements.size() < maximumPlacements;
+                 y += stallLength) {
+                for (qreal x = bounds.left() + stallWidth / 2.0;
+                     x < bounds.right()
+                     && placements.size() < maximumPlacements;
+                     x += stallWidth) {
+                    Placement placement;
+                    placement.tile = QPointF(x, y);
+                    placement.angle = angleForDirection(direction);
+                    placement.mayReverse = !faceDirection;
+                    placement.variant = variant++;
+                    placements.append(placement);
+                }
+            }
+        }
+    }
+
+    struct DrawVehicle
+    {
+        QPointF anchor;
+        VehicleMeshPreview::RenderedVehicle preview;
+    };
+    QVector<DrawVehicle> drawVehicles;
+    drawVehicles.reserve(placements.size());
+    const qreal previewScale = vehicleMeshPreviewScale();
+    const qreal rasterScale = qMax(vehicleMeshPreviewQuality(),
+                                   previewScale);
+    quint32 zoneVariantSeed = qHash(zoneNameLower);
+    zoneVariantSeed ^= quint32(qRound(mObject->x() * 16.0)) * 0x9e3779b9U;
+    zoneVariantSeed ^= quint32(qRound(mObject->y() * 16.0)) * 0x85ebca6bU;
+    zoneVariantSeed ^= quint32(mObject->level()) * 0xc2b2ae35U;
+    for (const Placement &placement : qAsConst(placements)) {
+        DrawVehicle draw;
+        const quint32 placementVariant = zoneVariantSeed
+                + quint32(placement.variant + 1) * 0x27d4eb2dU;
+        qreal placementAngle = placement.angle;
+        if (placement.mayReverse
+                && (mixedVehiclePreviewSeed(placementVariant
+                                             ^ 0x5bd1e995U) & 1U)) {
+            placementAngle += M_PI;
+        }
+        draw.preview = VehicleMeshPreview::instance()->previewForPlacement(
+                    gameDirectory, zoneName, placementAngle,
+                    int(zoneVariantSeed & 0x7fffffffU),
+                    int(placementVariant & 0x7fffffffU),
+                    rasterScale, mObject->isPolyline(),
+                    placement.minimumAngleJitter,
+                    placement.maximumAngleJitter);
+        if (!draw.preview.isValid())
+            continue;
+        draw.anchor = mRenderer->tileToPixelCoords(
+                    placement.tile, mObject->level());
+        drawVehicles.append(draw);
+    }
+    std::sort(drawVehicles.begin(), drawVehicles.end(),
+              [](const DrawVehicle &left, const DrawVehicle &right) {
+        return left.anchor.y() < right.anchor.y();
+    });
+    static bool reportedVehicleDraw = false;
+    if (!reportedVehicleDraw && !drawVehicles.isEmpty()) {
+        reportedVehicleDraw = true;
+        qInfo().noquote()
+                << "Vehicle previews active:"
+                << drawVehicles.size() << "vehicle(s) for"
+                << zoneName << "at raster scale"
+                << rasterScale << "and display scale"
+                << previewScale;
+    }
+    painter->save();
+    painter->setOpacity(0.92);
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    for (const DrawVehicle &draw : qAsConst(drawVehicles)) {
+        const qreal imageScale = previewScale
+                / qMax(0.01, draw.preview.rasterScale);
+        const QSizeF scaledSize(
+                    draw.preview.image.width() * imageScale,
+                    draw.preview.image.height() * imageScale);
+        const QRectF target(draw.anchor
+                            - draw.preview.anchor * imageScale,
+                            scaledSize);
+        painter->drawImage(target, draw.preview.image);
+    }
+    painter->restore();
+}
+
 void ObjectLabelItem::synch()
 {
     QString text = mItem->object()->name();
@@ -1947,6 +2290,17 @@ void ObjectLabelItem::synch()
                 text += QLatin1String("\n");
             text += p->mDefinition->mName + QLatin1String("=") + p->mValue;
         }
+    }
+
+    if (mItem->object()->isSpawnPoint()) {
+        const QPointF absolute =
+                mItem->object()->absoluteWorldPosition();
+        if (!text.isEmpty())
+            text += QLatin1Char('\n');
+        text += QString::fromLatin1("posX=%1, posY=%2, posZ=%3")
+                .arg(qRound64(absolute.x()))
+                .arg(qRound64(absolute.y()))
+                .arg(mItem->object()->level());
     }
 
     if (!mItem->resizeDelta().isNull() || mShowSize) {
@@ -2141,6 +2495,11 @@ ObjectItem::ObjectItem(WorldCellObject *obj, CellScene *scene, QGraphicsItem *pa
     setAcceptHoverEvents(true);
     mBoundingRect = ::boundingRect(mRenderer, QRectF(mObject->pos(), mObject->size()),
                                    mObject->level()).adjusted(-20, -20, 20, 20);
+    if (hasVehicleMeshPreview())
+        mBoundingRect.adjust(-vehicleMeshPreviewMargin(),
+                             -vehicleMeshPreviewMargin(),
+                             vehicleMeshPreviewMargin(),
+                             vehicleMeshPreviewMargin());
     mResizeHandle->setVisible(false);
 
     // Update the tooltip
@@ -3535,6 +3894,7 @@ void ObjectItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWid
 #endif
         }
 #endif
+        paintVehicleMeshPreviews(painter);
         return;
     }
 
@@ -3544,6 +3904,7 @@ void ObjectItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWid
     if (isMouseOverHighlighted())
         color = color.lighter();
     mRenderer->drawFancyRectangle(painter, tileBounds(), color, mObject->level());
+    paintVehicleMeshPreviews(painter);
 
     /**
       * There is something badly broken with the OpenGL line stroking when the
@@ -3761,6 +4122,11 @@ void ObjectItem::synchWithObject()
     if (mObject->geometryType() == ObjectGeometryType::INVALID) {
         QRectF tileBounds(mObject->pos() + mDragOffset, mObject->size() + mResizeDelta);
         QRectF sceneBounds = ::boundingRect(mRenderer, tileBounds, mObject->level()).adjusted(-20, -20, 20, 20);
+        if (hasVehicleMeshPreview())
+            sceneBounds.adjust(-vehicleMeshPreviewMargin(),
+                               -vehicleMeshPreviewMargin(),
+                               vehicleMeshPreviewMargin(),
+                               vehicleMeshPreviewMargin());
         if (sceneBounds != mBoundingRect) {
             prepareGeometryChange();
             mBoundingRect = sceneBounds;
@@ -3782,6 +4148,11 @@ void ObjectItem::synchWithObject()
         mPolygon += { qreal(center.x) , qreal(center.y) };
         QPointF scenePos = mRenderer->tileToPixelCoords(mPolygon[0] + mDragOffset);
         QRectF bounds(scenePos.x() - 10, scenePos.y() - 10, 20, 20);
+        if (hasVehicleMeshPreview())
+            bounds.adjust(-vehicleMeshPreviewMargin(),
+                          -vehicleMeshPreviewMargin(),
+                          vehicleMeshPreviewMargin(),
+                          vehicleMeshPreviewMargin());
         if (bounds != mBoundingRect) {
             prepareGeometryChange();
             mBoundingRect = bounds;
@@ -3802,6 +4173,11 @@ void ObjectItem::synchWithObject()
             if (mPolylineOutline.empty())
                 break;
             QRectF bounds = mRenderer->tileToPixelCoords(mPolylineOutline.translated(mDragOffset), mObject->level()).boundingRect().adjusted(-20, -20, 20, 20);
+            if (hasVehicleMeshPreview())
+                bounds.adjust(-vehicleMeshPreviewMargin(),
+                              -vehicleMeshPreviewMargin(),
+                              vehicleMeshPreviewMargin(),
+                              vehicleMeshPreviewMargin());
             if (bounds != mBoundingRect) {
                 prepareGeometryChange();
                 mBoundingRect = bounds;
@@ -3812,6 +4188,11 @@ void ObjectItem::synchWithObject()
     }
 
     QRectF bounds = mRenderer->tileToPixelCoords(mPolygon.translated(mDragOffset), mObject->level()).boundingRect().adjusted(-20, -20, 20, 20);
+    if (hasVehicleMeshPreview())
+        bounds.adjust(-vehicleMeshPreviewMargin(),
+                      -vehicleMeshPreviewMargin(),
+                      vehicleMeshPreviewMargin(),
+                      vehicleMeshPreviewMargin());
     if (bounds != mBoundingRect) {
         prepareGeometryChange();
         mBoundingRect = bounds;
@@ -4570,10 +4951,20 @@ SpawnPointItem::SpawnPointItem(WorldCellObject *object, CellScene *scene, QGraph
 //    setFlag(ItemIgnoresTransformations);
 }
 
+QPointF SpawnPointItem::renderPosition() const
+{
+    World *world = mObject->cell()->world();
+    const QPoint origin = world->getGenerateLotsSettings().worldOrigin;
+    const QPointF cellOrigin(
+                (mObject->cell()->x() + origin.x()) * world->cellSize(),
+                (mObject->cell()->y() + origin.y()) * world->cellSize());
+    return mObject->absoluteWorldPosition() - cellOrigin + mDragOffset;
+}
+
 QRectF SpawnPointItem::boundingRect() const
 {
     QRectF bounds = ObjectItem::boundingRect();
-    QPointF pos = mObject->pos() + mDragOffset;
+    QPointF pos = renderPosition();
     bounds |= mRenderer->boundingRect(QRect(pos.x() - 3, pos.y() - 3, 1, 1), mObject->level());
     bounds |= mRenderer->boundingRect(QRect(pos.x(), pos.y(), 1, 1), mObject->level());
     return bounds;
@@ -4594,7 +4985,7 @@ void SpawnPointItem::paint(QPainter *painter,
     int level = mObject->level();
 
     qreal inset = 0.15;
-    QPointF pos = mObject->pos() + mDragOffset;
+    QPointF pos = renderPosition();
 
     // Bottom-right
     QPolygonF poly;
@@ -5155,6 +5546,45 @@ CellScene::CellScene(QObject *parent)
     connect(prefs, &Preferences::gridWidthChanged, this, [this]{this->update();});
     connect(prefs, &Preferences::showObjectsChanged, this, &CellScene::showObjectsChanged);
     connect(prefs, &Preferences::showObjectNamesChanged, this, &CellScene::showObjectNamesChanged);
+    connect(prefs, &Preferences::showVehicleMeshPreviewsChanged,
+            this, [this](bool) {
+        for (ObjectItem *item : qAsConst(mObjectItems)) {
+            if (item)
+                item->update();
+        }
+    });
+    connect(prefs, &Preferences::vehicleMeshPreviewScaleChanged,
+            this, [this](qreal) {
+        for (ObjectItem *item : qAsConst(mObjectItems)) {
+            if (item) {
+                item->synchWithObject();
+                item->update();
+            }
+        }
+    });
+    connect(prefs, &Preferences::vehicleMeshPreviewQualityChanged,
+            this, [this](qreal) {
+        VehicleMeshPreview::instance()->clearRendered();
+        for (ObjectItem *item : qAsConst(mObjectItems)) {
+            if (item)
+                item->update();
+        }
+    });
+    connect(prefs, &Preferences::vehicleMeshPreviewAtlasChanged,
+            this, [this]() {
+        for (ObjectItem *item : qAsConst(mObjectItems)) {
+            if (item)
+                item->update();
+        }
+    });
+    connect(prefs, &Preferences::projectZomboidDirectoryChanged,
+            this, [this]() {
+        VehicleMeshPreview::instance()->clear();
+        for (ObjectItem *item : qAsConst(mObjectItems)) {
+            if (item)
+                item->update();
+        }
+    });
     connect(prefs, &Preferences::showLotFloorsOnlyChanged, this, &CellScene::showLotFloorsOnlyChanged);
     connect(prefs, &Preferences::showInvisibleTilesChanged, this, &CellScene::showInvisibleTilesChanged);
     connect(MapImageManager::instance(), &MapImageManager::mapImageChanged,

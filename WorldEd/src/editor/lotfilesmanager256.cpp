@@ -47,6 +47,7 @@
 #include "tileset.h"
 
 #include <QDebug>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QMessageBox>
@@ -2668,6 +2669,8 @@ int CombinedCellMaps::checkLoading(WorldDocument *worldDoc)
             qInfo() << "LOT output cell" << mCell256X << mCell256Y
                     << "finished loading referenced TMX/TBX sub-maps";
         }
+        if (!reportVerticalPlacements())
+            return -1;
         return 1;
     }
     World *world = worldDoc->world();
@@ -2741,7 +2744,46 @@ int CombinedCellMaps::checkLoading(WorldDocument *worldDoc)
         mLoggedPendingSubMaps = true;
         return 0;
     }
+    if (!reportVerticalPlacements())
+        return -1;
     return 1;
+}
+
+bool CombinedCellMaps::reportVerticalPlacements()
+{
+    if (mLoggedVerticalPlacements)
+        return true;
+    for (MapComposite *subMap : mMapComposite->subMaps()) {
+        if (subMap->isCellMap() || subMap->levelOffset() == 0)
+            continue;
+        const int sourceMin = subMap->minLevel();
+        const int sourceMax = subMap->maxLevel();
+        const int worldMin = sourceMin + subMap->levelOffset();
+        const int worldMax = sourceMax + subMap->levelOffset();
+        const QString sourcePath = subMap->mapInfo()->path();
+        if (worldMin < MIN_WORLD_LEVEL || worldMax > MAX_WORLD_LEVEL) {
+            mError = QCoreApplication::translate(
+                        "CombinedCellMaps",
+                        "Vertical placement of \"%1\" uses offset %2 and "
+                        "would export source levels %3 to %4 as world levels "
+                        "%5 to %6. Supported world levels are %7 to %8.")
+                    .arg(sourcePath)
+                    .arg(subMap->levelOffset())
+                    .arg(sourceMin).arg(sourceMax)
+                    .arg(worldMin).arg(worldMax)
+                    .arg(MIN_WORLD_LEVEL).arg(MAX_WORLD_LEVEL);
+            return false;
+        }
+        qInfo().noquote()
+                << QStringLiteral("LOT vertical placement: output cell %1,%2 | map %3 | offset %4 | source levels %5..%6 | world levels %7..%8")
+                   .arg(mCell256X).arg(mCell256Y)
+                   .arg(QDir::toNativeSeparators(sourcePath))
+                   .arg(subMap->levelOffset())
+                   .arg(sourceMin).arg(sourceMax)
+                   .arg(worldMin).arg(worldMax);
+    }
+    mLoggedVerticalPlacements = true;
+    return true;
 }
 
 MapInfo *CombinedCellMaps::getCombinedMap()

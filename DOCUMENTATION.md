@@ -23,6 +23,7 @@ and BuildingEd.
 | WorldGen biomes, previews, features, and static prefabs | [WorldGen editor](docs/PZ-B42.20-WorldGen-Editor-and-Prefabs.md) |
 | Jumbo, XL, and XXL trees | [Jumbo trees](docs/PZ-B42.20-Jumbo-Trees.md) |
 | Build 42.20 Biomemap values and channels | [BiomeMapConfig](docs/PZ-B42.20-BiomeMapConfig.md) |
+| Read-only adjacent PZW projects and `otherworld` compatibility | [Linked World Projects](docs/PZWorldEd-Linked-World-Projects.md) |
 | Terrain images, Biomemap, Zombie Heatmap, InGameMap, and export | [PZTools user guide](docs/TileZed/PZToolsGuide.html) |
 
 ## TileZed

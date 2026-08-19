@@ -265,6 +265,8 @@ signals:
     void roomRemoved(BuildingEditor::Room *room);
     void roomsReordered();
     void roomChanged(BuildingEditor::Room *room);
+    void roomColorChanged(BuildingEditor::Room *room);
+    void roomTilesChanged(BuildingEditor::Room *room);
 
     void buildingResized();
     void buildingRotated();

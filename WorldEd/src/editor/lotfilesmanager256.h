@@ -44,6 +44,7 @@ public:
     MapInfo* getCombinedMap();
     void moveToThread(MapComposite *mapComposite, QThread *thread);
     bool lotOverlaps(WorldCellLot *lot, int cell256X, int cell256Y, const QPoint &worldOrigin);
+    bool reportVerticalPlacements();
 
     static QRect outputCellRect(WorldGridFormat format, const QRect &sourceCellRect);
     static QRect sourceCellRect(WorldGridFormat format, const QRect &outputCellRect);
@@ -65,6 +66,7 @@ public:
     MapComposite* mMapComposite = nullptr;
     QList<MapComposite*> mCellMaps;
     bool mLoggedPendingSubMaps = false;
+    bool mLoggedVerticalPlacements = false;
     QString mError;
 };
 

@@ -371,6 +371,8 @@ void DrawTileTool::clearCaptureTiles()
 
 void DrawTileTool::clearClipboardPreview()
 {
+    if (mClipboardPreviewTiles && mEditor)
+        mEditor->clearToolTiles();
     delete mClipboardPreviewTiles;
     mClipboardPreviewTiles = nullptr;
     mClipboardPreviewRegion = QRegion();
@@ -517,7 +519,7 @@ void DrawTileTool::updateCursor(const QPointF &scenePos, bool force)
                 && !mClipboardPreviewTiles->isEmpty()) {
             mEditor->setToolTiles(mClipboardPreviewTiles,
                                   mCursorTileBounds.topLeft(),
-                                  layerName());
+                                  layerName(), true);
         } else {
             mEditor->clearToolTiles();
         }

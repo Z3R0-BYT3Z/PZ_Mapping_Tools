@@ -1728,9 +1728,12 @@ void MainWindow::cut()
     mActionHandler->selectNone();
 
     stack->endMacro();
-    if (copiedTileSelection)
-        paste();
     endDocumentTransaction();
+    if (copiedTileSelection) {
+        statusBar()->showMessage(
+                    tr("Selection cut. Press Ctrl+V to move and place it."),
+                    5000);
+    }
 }
 
 void MainWindow::copy()
@@ -1749,7 +1752,9 @@ void MainWindow::copy()
 
     if (mClipboardManager->copySelection(
                 mMapDocument, mTileSelectionScope)) {
-        paste();
+        statusBar()->showMessage(
+                    tr("Selection copied. Press Ctrl+V to move and place it."),
+                    5000);
     }
 }
 

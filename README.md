@@ -46,22 +46,47 @@ Important additions include:
 - Optional hole filling during LOT generation
 - Project Doctor for paths, missing tilesets, and project cleanup
 - Build 42.20 Biomemap reference and separate red and green painting modes
+- Main, vegetation, and Biomemap editing require a saved PZW and use the
+  project directory for generated images
 - WorldGen biome, feature, and static-prefab editing
 - OpenStreetMap project generation with terrain, vegetation, buildings,
   streets, roads, markings, and typed zones
 - Regions and Street Names editors
+- Native256 `spawnpoints.lua` output with absolute `posX`, `posY`, and `posZ`
+  values instead of the historical 300-square `worldX` and `worldY` format
+- Creation defaults and non-blocking export validation for SpawnPoint,
+  WaterFlow, WaterZone, and RoomTone objects
+- Moving selected cells also translates Street points, Region anchors, Road
+  endpoints, and fully covered terrain-image placements in the same Undo
+  transaction
 - InGameMap Forest export with the Forest pyramid and strict Build 42.20
   binary-header validation before existing files are replaced
 - InGameMap building outlines from both placed TBX lots and RoomDefs embedded
   directly in cell TMX maps
+- InGameMap road generation with generic dirt-to-Trail inference disabled by
+  default and available as an explicit preference when a project uses those
+  tiles exclusively as paths. Generated road masks close isolated one-tile
+  breaks, fill small enclosed holes, discard short internal fragments, and
+  retain long or cell-crossing sections before polygon conversion
+- Feature Generation preferences provide editable exact-tile catalogues for
+  trees and primary, secondary, and tertiary roads. The Tree defaults include
+  classic vegetation trees, `jumbo_tree_01_0`, and the Build 42 Jumbo, XL, and
+  XXL tree tiles. Clearing a catalogue disables that detection.
 - Non-destructive `worldmap.xml` and `worldmap-forest.xml` overlays in the
   World view
 - Structured editing of Build 42.20 `worldmap-annotations.lua` text symbols
   from the first entry in **InGameMap**, the annotation button on the main
   toolbar, or **Ctrl+Alt+A**
 - Basement entrance placement preview and visual access picker
-- Vertical building-lot placement with selected underground outlines and a
-  confirmed ground-opening action for basement stairs
+- Confirmed vertical building-lot placement with source and resulting world
+  level ranges, selected underground outlines, and a confirmed ground-opening
+  action for basement stairs
+- Linked World Projects manager for adding, validating, ordering, replacing,
+  and removing read-only PZW references without editing project XML
+- Cell View vehicle previews using the game installation's textured 3D meshes,
+  scripted dimensions, model scale, model offset, and wheel placement for
+  ParkingStall and TrafficJam zones, with a persistent mapping-tools atlas for
+  fast reuse across sessions
 
 ### TileZed
 
@@ -78,13 +103,15 @@ Important additions include:
 - Safe, undoable tileset removal with MiniMap synchronization and automatic
   Rules and Blends layer rebuilding
 - Layer-aware and floor-aware tile selection
-- Copy and cut immediately switch tile selections to a translucent,
-  pointer-following preview. One click places every selected layer and level.
+- Copy captures the selected layers and levels. Cut captures and removes them.
+  Neither command starts placement. Ctrl+V activates a translucent
+  pointer-following preview, then one click places the complete selection.
 - Stamp and Fill previews retain their tilesets until the preview is replaced
   or cleared, including when Undo removes a newly introduced tileset from the
   TMX.
 - Partial Chunks mode shared with WorldEd for Native256 TMX maps
-- Depth Map primitive editing with pixel dimensions and reusable presets
+- Depth Map primitive editing with Build 42 local geometry dimensions,
+  projected outline dimensions, movable saved panels, and reusable presets
 - TileDef comparison and Snow, Burnt, and custom replacement editing
 - Fast pack extraction for individual tiles, tilesets, and multi-tile objects
 - Optional orphan-pixel cleanup during extraction
@@ -93,6 +120,7 @@ Important additions include:
   process. TileZed does not host a second embedded editor.
 - Narrow Tilesets docks retain every command through the toolbar overflow
   menu.
+- Layer and level visibility thresholds are restored from the portable INI.
 
 ### BuildingEd
 
@@ -113,6 +141,10 @@ Important additions include:
   replacing the clipboard cannot invalidate pasted room floors.
 - The placement preview uses a validated, immutable snapshot of copied tiles
   and rooms instead of traversing live clipboard grids on every mouse move.
+  Converted isometric preview tiles are reused while the pointer moves.
+- Editing a room name or internal name commits when the field is finished or a
+  list entry is selected. Text entry no longer rebuilds every isometric floor
+  after each character.
 - Pasting beyond an edge expands the building while preserving and shifting
   existing rooms, user tiles, square properties, objects, and basement access.
   One Undo restores the complete pre-paste state.
@@ -124,6 +156,7 @@ Important additions include:
 - Procedural-loot inspection and project overrides
 - Lua building automation with transactional Undo
 - Configurable autosave at 1, 5, 10, 20, or 60 minutes
+- The Layers visibility threshold is restored from the portable INI.
 
 ## First setup
 
@@ -134,8 +167,89 @@ Important additions include:
 5. Optionally select the Project Zomboid installation in Preferences.
 
 The shared Project Zomboid path can supply official TileDefs, texture packs,
-WorldGen data, and procedural-loot definitions. It does not replace the
-extracted mapping Tiles directory required by the renderers.
+WorldGen data, procedural-loot definitions, and vehicle preview assets. It does
+not replace the extracted mapping Tiles directory required by the renderers.
+
+## Cell View vehicle previews
+
+Set the Project Zomboid installation path in WorldEd Preferences, open a cell,
+then enable **View > Show Vehicle Mesh Previews**. WorldEd displays textured
+vehicles on ParkingStall vehicle zones and on rectangular or polyline
+TrafficJam variants. `Nav` and other navigation zones are not vehicle zones and
+do not receive a preview.
+
+Vehicle display size, render quality, atlas status, and atlas rebuilding are
+grouped in the separate **Preferences > Vehicles** tab.
+
+The preview reads the installed vehicle scripts, `VehicleZoneDefinition.lua`,
+textures, legacy text meshes, and binary FBX meshes. The zone name selects its
+actual vehicle category, so Police, Fire, Ranger, Ambulance, Junkyard,
+TrafficJam, and ordinary ParkingStall zones use their own distributions. The
+default spawn rate and the normal, special, and burnt-vehicle chances determine
+whether a vehicle appears and which distribution supplies it. Shared and
+aliased Lua distributions retain their configured weights.
+
+The ordinary installed `ParkingStall` distribution is intentionally sparse.
+Several nearby stalls can therefore display no vehicle while other parts of
+the same cell do. This is a deterministic preview of the configured spawn
+density, not an atlas-loading failure.
+
+Vehicle type, game-scale dimensions, scripted `randomAngle`, `Direction`,
+`FaceDirection`, stall spacing, TrafficJam lane direction, and TrafficJam angle
+variation are used to create a deterministic editing preview. Each zone and
+position receives a stable result, so representative density, category, model,
+and orientation do not change on every repaint. The renderer preserves the
+resource-model scale, vehicle-model scale, and vehicle-model offset instead of
+stretching every body independently to its physics extents. It attaches the
+installed wheel mesh at each scripted wheel position and applies the same model
+offset, scale, and ground alignment to the complete assembly. Named bodies are
+selected correctly from FBX files containing multiple geometries.
+
+WorldEd checks its persistent vehicle atlas before calculating a mesh preview.
+Each cached sprite contains the selected body, texture, linked wheels, render
+quality, and direction. The atlas supports 16 directions and is stored below
+`settings/cache/vehicle-preview-atlas` in the mapping-tools installation. Its
+asset fingerprint covers the relevant game scripts, models, and textures, so a
+changed game installation creates a separate valid cache instead of reusing
+stale images. WorldEd never writes the cache into the game installation.
+
+**Preferences > Vehicle Previews > Preview size** controls a display correction
+from 0.25 x to 4 x in 0.25 steps. The default is 1 x, which represents the
+dimensions calculated from the installed vehicle script and model resource.
+Changing this display-only value keeps the vehicle centered on its actual zone
+anchor.
+**Preferences > Vehicle Previews > Render quality** controls the internally
+calculated image resolution from 0.25 x to 4 x. It changes sharpness, memory
+use, and calculation time without changing the displayed size or zone anchor.
+The default is 2.5 x, while lower values reduce memory use and calculation time.
+When preview size exceeds render quality, WorldEd automatically uses the
+preview size as the effective atlas quality so an undersized sprite is never
+enlarged into a blurry result.
+The same group reports the atlas state for the selected game installation and
+quality. **Rebuild Atlas** clears only that matching cache and precomputes all
+16 directions for every vehicle used by the installed zone definitions. An
+existing eight-direction cache remains usable through the nearest stored
+orientation until it is rebuilt.
+A cancelled rebuild keeps the completed sprites, so later previews can reuse
+them.
+The game can still omit vehicles or vary their exact position, angle, skin,
+damage, and density at runtime because those results depend on sandbox settings
+and random spawning. The preview does not change the PZW, TMX, zone
+definitions, or game files. No game asset is copied into the mapping tools
+distribution.
+
+Vertical Placement is available from the context menu of a selected building
+lot. The menu shows the source level range stored by the TBX or TMX and the
+current resulting world range. Lowering, raising, or returning a lot to level
+0 requires confirmation and previews the resulting range before the project is
+changed. The operation shifts the complete source uniformly, including floors,
+walls, windows, stairs, RoomDefs, objects, and collision layers. A source that
+already stores its basement on negative levels normally remains at lot level 0.
+Dragging a lot into another level group in the Lots panel requires the same
+explicit confirmation, while reordering lots within their current level does
+not. LOT generation records every nonzero vertical placement and its source and
+world level ranges in the application log. Generation stops if a manual project
+edit would place content outside the supported world levels.
 
 Basement access resources use the portable directory beside `bin`:
 
@@ -155,6 +269,30 @@ recoverable `.autosave` copy workflow. Untitled projects are never assigned a
 path automatically. Copy checkpoints autosave when unsaved edits exist.
 Autosave pauses during complete cut, paste, paint, and resize transactions and
 resumes only after the document is coherent.
+
+## Spawn points and Lua zone export
+
+WorldEd stores each SpawnPoint in its source cell with local coordinates. When
+it writes `spawnpoints.lua`, it adds the configured World origin, multiplies
+the resulting cell coordinate by the project cell size, and adds the local
+position. A Native256 point at cell `17,54` and local position `31,123` is
+therefore written as `{ posX = 4383, posY = 13947, posZ = 0 }`.
+
+The generated file keeps the existing `SpawnPoints()` function, profession
+tables, point lists, and `posZ`. It no longer writes `worldX` or `worldY`.
+WorldEd shows the same absolute coordinates in the visible SpawnPoint label.
+
+New SpawnPoints default to the explicit `unemployed` profession. New
+WaterFlow objects default to a 1 x 1 rectangle with `WaterDirection = 0` and
+`WaterSpeed = 0.0`. New WaterZones receive `WaterGround = false` and
+`WaterShore = true` without reducing a valid larger water area. New RoomTone
+objects default to a 1 x 1 rectangle with `RoomTone = Generic` and
+`EntireBuilding = false`.
+
+Lua export omits an invalid SpawnPoint, WaterFlow, WaterZone, or RoomTone
+record and lists the exact reason. The object remains in the PZW for repair,
+the project remains saved, and LOT generation remains available. Correct the
+reported geometry or properties and save or export again to include it.
 
 ## Partial chunk LOT export
 
@@ -209,7 +347,18 @@ hidden, or cleared independently. Forest geometry is green. Buildings, water,
 roads, railways, and other world-map geometry use distinct colors. Loaded
 overlays are read-only and never change project data or exported files. The
 overlay renderer spatially batches geometry and skips batches outside the
-visible World view.
+visible World view. Build 42.20 world-map files always use 256-square cells.
+WorldEd therefore places overlay geometry from absolute map-square
+coordinates, independently of whether the open project uses Native256 or
+Legacy300 cells. Newly written XML includes `cellSize="256"`. Older XML
+without this attribute defaults to the Build 42.20 grid, while clear legacy
+300-square geometry is detected when local coordinates exceed 256.
+
+**Write Worldmap** and **Write Worldmap-Forest** now normalize both the XML
+and binary outputs to the Build 42.20 256-square grid. Legacy300 project
+features that cross a 256-square boundary are split into the required output
+cells without changing their absolute map-square position. Native256 projects
+remain one-to-one.
 
 **InGameMap > Generate Building Features** detects placed TBX lots and
 RoomDefs embedded directly in assigned cell TMX maps. Room rectangles are
@@ -219,6 +368,25 @@ negative basement levels are excluded from the surface outline.
 **InGameMap > Create World Image** uses the packaged `MapToPNG.txt` color
 rules. This file is different from terrain `Rules.txt`. The dialog selects the
 packaged file by default and replaces an invalid remembered rules path.
+
+## Linked World Projects
+
+Open **World > Linked World Projects...** to manage the PZW files historically
+stored as `otherworld` XML entries. The manager reports each linked project's
+path, grid format, World origin, size, relative placement, coverage, overlap,
+and validation status. It prevents self-links, duplicates, unreadable files,
+and mixed 256 or 300 cell grids. Existing broken entries remain visible for
+replacement or removal.
+
+Linked projects are read-only visual references. They are not merged into the
+current PZW and their content is not exported by Generate Lots. Their position
+is the linked World origin minus the current World origin. Open and save a
+linked project to change that origin, then use **Refresh** in the manager.
+Changes to the list support Undo and are saved through the normal PZW workflow.
+Use **View > Show Linked World Projects** for visibility.
+
+See the [Linked World Projects guide](docs/PZWorldEd-Linked-World-Projects.md)
+for the complete workflow and PZW compatibility details.
 
 ## Tileset compatibility
 

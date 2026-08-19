@@ -37,6 +37,7 @@ public:
     void setDocument(Document *document);
     void clearDocument();
     const QVector<StreetNameRecord> &streets() const { return mStreets; }
+    int selectedStreetIndex() const { return mSelectedStreet; }
     bool saveForProject();
     bool validateStreetFile(const QString &fileName, int *streetCount,
                             QString *error) const;
@@ -86,6 +87,7 @@ private:
     void beginSnapshot();
     void commitSnapshot(const QString &text);
     void cancelSnapshot();
+    bool hasUnsavedChanges() const;
     void finishCreating(bool accept);
     QPointF sceneToWorld(const QPointF &scenePoint) const;
     QPointF worldToScene(const QPointF &worldPoint) const;
@@ -101,6 +103,7 @@ private:
     QPointer<WorldDocument> mWorldDocument;
     QPointer<BaseGraphicsScene> mScene;
     QVector<StreetNameRecord> mStreets;
+    QVector<StreetNameRecord> mSavedStreets;
     QVector<QGraphicsPathItem *> mPathItems;
     QVector<QGraphicsSimpleTextItem *> mLabelItems;
     QVector<QGraphicsEllipseItem *> mPointItems;

@@ -45,6 +45,7 @@
 #include "objectsdock.h"
 #include "objectgroupsdialog.h"
 #include "objecttypesdialog.h"
+#include "otherworldsdialog.h"
 #include "pngbuildingdialog.h"
 #include "pngzonesdialog.h"
 #include "preferences.h"
@@ -55,6 +56,7 @@
 #include "propertydefinitionsdialog.h"
 #include "propertyenumdialog.h"
 #include "resizeworlddialog.h"
+#include "road.h"
 #include "roadsdock.h"
 #include "scenetools.h"
 #include "searchdock.h"
@@ -73,6 +75,7 @@
 #include "worlddocument.h"
 #include "worldreader.h"
 #include "worldscene.h"
+#include "worldobjectvalidation.h"
 #include "worldview.h"
 #include "worldwriter.h"
 #include "writeroomtonesdialog.h"
@@ -130,10 +133,12 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QProgressDialog>
+#include <QPointer>
 #include <QPushButton>
 #include <QPixmap>
 #include <QRandomGenerator>
 #include <QScrollBar>
+#include <QSet>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSlider>
@@ -145,13 +150,123 @@
 #include <QTemporaryDir>
 #include <QToolBar>
 #include <QUndoGroup>
+#include <QUndoCommand>
 #include <QUndoStack>
 #include <QXmlStreamReader>
+
+#include <limits>
 
 using namespace Tiled;
 using namespace Tiled::Internal;
 
 namespace {
+QPoint projectCellForPoint(const QPointF &point, int cellSize,
+                           const QPoint &worldOrigin)
+{
+    return QPoint(qFloor(point.x() / cellSize) - worldOrigin.x(),
+                  qFloor(point.y() / cellSize) - worldOrigin.y());
+}
+
+QPoint localCellForPoint(const QPoint &point, int cellSize)
+{
+    return QPoint(qFloor(qreal(point.x()) / cellSize),
+                  qFloor(qreal(point.y()) / cellSize));
+}
+
+quint64 cellPositionKey(const QPoint &cell)
+{
+    return (quint64(quint32(cell.x())) << 32)
+            | quint64(quint32(cell.y()));
+}
+
+QVector<StreetNameRecord> translatedStreetRecords(
+        const QVector<StreetNameRecord> &records,
+        const QSet<quint64> &sourceCells, const QPoint &cellOffset,
+        const QPoint &worldOrigin, int cellSize)
+{
+    QVector<StreetNameRecord> translated = records;
+    const QPointF squareOffset(cellOffset.x() * cellSize,
+                               cellOffset.y() * cellSize);
+    for (StreetNameRecord &record : translated) {
+        for (QPointF &point : record.points) {
+            if (sourceCells.contains(cellPositionKey(projectCellForPoint(
+                                         point, cellSize, worldOrigin))))
+                point += squareOffset;
+        }
+    }
+    return translated;
+}
+
+QVector<RegionRecord> translatedRegionRecords(
+        const QVector<RegionRecord> &records,
+        const QSet<quint64> &sourceCells, const QPoint &cellOffset,
+        const QPoint &worldOrigin, int cellSize)
+{
+    QVector<RegionRecord> translated = records;
+    const QPoint squareOffset(cellOffset.x() * cellSize,
+                              cellOffset.y() * cellSize);
+    for (RegionRecord &record : translated) {
+        if (sourceCells.contains(cellPositionKey(projectCellForPoint(
+                                     QPointF(record.x, record.y),
+                                     cellSize, worldOrigin)))) {
+            record.x += squareOffset.x();
+            record.y += squareOffset.y();
+        }
+    }
+    return translated;
+}
+
+class MoveExternalCoordinatesCommand : public QUndoCommand
+{
+public:
+    MoveExternalCoordinatesCommand(
+            StreetNamesDock *streetsDock,
+            const QVector<StreetNameRecord> &streetsBefore,
+            const QVector<StreetNameRecord> &streetsAfter,
+            int selectedStreet,
+            RegionsDock *regionsDock,
+            const QVector<RegionRecord> &regionsBefore,
+            const QVector<RegionRecord> &regionsAfter,
+            int selectedRegion)
+        : QUndoCommand(QObject::tr("Move Cell Coordinate Data"))
+        , mStreetsDock(streetsDock)
+        , mStreetsBefore(streetsBefore)
+        , mStreetsAfter(streetsAfter)
+        , mSelectedStreet(selectedStreet)
+        , mRegionsDock(regionsDock)
+        , mRegionsBefore(regionsBefore)
+        , mRegionsAfter(regionsAfter)
+        , mSelectedRegion(selectedRegion)
+    {
+    }
+
+    void undo() override
+    {
+        if (mStreetsDock)
+            mStreetsDock->applySnapshot(mStreetsBefore, mSelectedStreet);
+        if (mRegionsDock)
+            mRegionsDock->applySnapshot(mRegionsBefore, mSelectedRegion);
+    }
+
+    void redo() override
+    {
+        if (mStreetsDock)
+            mStreetsDock->applySnapshot(mStreetsAfter, mSelectedStreet);
+        if (mRegionsDock)
+            mRegionsDock->applySnapshot(mRegionsAfter, mSelectedRegion);
+    }
+
+private:
+    QPointer<StreetNamesDock> mStreetsDock;
+    QVector<StreetNameRecord> mStreetsBefore;
+    QVector<StreetNameRecord> mStreetsAfter;
+    int mSelectedStreet;
+    QPointer<RegionsDock> mRegionsDock;
+    QVector<RegionRecord> mRegionsBefore;
+    QVector<RegionRecord> mRegionsAfter;
+    int mSelectedRegion;
+};
+
 bool moveFile(const QString &source, const QString &destination,
               QString *error)
 {
@@ -700,6 +815,8 @@ bool MainWindow::validateInGameMapForestExport(
             || forestXml.contains("value=\"Residential\"")
             || !worldXml.contains("value=\"Residential\"")
             || worldXml.contains("value=\"forest\"")
+            || !forestXml.contains("cellSize=\"256\"")
+            || !worldXml.contains("cellSize=\"256\"")
             || !forestBinary.contains("forest")
             || forestBinary.contains("Residential")
             || !worldBinary.contains("Residential")
@@ -707,6 +824,81 @@ bool MainWindow::validateInGameMapForestExport(
         if (error) {
             *error = tr("Forest and non-Forest features were not separated "
                         "consistently in XML and binary output.");
+        }
+        return false;
+    }
+    World legacyWorld(1, 1, WorldGridFormat::Legacy300);
+    WorldCell *legacyCell = legacyWorld.cellAt(0, 0);
+    InGameMapFeature *legacyFeature =
+            new InGameMapFeature(&legacyCell->inGameMap());
+    legacyFeature->mGeometry.mType = QStringLiteral("Polygon");
+    InGameMapCoordinates legacyCoordinates;
+    legacyCoordinates += InGameMapPoint(250, 10);
+    legacyCoordinates += InGameMapPoint(290, 10);
+    legacyCoordinates += InGameMapPoint(290, 40);
+    legacyCoordinates += InGameMapPoint(250, 40);
+    legacyFeature->mGeometry.mCoordinates += legacyCoordinates;
+    legacyFeature->mProperties.set(
+                QStringLiteral("building"), QStringLiteral("Legacy"));
+    legacyCell->inGameMap().features() += legacyFeature;
+    const QString legacyXmlPath = directory.filePath(
+                QStringLiteral("legacy-worldmap.xml"));
+    InGameMapWriter legacyWriter;
+    if (!legacyWriter.writeWorld(&legacyWorld, legacyXmlPath)) {
+        if (error)
+            *error = legacyWriter.errorString();
+        return false;
+    }
+    QByteArray legacyXml;
+    if (!readFile(legacyXmlPath, &legacyXml)) {
+        if (error)
+            *error = tr("The Legacy 300 XML conversion could not be read.");
+        return false;
+    }
+    QXmlStreamReader legacyReader(legacyXml);
+    QSet<int> legacyCells;
+    int legacyCellX = 0;
+    int legacyCellY = 0;
+    bool legacyCellSizeValid = false;
+    qreal legacyMinX = std::numeric_limits<qreal>::max();
+    qreal legacyMinY = std::numeric_limits<qreal>::max();
+    qreal legacyMaxX = std::numeric_limits<qreal>::lowest();
+    qreal legacyMaxY = std::numeric_limits<qreal>::lowest();
+    while (!legacyReader.atEnd()) {
+        legacyReader.readNext();
+        if (!legacyReader.isStartElement())
+            continue;
+        if (legacyReader.name() == QLatin1String("world")) {
+            legacyCellSizeValid = legacyReader.attributes().value(
+                        QLatin1String("cellSize")) == QLatin1String("256");
+        } else if (legacyReader.name() == QLatin1String("cell")) {
+            legacyCellX = legacyReader.attributes().value(
+                        QLatin1String("x")).toInt();
+            legacyCellY = legacyReader.attributes().value(
+                        QLatin1String("y")).toInt();
+            legacyCells.insert(legacyCellX);
+        } else if (legacyReader.name() == QLatin1String("point")) {
+            const qreal localX = legacyReader.attributes().value(
+                        QLatin1String("x")).toDouble();
+            const qreal localY = legacyReader.attributes().value(
+                        QLatin1String("y")).toDouble();
+            const qreal absoluteX = legacyCellX * 256 + localX;
+            const qreal absoluteY = legacyCellY * 256 + localY;
+            legacyMinX = qMin(legacyMinX, absoluteX);
+            legacyMinY = qMin(legacyMinY, absoluteY);
+            legacyMaxX = qMax(legacyMaxX, absoluteX);
+            legacyMaxY = qMax(legacyMaxY, absoluteY);
+        }
+    }
+    if (legacyReader.hasError() || !legacyCellSizeValid
+            || !legacyCells.contains(0) || !legacyCells.contains(1)
+            || qAbs(legacyMinX - 250.0) > 0.01
+            || qAbs(legacyMinY - 10.0) > 0.01
+            || qAbs(legacyMaxX - 290.0) > 0.01
+            || qAbs(legacyMaxY - 40.0) > 0.01) {
+        if (error) {
+            *error = tr("Legacy 300 world-map geometry was not converted "
+                        "to the Build 42.20 256-square XML grid.");
         }
         return false;
     }
@@ -767,8 +959,9 @@ bool MainWindow::validateInGameMapForestExport(
         return false;
     }
     if (summary) {
-        *summary = tr("Build 42.20 IGMB headers, forest/non-Forest XML and "
-                      "binary filtering, Forest PNG, two image levels, and "
+        *summary = tr("Build 42.20 IGMB headers, Native 256 XML metadata, "
+                      "Legacy 300 to 256 XML conversion, forest/non-Forest "
+                      "filtering, Forest PNG, two image levels, and "
                       "pyramid.txt bounds verified");
     }
     return true;
@@ -889,6 +1082,8 @@ MainWindow::MainWindow(QWidget *parent)
     ui->actionShowMiniMap->setChecked(prefs->showMiniMap());
     ui->actionShowObjects->setChecked(prefs->showObjects());
     ui->actionShowObjectNames->setChecked(prefs->showObjectNames());
+    ui->actionShowVehicleMeshPreviews->setChecked(
+                prefs->showVehicleMeshPreviews());
     ui->actionShowBMP->setChecked(prefs->showBMPs());
     ui->actionShowOtherWorlds->setChecked(prefs->showOtherWorlds());
     ui->actionShowWorldThumbnails->setChecked(prefs->showWorldThumbnails());
@@ -1178,6 +1373,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->actionKeyboardShortcuts, &QAction::triggered, this, &MainWindow::keyboardShortcuts);
 
     connect(ui->actionResizeWorld, &QAction::triggered, this, &MainWindow::resizeWorld);
+    connect(ui->actionLinkedWorldProjects, &QAction::triggered,
+            this, &MainWindow::linkedWorldProjects);
     connect(ui->actionObjectGroups, &QAction::triggered, this, &MainWindow::objectGroupsDialog);
     connect(ui->actionObjectTypes, &QAction::triggered, this, &MainWindow::objectTypesDialog);
     connect(ui->actionEnums, &QAction::triggered, this, &MainWindow::propertyEnumsDialog);
@@ -1234,6 +1431,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->actionShowMiniMap, &QAction::toggled, prefs, &Preferences::setShowMiniMap);
     connect(ui->actionShowObjects, &QAction::toggled, prefs, &Preferences::setShowObjects);
     connect(ui->actionShowObjectNames, &QAction::toggled, prefs, &Preferences::setShowObjectNames);
+    connect(ui->actionShowVehicleMeshPreviews, &QAction::toggled,
+            prefs, &Preferences::setShowVehicleMeshPreviews);
     connect(ui->actionShowOtherWorlds, &QAction::toggled, prefs, &Preferences::setShowOtherWorlds);
     connect(ui->actionShowWorldThumbnails, &QAction::toggled, prefs, &Preferences::setShowWorldThumbnails);
     connect(ui->actionShowBMP, &QAction::toggled, prefs, &Preferences::setShowBMPs);
@@ -2591,7 +2790,8 @@ void MainWindow::lootInspector()
 void MainWindow::generateBiomeMap()
 {
     WorldDocument *worldDocument = currentWorldDocument();
-    if (!worldDocument)
+    if (!worldDocument
+            || !ensureSavedProjectForTerrainWorkflow(worldDocument))
         return;
     BiomeMapGeneratorDialog dialog(worldDocument->world(),
                                    worldDocument->fileName(), this);
@@ -2615,7 +2815,8 @@ void MainWindow::generateBiomeMap()
 void MainWindow::terrainImageEditor()
 {
     WorldDocument *worldDocument = currentWorldDocument();
-    if (!worldDocument)
+    if (!worldDocument
+            || !ensureSavedProjectForTerrainWorkflow(worldDocument))
         return;
     TerrainImageEditorDialog dialog(worldDocument, this);
     dialog.exec();
@@ -2623,6 +2824,9 @@ void MainWindow::terrainImageEditor()
 void MainWindow::importOpenStreetMapTerrain()
 {
     WorldDocument *worldDocument = currentWorldDocument();
+    if (worldDocument
+            && !ensureSavedProjectForTerrainWorkflow(worldDocument))
+        return;
     OsmTerrainImportDialog importDialog(worldDocument, this);
     if (importDialog.exec() != QDialog::Accepted)
         return;
@@ -3134,6 +3338,217 @@ WorldDocument *MainWindow::currentWorldDocument()
     return nullptr;
 }
 
+bool MainWindow::ensureSavedProjectForTerrainWorkflow(
+        WorldDocument *worldDocument)
+{
+    if (!worldDocument)
+        return false;
+
+    const auto isSavedProject = [worldDocument]() {
+        const QFileInfo fileInfo(worldDocument->fileName());
+        return !worldDocument->fileName().isEmpty()
+                && fileInfo.suffix().compare(
+                    QLatin1String("pzw"), Qt::CaseInsensitive) == 0
+                && fileInfo.isFile();
+    };
+    if (isSavedProject())
+        return true;
+
+    QMessageBox prompt(
+                QMessageBox::Information,
+                tr("Save Project Before Editing Terrain Images"),
+                tr("Main, vegetation and biome images belong to a WorldEd "
+                   "project. Save the PZW first so the images are created "
+                   "inside the project folder."),
+                QMessageBox::NoButton,
+                this);
+    QPushButton *saveButton = prompt.addButton(
+                tr("Save PZW..."), QMessageBox::AcceptRole);
+    prompt.addButton(QMessageBox::Cancel);
+    prompt.setDefaultButton(saveButton);
+    prompt.exec();
+    if (prompt.clickedButton() != saveButton)
+        return false;
+
+    QString targetFileName = worldDocument->fileName();
+    if (targetFileName.isEmpty()
+            || QFileInfo(targetFileName).suffix().compare(
+                QLatin1String("pzw"), Qt::CaseInsensitive) != 0) {
+        QString directory = Preferences::instance()->openFileDirectory();
+        if (directory.isEmpty() || !QDir(directory).exists())
+            directory = QDir::currentPath();
+        targetFileName = QFileDialog::getSaveFileName(
+                    this, tr("Save WorldEd Project"),
+                    QDir(directory).filePath(tr("untitled.pzw")),
+                    tr("PZWorldEd world files (*.pzw)"));
+        if (targetFileName.isEmpty())
+            return false;
+        if (QFileInfo(targetFileName).suffix().compare(
+                    QLatin1String("pzw"), Qt::CaseInsensitive) != 0) {
+            targetFileName += QLatin1String(".pzw");
+        }
+        Preferences::instance()->setOpenFileDirectory(
+                    QFileInfo(targetFileName).absolutePath());
+    }
+
+    QString saveError;
+    if (!worldDocument->save(targetFileName, saveError)) {
+        QMessageBox::critical(this, tr("Error Saving Project"), saveError);
+        return false;
+    }
+    if (mStreetNamesDock && !mStreetNamesDock->saveForProject())
+        return false;
+    if (mRegionsDock && !mRegionsDock->saveForProject())
+        return false;
+    updateWindowTitle();
+    for (int index = 0; index < docman()->documentCount(); ++index) {
+        Document *document = docman()->documentAt(index);
+        CellDocument *cellDocument = document->asCellDocument();
+        if (document == worldDocument
+                || (cellDocument
+                    && cellDocument->worldDocument() == worldDocument)) {
+            ui->documentTabWidget->setTabToolTip(index, targetFileName);
+        }
+    }
+    if (isSavedProject())
+        return true;
+
+    QMessageBox::critical(
+                this, tr("Project Save Required"),
+                tr("WorldEd could not confirm a valid PZW file. The terrain "
+                   "image workflow was not opened."));
+    return false;
+}
+
+bool MainWindow::validateCellMoveCoordinateData(
+        QString *summary, QString *error)
+{
+    const int cellSize = 256;
+    const QPoint worldOrigin(10, 20);
+    const QPoint sourceCell(1, 2);
+    const QPoint cellOffset(2, -1);
+    QSet<quint64> sourceCells;
+    sourceCells.insert(cellPositionKey(sourceCell));
+
+    StreetNameRecord street;
+    street.name = QStringLiteral("Validation Street");
+    street.points << QPointF((worldOrigin.x() + sourceCell.x()) * cellSize + 7,
+                             (worldOrigin.y() + sourceCell.y()) * cellSize + 9)
+                  << QPointF((worldOrigin.x() + sourceCell.x() + 1) * cellSize + 3,
+                             (worldOrigin.y() + sourceCell.y()) * cellSize + 5);
+    const QVector<StreetNameRecord> movedStreets = translatedStreetRecords(
+                QVector<StreetNameRecord>() << street, sourceCells,
+                cellOffset, worldOrigin, cellSize);
+    const QPointF squareOffset(cellOffset.x() * cellSize,
+                               cellOffset.y() * cellSize);
+    if (movedStreets.first().points.first()
+            != street.points.first() + squareOffset
+            || movedStreets.first().points.last() != street.points.last()) {
+        if (error)
+            *error = tr("Street points were not translated by source cell.");
+        return false;
+    }
+
+    RegionRecord region;
+    region.name = QStringLiteral("Validation Region");
+    region.x = (worldOrigin.x() + sourceCell.x()) * cellSize + 12;
+    region.y = (worldOrigin.y() + sourceCell.y()) * cellSize + 14;
+    const QVector<RegionRecord> movedRegions = translatedRegionRecords(
+                QVector<RegionRecord>() << region, sourceCells,
+                cellOffset, worldOrigin, cellSize);
+    if (movedRegions.first().x != region.x + squareOffset.x()
+            || movedRegions.first().y != region.y + squareOffset.y()) {
+        if (error)
+            *error = tr("Region coordinates were not translated by source cell.");
+        return false;
+    }
+
+    if (localCellForPoint(QPoint(cellSize + 4, cellSize * 2 + 8),
+                          cellSize) != sourceCell
+            || projectCellForPoint(street.points.first(), cellSize,
+                                   worldOrigin) != sourceCell) {
+        if (error)
+            *error = tr("Native 256 coordinate classification failed.");
+        return false;
+    }
+
+    if (summary) {
+        *summary = tr("Native 256 street points, region anchors and local "
+                      "road coordinates follow their source cells.");
+    }
+    return true;
+}
+
+void MainWindow::moveCellCoordinateData(
+        WorldDocument *worldDocument,
+        const QList<WorldCell *> &sourceCells,
+        const QPoint &cellOffset)
+{
+    if (!worldDocument || sourceCells.isEmpty() || cellOffset.isNull())
+        return;
+
+    World *world = worldDocument->world();
+    const int cellSize = world->cellSize();
+    const QPoint worldOrigin =
+            world->getGenerateLotsSettings().worldOrigin;
+    const QPoint squareOffset(cellOffset.x() * cellSize,
+                              cellOffset.y() * cellSize);
+    QSet<quint64> sourcePositions;
+    for (WorldCell *cell : sourceCells) {
+        if (cell && cell->world() == world)
+            sourcePositions.insert(cellPositionKey(cell->pos()));
+    }
+    if (sourcePositions.isEmpty())
+        return;
+
+    const QVector<StreetNameRecord> streetsBefore =
+            mStreetNamesDock->streets();
+    const QVector<StreetNameRecord> streetsAfter = translatedStreetRecords(
+                streetsBefore, sourcePositions, cellOffset,
+                worldOrigin, cellSize);
+    const QVector<RegionRecord> regionsBefore = mRegionsDock->regions();
+    const QVector<RegionRecord> regionsAfter = translatedRegionRecords(
+                regionsBefore, sourcePositions, cellOffset,
+                worldOrigin, cellSize);
+    if (streetsBefore != streetsAfter || regionsBefore != regionsAfter) {
+        worldDocument->undoStack()->push(
+                    new MoveExternalCoordinatesCommand(
+                        mStreetNamesDock, streetsBefore, streetsAfter,
+                        mStreetNamesDock->selectedStreetIndex(),
+                        mRegionsDock, regionsBefore, regionsAfter,
+                        mRegionsDock->selectedRegionIndex()));
+    }
+
+    for (Road *road : world->roads()) {
+        QPoint start = road->start();
+        QPoint end = road->end();
+        if (sourcePositions.contains(cellPositionKey(
+                                         localCellForPoint(start, cellSize))))
+            start += squareOffset;
+        if (sourcePositions.contains(cellPositionKey(
+                                         localCellForPoint(end, cellSize))))
+            end += squareOffset;
+        if (start != road->start() || end != road->end())
+            worldDocument->changeRoadCoords(road, start, end);
+    }
+
+    for (WorldBMP *bmp : world->bmps()) {
+        const QRect bounds = bmp->bounds();
+        bool fullySelected = !bounds.isEmpty();
+        for (int y = bounds.top(); fullySelected && y <= bounds.bottom(); ++y) {
+            for (int x = bounds.left(); x <= bounds.right(); ++x) {
+                if (!sourcePositions.contains(
+                            cellPositionKey(QPoint(x, y)))) {
+                    fullySelected = false;
+                    break;
+                }
+            }
+        }
+        if (fullySelected)
+            worldDocument->moveBMP(bmp, bmp->pos() + cellOffset);
+    }
+}
+
 bool MainWindow::canSplitObjectPolygon()
 {
     if (mCurrentDocument == nullptr) {
@@ -3202,10 +3617,14 @@ bool MainWindow::saveFileAs()
         suggestedFileName += tr("untitled.pzw");
     }
 
-    const QString fileName =
+    QString fileName =
             QFileDialog::getSaveFileName(this, QString(), suggestedFileName,
                                          tr("PZWorldEd world files (*.pzw)"));
     if (!fileName.isEmpty()) {
+        if (QFileInfo(fileName).suffix().compare(
+                    QLatin1String("pzw"), Qt::CaseInsensitive) != 0) {
+            fileName += QLatin1String(".pzw");
+        }
         Preferences::instance()->setOpenFileDirectory(QFileInfo(fileName).absolutePath());
         return saveFile(fileName);
     }
@@ -3676,6 +4095,19 @@ void MainWindow::resizeWorld()
     dialog.exec();
 }
 
+void MainWindow::linkedWorldProjects()
+{
+    if (!mCurrentDocument)
+        return;
+    WorldDocument *worldDoc = mCurrentDocument->asWorldDocument();
+    if (CellDocument *cellDoc = mCurrentDocument->asCellDocument())
+        worldDoc = cellDoc->worldDocument();
+    if (!worldDoc)
+        return;
+    OtherWorldsDialog dialog(worldDoc, this);
+    dialog.exec();
+}
+
 void MainWindow::preferencesDialog()
 {
     WorldDocument *worldDoc = 0;
@@ -3732,6 +4164,9 @@ void MainWindow::initActionManager()
     actionManager->registerAction(ui->actionShowMiniMap, CONTEXT_MENU, CATEGORY_MENU_VIEW, QStringLiteral("Menu.View.ShowMiniMap"));
     actionManager->registerAction(ui->actionShowObjects, CONTEXT_MENU, CATEGORY_MENU_VIEW, QStringLiteral("Menu.View.ShowObjects"));
     actionManager->registerAction(ui->actionShowObjectNames, CONTEXT_MENU, CATEGORY_MENU_VIEW, QStringLiteral("Menu.View.ShowObjectNames"));
+    actionManager->registerAction(ui->actionShowVehicleMeshPreviews,
+                                  CONTEXT_MENU, CATEGORY_MENU_VIEW,
+                                  QStringLiteral("Menu.View.ShowVehicleMeshPreviews"));
     actionManager->registerAction(ui->actionShowOtherWorlds, CONTEXT_MENU, CATEGORY_MENU_VIEW, QStringLiteral("Menu.View.ShowOtherWorlds"));
     actionManager->registerAction(ui->actionShowBMP, CONTEXT_MENU, CATEGORY_MENU_VIEW, QStringLiteral("Menu.View.ShowBMP"));
     actionManager->registerAction(ui->actionShowZombieSpawnImage, CONTEXT_MENU, CATEGORY_MENU_VIEW, QStringLiteral("Menu.View.ShowZombieSpawnImage"));
@@ -3750,6 +4185,7 @@ void MainWindow::initActionManager()
     actionManager->registerAction(ui->actionEditCell, CONTEXT_MENU, CATEGORY_MENU_WORLD, QStringLiteral("Menu.World.EditCell"));
     actionManager->registerAction(ui->actionGoToXY, CONTEXT_MENU, CATEGORY_MENU_WORLD, QStringLiteral("Menu.World.GoToXY"));
     actionManager->registerAction(ui->actionResizeWorld, CONTEXT_MENU, CATEGORY_MENU_WORLD, QStringLiteral("Menu.World.ResizeWorld"));
+    actionManager->registerAction(ui->actionLinkedWorldProjects, CONTEXT_MENU, CATEGORY_MENU_WORLD, QStringLiteral("Menu.World.LinkedWorldProjects"));
     actionManager->registerAction(ui->actionObjectTypes, CONTEXT_MENU, CATEGORY_MENU_WORLD, QStringLiteral("Menu.World.ObjectTypes"));
     actionManager->registerAction(ui->actionObjectGroups, CONTEXT_MENU, CATEGORY_MENU_WORLD, QStringLiteral("Menu.World.ObjectGroups"));
     actionManager->registerAction(ui->actionEnums, CONTEXT_MENU, CATEGORY_MENU_WORLD, QStringLiteral("Menu.World.Enums"));
@@ -4176,6 +4612,7 @@ void MainWindow::extractObjects()
                                                            type, group, x, y,
                                                            og->level(),
                                                            width, height);
+                WorldObjectValidation::applyCreationDefaults(obj);
                 worldDoc->addCellObject(cell, cell->objects().size(), obj);
             }
         }
@@ -5497,6 +5934,7 @@ void MainWindow::updateActions()
     ui->actionEditCell->setEnabled(false);
     ui->actionGoToXY->setEnabled(hasDoc);
     ui->actionResizeWorld->setEnabled(worldDoc);
+    ui->actionLinkedWorldProjects->setEnabled(currentWorldDoc != nullptr);
     ui->actionObjectTypes->setEnabled(hasDoc);
     ui->actionEnums->setEnabled(hasDoc);
     ui->actionProperties->setEnabled(hasDoc);

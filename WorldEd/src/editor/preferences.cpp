@@ -236,8 +236,102 @@ void ensureBuiltInThemesExtracted()
         destination.commit();
     }
 }
+
+QString normalizedFeatureTile(QString tile)
+{
+    tile = tile.trimmed();
+    const int separator = tile.lastIndexOf(QLatin1Char('_'));
+    bool validId = false;
+    const int tileId = tile.mid(separator + 1).toInt(&validId);
+    if (separator > 0 && validId && tileId >= 0)
+        tile = tile.left(separator + 1) + QString::number(tileId);
+    return tile;
+}
+
+QStringList normalizedFeatureTiles(const QStringList &tiles)
+{
+    QStringList normalized;
+    for (const QString &sourceTile : tiles) {
+        const QString tile = normalizedFeatureTile(sourceTile);
+        if (!tile.isEmpty() && !normalized.contains(tile))
+            normalized.append(tile);
+    }
+    normalized.sort(Qt::CaseInsensitive);
+    return normalized;
+}
 }
 Preferences *Preferences::mInstance = 0;
+
+QStringList Preferences::defaultTreeFeatureTiles()
+{
+    QStringList tiles;
+    for (int id = 8; id <= 15; ++id)
+        tiles.append(QStringLiteral("vegetation_trees_01_%1").arg(id));
+    tiles.append(QStringLiteral("jumbo_tree_01_0"));
+    const QStringList species = {
+        QStringLiteral("americanholly"),
+        QStringLiteral("americanlinden"),
+        QStringLiteral("canadianhemlock"),
+        QStringLiteral("carolinasilverbell"),
+        QStringLiteral("cockspurhawthorn"),
+        QStringLiteral("dogwood"),
+        QStringLiteral("easternredbud"),
+        QStringLiteral("redmaple"),
+        QStringLiteral("riverbirch"),
+        QStringLiteral("virginiapine"),
+        QStringLiteral("yellowwood")
+    };
+    for (const QString &name : species) {
+        const QString regular = QStringLiteral("e_%1JUMBO_1_").arg(name);
+        tiles.append(regular + QStringLiteral("0"));
+        tiles.append(regular + QStringLiteral("1"));
+        tiles.append(QStringLiteral("e_%1JUMBOXL_1_0").arg(name));
+        tiles.append(QStringLiteral("e_%1JUMBOXXL_1_0").arg(name));
+    }
+    return normalizedFeatureTiles(tiles);
+}
+
+QString Preferences::canonicalFeatureTileName(const QString &tile)
+{
+    return normalizedFeatureTile(tile);
+}
+
+QStringList Preferences::defaultPrimaryRoadFeatureTiles()
+{
+    return normalizedFeatureTiles({
+        QStringLiteral("blends_street_01_32"),
+        QStringLiteral("blends_street_01_37"),
+        QStringLiteral("blends_street_01_38"),
+        QStringLiteral("blends_street_01_39"),
+        QStringLiteral("blends_street_01_80"),
+        QStringLiteral("blends_street_01_85"),
+        QStringLiteral("blends_street_01_86"),
+        QStringLiteral("blends_street_01_87")
+    });
+}
+
+QStringList Preferences::defaultSecondaryRoadFeatureTiles()
+{
+    return normalizedFeatureTiles({
+        QStringLiteral("blends_street_01_96"),
+        QStringLiteral("blends_street_01_101"),
+        QStringLiteral("blends_street_01_102"),
+        QStringLiteral("blends_street_01_103")
+    });
+}
+
+QStringList Preferences::defaultTertiaryRoadFeatureTiles()
+{
+    return normalizedFeatureTiles({
+        QStringLiteral("blends_street_01_16"),
+        QStringLiteral("blends_street_01_21"),
+        QStringLiteral("blends_street_01_48"),
+        QStringLiteral("blends_street_01_53"),
+        QStringLiteral("blends_street_01_54"),
+        QStringLiteral("blends_street_01_55")
+    });
+}
+
 Preferences *Preferences::instance()
 {
     if (!mInstance)
@@ -324,12 +418,49 @@ Preferences::Preferences()
             QLatin1String("RoadSimplificationTrail"), 2.0).toDouble(), 32.0);
     mRoadPointSpacingTrail = qBound(1, mSettings->value(
             QLatin1String("RoadPointSpacingTrail"), 40).toInt(), 300);
+    mGenerateTrailFeatures = mSettings->value(
+                QLatin1String("GenerateTrailFeatures"), false).toBool();
     mRoadSimplificationRailway = qBound(0.0, mSettings->value(
             QLatin1String("RoadSimplificationRailway"), 2.0).toDouble(), 32.0);
     mRoadPointSpacingRailway = qBound(1, mSettings->value(
             QLatin1String("RoadPointSpacingRailway"), 40).toInt(), 300);
+    mTreeFeatureTiles = normalizedFeatureTiles(
+                mSettings->contains(QLatin1String("TreeFeatureTiles"))
+                ? mSettings->value(QLatin1String("TreeFeatureTiles")).toStringList()
+                : defaultTreeFeatureTiles());
+    mPrimaryRoadFeatureTiles = normalizedFeatureTiles(
+                mSettings->contains(QLatin1String("PrimaryRoadFeatureTiles"))
+                ? mSettings->value(QLatin1String("PrimaryRoadFeatureTiles")).toStringList()
+                : defaultPrimaryRoadFeatureTiles());
+    mSecondaryRoadFeatureTiles = normalizedFeatureTiles(
+                mSettings->contains(QLatin1String("SecondaryRoadFeatureTiles"))
+                ? mSettings->value(QLatin1String("SecondaryRoadFeatureTiles")).toStringList()
+                : defaultSecondaryRoadFeatureTiles());
+    mTertiaryRoadFeatureTiles = normalizedFeatureTiles(
+                mSettings->contains(QLatin1String("TertiaryRoadFeatureTiles"))
+                ? mSettings->value(QLatin1String("TertiaryRoadFeatureTiles")).toStringList()
+                : defaultTertiaryRoadFeatureTiles());
     mShowObjects = mSettings->value(QLatin1String("ShowObjects"), true).toBool();
     mShowObjectNames = mSettings->value(QLatin1String("ShowObjectNames"), true).toBool();
+    mShowVehicleMeshPreviews = mSettings->value(
+                QLatin1String("ShowVehicleMeshPreviews"), true).toBool();
+    const int vehiclePreviewGeometryVersion = mSettings->value(
+                QLatin1String("VehicleMeshPreviewGeometryVersion"), 0)
+            .toInt();
+    if (vehiclePreviewGeometryVersion < 2) {
+        mVehicleMeshPreviewScale = 1.0;
+        mSettings->setValue(QLatin1String("VehicleMeshPreviewScale"),
+                            mVehicleMeshPreviewScale);
+        mSettings->setValue(
+                    QLatin1String("VehicleMeshPreviewGeometryVersion"), 2);
+    } else {
+        mVehicleMeshPreviewScale = qBound(0.25, mSettings->value(
+                    QLatin1String("VehicleMeshPreviewScale"), 1.0)
+                .toDouble(), 4.0);
+    }
+    mVehicleMeshPreviewQuality = qBound(0.25, mSettings->value(
+                QLatin1String("VehicleMeshPreviewQuality"), 2.5).toDouble(),
+                4.0);
     mShowBMPs = mSettings->value(QLatin1String("ShowBMPs"), true).toBool();
     mShowMiniMap = mSettings->value(QLatin1String("ShowMiniMap"), true).toBool();
     mShowZombieSpawnImage = mSettings->value(QLatin1String("ShowZombieSpawnImage"), false).toBool();
@@ -651,6 +782,13 @@ void Preferences::setRoadPointSpacingTrail(int spacing)
     mSettings->setValue(QLatin1String("Interface/RoadPointSpacingTrail"),
                         mRoadPointSpacingTrail);
 }
+
+void Preferences::setGenerateTrailFeatures(bool enabled)
+{
+    mGenerateTrailFeatures = enabled;
+    mSettings->setValue(QLatin1String("Interface/GenerateTrailFeatures"),
+                        enabled);
+}
 void Preferences::setRoadSimplificationRailway(qreal tolerance)
 {
     mRoadSimplificationRailway = qBound(0.0, double(tolerance), 32.0);
@@ -663,6 +801,35 @@ void Preferences::setRoadPointSpacingRailway(int spacing)
     mSettings->setValue(QLatin1String("Interface/RoadPointSpacingRailway"),
                         mRoadPointSpacingRailway);
 }
+
+void Preferences::setTreeFeatureTiles(const QStringList &tiles)
+{
+    mTreeFeatureTiles = normalizedFeatureTiles(tiles);
+    mSettings->setValue(QLatin1String("Interface/TreeFeatureTiles"),
+                        mTreeFeatureTiles);
+}
+
+void Preferences::setPrimaryRoadFeatureTiles(const QStringList &tiles)
+{
+    mPrimaryRoadFeatureTiles = normalizedFeatureTiles(tiles);
+    mSettings->setValue(QLatin1String("Interface/PrimaryRoadFeatureTiles"),
+                        mPrimaryRoadFeatureTiles);
+}
+
+void Preferences::setSecondaryRoadFeatureTiles(const QStringList &tiles)
+{
+    mSecondaryRoadFeatureTiles = normalizedFeatureTiles(tiles);
+    mSettings->setValue(QLatin1String("Interface/SecondaryRoadFeatureTiles"),
+                        mSecondaryRoadFeatureTiles);
+}
+
+void Preferences::setTertiaryRoadFeatureTiles(const QStringList &tiles)
+{
+    mTertiaryRoadFeatureTiles = normalizedFeatureTiles(tiles);
+    mSettings->setValue(QLatin1String("Interface/TertiaryRoadFeatureTiles"),
+                        mTertiaryRoadFeatureTiles);
+}
+
 void Preferences::setUseOpenGL(bool useOpenGL)
 {
     if (mUseOpenGL == useOpenGL)
@@ -753,6 +920,49 @@ void Preferences::setShowObjectNames(bool show)
     mSettings->setValue(QLatin1String("Interface/ShowObjectNames"), mShowObjectNames);
 
     emit showObjectNamesChanged(mShowObjectNames);
+}
+
+void Preferences::setShowVehicleMeshPreviews(bool show)
+{
+    if (mShowVehicleMeshPreviews == show)
+        return;
+
+    mShowVehicleMeshPreviews = show;
+    mSettings->setValue(QLatin1String("Interface/ShowVehicleMeshPreviews"),
+                        mShowVehicleMeshPreviews);
+
+    emit showVehicleMeshPreviewsChanged(mShowVehicleMeshPreviews);
+}
+
+void Preferences::setVehicleMeshPreviewScale(qreal scale)
+{
+    scale = qBound(0.25, scale, 4.0);
+    if (qFuzzyCompare(mVehicleMeshPreviewScale, scale))
+        return;
+
+    mVehicleMeshPreviewScale = scale;
+    mSettings->setValue(QLatin1String("Interface/VehicleMeshPreviewScale"),
+                        mVehicleMeshPreviewScale);
+
+    emit vehicleMeshPreviewScaleChanged(mVehicleMeshPreviewScale);
+}
+
+void Preferences::setVehicleMeshPreviewQuality(qreal quality)
+{
+    quality = qBound(0.25, quality, 4.0);
+    if (qFuzzyCompare(mVehicleMeshPreviewQuality, quality))
+        return;
+
+    mVehicleMeshPreviewQuality = quality;
+    mSettings->setValue(QLatin1String("Interface/VehicleMeshPreviewQuality"),
+                        mVehicleMeshPreviewQuality);
+
+    emit vehicleMeshPreviewQualityChanged(mVehicleMeshPreviewQuality);
+}
+
+void Preferences::notifyVehicleMeshPreviewAtlasChanged()
+{
+    emit vehicleMeshPreviewAtlasChanged();
 }
 
 void Preferences::setShowBMPs(bool show)

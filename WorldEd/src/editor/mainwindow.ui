@@ -314,6 +314,7 @@
     <addaction name="actionShowMiniMap"/>
     <addaction name="actionShowObjects"/>
     <addaction name="actionShowObjectNames"/>
+    <addaction name="actionShowVehicleMeshPreviews"/>
     <addaction name="actionShowOtherWorlds"/>
     <addaction name="actionShowBMP"/>
     <addaction name="actionShowWorldThumbnails"/>
@@ -338,6 +339,7 @@
     <addaction name="actionEditCell"/>
     <addaction name="actionGoToXY"/>
     <addaction name="actionResizeWorld"/>
+    <addaction name="actionLinkedWorldProjects"/>
     <addaction name="separator"/>
     <addaction name="actionObjectGroups"/>
     <addaction name="actionObjectTypes"/>
@@ -826,6 +828,17 @@
     <string>Resize World...</string>
    </property>
   </action>
+  <action name="actionLinkedWorldProjects">
+   <property name="text">
+    <string>Linked World Projects...</string>
+   </property>
+   <property name="toolTip">
+    <string>Manage read-only PZW projects displayed beside the current world</string>
+   </property>
+   <property name="statusTip">
+    <string>Add, remove, validate and inspect linked WorldEd projects</string>
+   </property>
+  </action>
   <action name="actionLotPackViewer">
    <property name="text">
     <string>LotPack Viewer</string>
@@ -967,7 +980,21 @@
     <bool>true</bool>
    </property>
    <property name="text">
-    <string>Show Other Worlds</string>
+    <string>Show Linked World Projects</string>
+   </property>
+   <property name="toolTip">
+    <string>Show or hide the PZW projects configured in World &gt; Linked World Projects</string>
+   </property>
+  </action>
+  <action name="actionShowVehicleMeshPreviews">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Show Vehicle Mesh Previews</string>
+   </property>
+   <property name="toolTip">
+    <string>Render Project Zomboid FBX vehicles over ParkingStall and TrafficJam zones in Cell View</string>
    </property>
   </action>
   <action name="actionGenerateInGameMapBuildingFeatures">
@@ -985,7 +1012,7 @@
     <string>Generate Road Features</string>
    </property>
    <property name="toolTip">
-    <string>Generate primary, secondary, tertiary, trail and railway features from map tiles</string>
+    <string>Generate primary, secondary, tertiary and railway features from map tiles. Dirt-based Trail detection is an optional heuristic in Preferences.</string>
    </property>
   </action>
   <action name="actionReadInGameMapFeaturesXML">

@@ -121,11 +121,39 @@ bool WorldMapOverlayItem::load(const QString &fileName, QString *error)
     int minY = std::numeric_limits<int>::max();
     int maxX = std::numeric_limits<int>::min();
     int maxY = std::numeric_limits<int>::min();
+    int sourceCellSize = 256;
+    bool explicitCellSize = false;
+    double maximumLocalCoordinate = 0.0;
     QXmlStreamReader scanner(&scanFile);
     while (!scanner.atEnd()) {
         scanner.readNext();
-        if (!scanner.isStartElement()
-                || scanner.name() != QLatin1String("cell"))
+        if (!scanner.isStartElement())
+            continue;
+        if (scanner.name() == QLatin1String("world")) {
+            bool cellSizeOk = false;
+            const int declaredCellSize = scanner.attributes().value(
+                        QLatin1String("cellSize")).toInt(&cellSizeOk);
+            if (cellSizeOk && (declaredCellSize == 256
+                               || declaredCellSize == 300)) {
+                sourceCellSize = declaredCellSize;
+                explicitCellSize = true;
+            }
+            continue;
+        }
+        if (scanner.name() == QLatin1String("point")) {
+            bool xOk = false;
+            bool yOk = false;
+            const double x = scanner.attributes().value(
+                        QLatin1String("x")).toDouble(&xOk);
+            const double y = scanner.attributes().value(
+                        QLatin1String("y")).toDouble(&yOk);
+            if (xOk)
+                maximumLocalCoordinate = qMax(maximumLocalCoordinate, x);
+            if (yOk)
+                maximumLocalCoordinate = qMax(maximumLocalCoordinate, y);
+            continue;
+        }
+        if (scanner.name() != QLatin1String("cell"))
             continue;
         bool xOk = false;
         bool yOk = false;
@@ -145,6 +173,8 @@ bool WorldMapOverlayItem::load(const QString &fileName, QString *error)
             *error = scanner.errorString();
         return false;
     }
+    if (!explicitCellSize && maximumLocalCoordinate > 256.0)
+        sourceCellSize = 300;
     if (minX > maxX || minY > maxY) {
         const GenerateLotsSettings &settings =
                 mScene->world()->getGenerateLotsSettings();
@@ -154,8 +184,11 @@ bool WorldMapOverlayItem::load(const QString &fileName, QString *error)
         maxY = minY + mScene->world()->height() - 1;
     }
 
+    const WorldGridFormat sourceFormat = sourceCellSize == 256
+            ? WorldGridFormat::Native256
+            : WorldGridFormat::Legacy300;
     World overlayWorld(maxX - minX + 1, maxY - minY + 1,
-                       mScene->world()->gridFormat());
+                       sourceFormat);
     GenerateLotsSettings overlaySettings =
             mScene->world()->getGenerateLotsSettings();
     overlaySettings.worldOrigin = QPoint(minX, minY);
@@ -169,15 +202,20 @@ bool WorldMapOverlayItem::load(const QString &fileName, QString *error)
 
     const QPoint currentOrigin =
             mScene->world()->getGenerateLotsSettings().worldOrigin;
-    const int cellSize = mScene->world()->cellSize();
+    const int currentCellSize = mScene->world()->cellSize();
+    const qreal sourceCellSpan = sourceCellSize
+            / qreal(currentCellSize);
     const int batchSize = 4;
     QMap<QPair<int, int>, QList<WorldCell *> > cellsByBatch;
     int featureCount = 0;
     for (WorldCell *cell : overlayWorld.cells()) {
         if (cell->inGameMap().features().isEmpty())
             continue;
-        const QPoint localCell = overlaySettings.worldOrigin
-                + cell->pos() - currentOrigin;
+        const QPoint sourceCell = overlaySettings.worldOrigin
+                + cell->pos();
+        const QPointF localCell(
+                    sourceCell.x() * sourceCellSpan - currentOrigin.x(),
+                    sourceCell.y() * sourceCellSpan - currentOrigin.y());
         const QPair<int, int> batch(
                     qFloor(localCell.x() / qreal(batchSize)),
                     qFloor(localCell.y() / qreal(batchSize)));
@@ -193,11 +231,16 @@ bool WorldMapOverlayItem::load(const QString &fileName, QString *error)
         QPainter picturePainter(&batch.picture);
         picturePainter.setRenderHint(QPainter::Antialiasing, true);
         for (WorldCell *cell : batchIt.value()) {
-            const QPoint localCell = overlaySettings.worldOrigin
-                    + cell->pos() - currentOrigin;
+            const QPoint sourceCell = overlaySettings.worldOrigin
+                    + cell->pos();
+            const QPointF localCell(
+                        sourceCell.x() * sourceCellSpan - currentOrigin.x(),
+                        sourceCell.y() * sourceCellSpan - currentOrigin.y());
             batch.bounds = batch.bounds.united(
-                        mScene->boundingRect(localCell).adjusted(
-                            -16, -16, 16, 16));
+                        mScene->cellRectToPolygon(QRectF(
+                            localCell,
+                            QSizeF(sourceCellSpan, sourceCellSpan)))
+                        .boundingRect().adjusted(-16, -16, 16, 16));
             for (InGameMapFeature *feature :
                  cell->inGameMap().features()) {
                 const QColor color = worldMapOverlayColor(feature, mForest);
@@ -218,8 +261,10 @@ bool WorldMapOverlayItem::load(const QString &fileName, QString *error)
                     polygon.reserve(coordinates.size() + 1);
                     for (const InGameMapPoint &point : coordinates) {
                         const QPointF cellPoint(
-                                    localCell.x() + point.x / cellSize,
-                                    localCell.y() + point.y / cellSize);
+                                    localCell.x()
+                                    + point.x / currentCellSize,
+                                    localCell.y()
+                                    + point.y / currentCellSize);
                         polygon += mScene->cellToPixelCoords(cellPoint);
                     }
                     if (feature->mGeometry.isPolygon()) {
@@ -248,7 +293,8 @@ bool WorldMapOverlayItem::load(const QString &fileName, QString *error)
                     if (width > 0) {
                         pen.setCosmetic(false);
                         pen.setWidthF(qMax(
-                            1.0, width * qreal(GRID_HEIGHT) / cellSize));
+                            1.0, width * qreal(GRID_HEIGHT)
+                            / currentCellSize));
                         QColor wideColor = color;
                         wideColor.setAlpha(125);
                         pen.setColor(wideColor);
@@ -272,7 +318,9 @@ bool WorldMapOverlayItem::load(const QString &fileName, QString *error)
     qInfo() << "World-map overlay loaded:" << mFileName
             << "features" << mFeatureCount
             << "batches" << mBatches.size()
-            << "forest" << mForest;
+            << "forest" << mForest
+            << "source-cell-size" << sourceCellSize
+            << "project-cell-size" << currentCellSize;
     update();
     return true;
 }
@@ -328,6 +376,8 @@ WorldScene::WorldScene(WorldDocument *worldDoc, QObject *parent)
 
     connect(mWorldDoc, &WorldDocument::generateLotSettingsChanged,
             this, &WorldScene::generateLotsSettingsChanged);
+    connect(mWorldDoc, &WorldDocument::otherWorldsChanged,
+            this, &WorldScene::reloadOtherWorlds);
 
     connect(mWorldDoc, SIGNAL(selectedRoadsChanged()),
             SLOT(selectedRoadsChanged()));
@@ -354,49 +404,7 @@ WorldScene::WorldScene(WorldDocument *worldDoc, QObject *parent)
     mCoordItem->updateBoundingRect();
 
     Preferences *prefs = Preferences::instance();
-    foreach (QString path, world()->otherWorlds()) {
-        WorldReader reader;
-        World *otherWorld = reader.readWorld(path);
-        if (otherWorld) {
-            OtherWorld *_otherWorld = new OtherWorld();
-            _otherWorld->mWorld = otherWorld;
-            _otherWorld->mFileName = path;
-            _otherWorld->mCellItems.resize(otherWorld->width() * otherWorld->height());
-            mOtherWorlds += _otherWorld;
-
-            foreach (WorldBMP *bmp, otherWorld->bmps()) {
-                WorldBMPItem *item = new WorldBMPItem(this, bmp);
-                item->setVisible(prefs->showOtherWorlds());
-                addItem(item);
-                _otherWorld->mBMPItems += item;
-            }
-
-            QSet<ThumbnailCell> visibleCells;
-            ThumbnailSettingsMgr::instance().visibleCells(path, visibleCells);
-
-            for (int y = 0; y < otherWorld->height(); y++) {
-                for (int x = 0; x < otherWorld->width(); x++) {
-                    WorldCell *cell = otherWorld->cellAt(x, y);
-                    OtherWorldCellItem *item = new OtherWorldCellItem(cell, this);
-                    item->setVisible(prefs->showOtherWorlds());
-                    addItem(item);
-                    item->setZValue(ZVALUE_CELLITEM); // below mGridItem
-                    _otherWorld->mCellItems[y * otherWorld->width() + x] = item;
-                    if (prefs->showWorldThumbnails()
-                            && prefs->loadAllWorldThumbnails()) {
-                        _otherWorld->mPendingThumbnails += item;
-                    } else if (prefs->showWorldThumbnails()
-                               && visibleCells.contains(
-                                   ThumbnailCell(cell->x(), cell->y()))) {
-                        _otherWorld->mPendingThumbnails += item;
-                    }
-                }
-            }
-
-            if (prefs->showOtherWorlds())
-                setSceneRect(sceneRect().united(boundingRect(_otherWorld->adjustedBounds(world()))));
-        }
-    }
+    loadOtherWorlds();
 
     QSet<ThumbnailCell> visibleCells;
     ThumbnailSettingsMgr::instance().visibleCells(worldDocument()->fileName(), visibleCells);
@@ -744,6 +752,7 @@ void WorldScene::worldResized(const QSize &oldSize)
 
 void WorldScene::generateLotsSettingsChanged()
 {
+    reloadOtherWorlds();
     mCoordItem->update();
     if (mZombieSpawnImageItem)
         mZombieSpawnImageItem->reloadFromSettings();
@@ -757,6 +766,101 @@ void WorldScene::generateLotsSettingsChanged()
                     mWorldMapForestOverlayItem->fileName(), &error);
     ZombieHeatMapTool::instance()->updateEnabledState();
     BiomeMapTool::instance()->updateEnabledState();
+}
+
+void WorldScene::loadOtherWorlds()
+{
+    Preferences *prefs = Preferences::instance();
+    QString ownerIdentity = QFileInfo(worldDocument()->fileName())
+            .canonicalFilePath();
+    if (ownerIdentity.isEmpty())
+        ownerIdentity = QFileInfo(worldDocument()->fileName())
+                .absoluteFilePath();
+#ifdef Q_OS_WIN
+    ownerIdentity = ownerIdentity.toLower();
+#endif
+    ownerIdentity = QDir::cleanPath(ownerIdentity);
+    QSet<QString> loadedPaths;
+    for (const QString &path : world()->otherWorlds()) {
+        QString identity = QFileInfo(path).canonicalFilePath();
+        if (identity.isEmpty())
+            identity = QFileInfo(path).absoluteFilePath();
+#ifdef Q_OS_WIN
+        identity = identity.toLower();
+#endif
+        identity = QDir::cleanPath(identity);
+        if (identity == ownerIdentity || loadedPaths.contains(identity)) {
+            qWarning() << "Linked world skipped because it is the current "
+                          "project or a duplicate:" << path;
+            continue;
+        }
+        WorldReader reader;
+        World *linkedWorld = reader.readWorld(path);
+        if (!linkedWorld) {
+            qWarning().noquote() << "Linked world could not be read:"
+                                 << path << reader.errorString();
+            continue;
+        }
+        if (linkedWorld->gridFormat() != world()->gridFormat()) {
+            qWarning() << "Linked world skipped because its grid differs "
+                          "from the current project:" << path;
+            delete linkedWorld;
+            continue;
+        }
+        loadedPaths.insert(identity);
+
+        OtherWorld *otherWorld = new OtherWorld();
+        otherWorld->mWorld = linkedWorld;
+        otherWorld->mFileName = path;
+        otherWorld->mCellItems.resize(
+                    linkedWorld->width() * linkedWorld->height());
+        mOtherWorlds += otherWorld;
+
+        for (WorldBMP *bmp : linkedWorld->bmps()) {
+            WorldBMPItem *item = new WorldBMPItem(this, bmp);
+            item->setVisible(prefs->showOtherWorlds()
+                             && prefs->showBMPs());
+            addItem(item);
+            otherWorld->mBMPItems += item;
+        }
+
+        QSet<ThumbnailCell> visibleCells;
+        ThumbnailSettingsMgr::instance().visibleCells(path, visibleCells);
+        for (int y = 0; y < linkedWorld->height(); ++y) {
+            for (int x = 0; x < linkedWorld->width(); ++x) {
+                WorldCell *cell = linkedWorld->cellAt(x, y);
+                OtherWorldCellItem *item = new OtherWorldCellItem(cell, this);
+                item->setVisible(prefs->showOtherWorlds() && !mBMPToolActive);
+                addItem(item);
+                item->setZValue(ZVALUE_CELLITEM);
+                otherWorld->mCellItems[y * linkedWorld->width() + x] = item;
+                if (prefs->showWorldThumbnails()
+                        && (prefs->loadAllWorldThumbnails()
+                            || visibleCells.contains(
+                                ThumbnailCell(cell->x(), cell->y())))) {
+                    otherWorld->mPendingThumbnails += item;
+                }
+            }
+        }
+    }
+    setShowOtherWorlds(prefs->showOtherWorlds());
+}
+
+void WorldScene::reloadOtherWorlds()
+{
+    if (mLoadThumbnailsDialog)
+        mLoadThumbnailsDialog->close();
+    mThumbnailLoadTotal = 0;
+    qDeleteAll(mOtherWorlds);
+    mOtherWorlds.clear();
+    loadOtherWorlds();
+    if (Preferences::instance()->showWorldThumbnails()
+            && Preferences::instance()->loadAllWorldThumbnails()) {
+        startThumbnailProgress();
+    } else {
+        handlePendingThumbnails();
+    }
+    update();
 }
 
 QPointF WorldScene::pixelToCellCoords(qreal x, qreal y) const
@@ -2861,6 +2965,8 @@ void ZombieSpawnImageItem::rebuildPreview()
 
 OtherWorld::~OtherWorld()
 {
+    qDeleteAll(mBMPItems);
+    qDeleteAll(mCellItems);
     delete mWorld;
 }
 

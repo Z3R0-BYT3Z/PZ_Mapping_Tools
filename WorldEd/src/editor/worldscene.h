@@ -583,6 +583,7 @@ public slots:
     void worldResized(const QSize &oldSize);
 
     void generateLotsSettingsChanged();
+    void reloadOtherWorlds();
 
     void selectedCellsChanged();
     void cellMapFileChanged(WorldCell *cell);
@@ -666,6 +667,7 @@ private:
     int pendingThumbnailCount() const;
     void startThumbnailProgress();
     void updateThumbnailProgress();
+    void loadOtherWorlds();
 
     QList<OtherWorld*> mOtherWorlds;
 };

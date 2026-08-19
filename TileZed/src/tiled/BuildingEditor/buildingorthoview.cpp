@@ -583,11 +583,13 @@ void BuildingBaseScene::synchObjectItemVisibility()
 }
 
 void BuildingOrthoScene::setToolTiles(const FloorTileGrid *tiles, const QPoint &pos,
-                                   const QString &layerName)
+                                   const QString &layerName,
+                                   bool reusableSource)
 {
     Q_UNUSED(tiles)
     Q_UNUSED(pos)
     Q_UNUSED(layerName)
+    Q_UNUSED(reusableSource)
 }
 
 void BuildingOrthoScene::clearToolTiles()
@@ -1600,7 +1602,7 @@ void BuildingOrthoScene::setDocument(BuildingDocument *doc)
         connect(mDocument, &BuildingDocument::selectedObjectsChanged,
                 this, &BuildingBaseScene::selectedObjectsChanged);
 
-        connect(mDocument, &BuildingDocument::roomChanged,
+        connect(mDocument, &BuildingDocument::roomColorChanged,
                 this, &BuildingOrthoScene::roomChanged);
         connect(mDocument, &BuildingDocument::roomAdded,
                 this, &BuildingOrthoScene::roomAdded);

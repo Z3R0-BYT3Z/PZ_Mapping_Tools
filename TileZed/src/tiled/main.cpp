@@ -576,6 +576,27 @@ static bool validateBuildingClipboard(
     document->insertRoom(building->roomCount(), sourceRoom);
     floor->SetRoomAt(1, 1, sourceRoom);
 
+    int colorChangeCount = 0;
+    int tileChangeCount = 0;
+    const QMetaObject::Connection colorConnection = QObject::connect(
+                document, &BuildingDocument::roomColorChanged,
+                [&colorChangeCount](Room *) { ++colorChangeCount; });
+    const QMetaObject::Connection tileConnection = QObject::connect(
+                document, &BuildingDocument::roomTilesChanged,
+                [&tileChangeCount](Room *) { ++tileChangeCount; });
+    Room *renamedRoom = new Room(sourceRoom);
+    renamedRoom->Name += QStringLiteral(" validation");
+    Room *originalRoom = document->changeRoom(sourceRoom, renamedRoom);
+    Room *temporaryRoom = document->changeRoom(sourceRoom, originalRoom);
+    delete temporaryRoom;
+    QObject::disconnect(colorConnection);
+    QObject::disconnect(tileConnection);
+    if (colorChangeCount != 0 || tileChangeCount != 0) {
+        *errorString = QStringLiteral(
+                    "Room metadata changes triggered an isometric rebuild");
+        return false;
+    }
+
     QList<BuildingDocument::ClipboardTileLayer> tileLayers;
     BuildingDocument::ClipboardTileLayer tileLayer;
     tileLayer.level = 0;

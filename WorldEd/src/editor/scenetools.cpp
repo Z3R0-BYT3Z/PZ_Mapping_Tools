@@ -40,6 +40,7 @@
 #include "worldconstants.h"
 #include "worlddocument.h"
 #include "worldproperties.h"
+#include "worldobjectvalidation.h"
 #include "zoomable.h"
 
 #include "../portablesettings.h"
@@ -78,6 +79,19 @@
 using namespace Tiled;
 
 namespace {
+bool typeRequiresUnitRectangle(const QString &type)
+{
+    return type == QLatin1String("SpawnPoint")
+            || type == QLatin1String("WaterFlow")
+            || type == QLatin1String("RoomTone");
+}
+
+bool typeRequiresRectangle(const QString &type)
+{
+    return typeRequiresUnitRectangle(type)
+            || type == QLatin1String("WaterZone");
+}
+
 void resolvedObjectProperties(PropertyHolder *holder, PropertyList &result)
 {
     for (PropertyTemplate *propertyTemplate : holder->templates())
@@ -442,6 +456,15 @@ void CreateObjectTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
         mStartScenePos = event->scenePos();
         mMousePressed = true;
         mAnchorPos = mScene->renderer()->pixelToTileCoordsInt(event->scenePos(), mScene->document()->currentLevel());
+        QString typeName = mObjectTypeName;
+        if (typeName.isEmpty()) {
+            WorldObjectGroup *group =
+                    mScene->document()->currentObjectGroup();
+            if (group && group->type())
+                typeName = group->type()->name();
+        }
+        if (typeRequiresUnitRectangle(typeName))
+            startNewMapObject(mAnchorPos);
 #else
         mAnchorPos = mScene->renderer()->pixelToTileCoords(event->scenePos(), mScene->document()->currentLevel());
 
@@ -467,6 +490,15 @@ void CreateObjectTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
 void CreateObjectTool::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 {
     if (mItem) {
+        if (WorldObjectValidation::requiresUnitRectangle(
+                    mItem->object())) {
+            mItem->object()->setPos(mAnchorPos);
+            mItem->object()->setWidth(1);
+            mItem->object()->setHeight(1);
+            mItem->synchWithObject();
+            event->accept();
+            return;
+        }
 #if 1
         QPointF pos = mScene->renderer()->pixelToTileCoordsInt(event->scenePos(), mScene->document()->currentLevel());
 #else
@@ -539,6 +571,7 @@ void CreateObjectTool::startNewMapObject(const QPointF &pos)
         }
     }
 #endif
+    WorldObjectValidation::applyCreationDefaults(obj);
     mItem = mScene->newObjectItem(obj, nullptr);
     mItem->labelItem()->setShowSize(true);
     mItem->setZValue(10000);
@@ -563,6 +596,7 @@ void CreateObjectTool::cancelNewMapObject()
 void CreateObjectTool::finishNewMapObject()
 {
     WorldCellObject *obj = clearNewMapObjectItem();
+    WorldObjectValidation::applyCreationDefaults(obj);
     mScene->worldDocument()->addCellObject(mScene->cell(),
                                            mScene->cell()->objects().size(),
                                            obj);
@@ -1332,18 +1366,28 @@ void SubMapTool::showContextMenu(const QPointF &scenePos, const QPoint &screenPo
     else
         lightbulbMapAction = menu.addAction(lightIcon, tr("Hide lights in %1").arg(mapName));
     menu.addSeparator();
-    QMenu *verticalMenu = menu.addMenu(tr("Vertical Placement"));
-    verticalMenu->setTitle(tr("Vertical Placement (Level %1)")
-                           .arg(item->lot()->level()));
-    QAction *lowerAction = verticalMenu->addAction(
-                tr("Lower Lot One Level"));
-    QAction *raiseAction = verticalMenu->addAction(
-                tr("Raise Lot One Level"));
-    QAction *groundAction = verticalMenu->addAction(
-                tr("Return Lot to Level 0"));
     const int lotLevel = item->lot()->level();
     const int sourceMinLevel = item->subMap()->minLevel();
     const int sourceMaxLevel = item->subMap()->maxLevel();
+    QMenu *verticalMenu = menu.addMenu(tr("Vertical Placement"));
+    verticalMenu->setTitle(tr("Vertical Placement (Level %1)")
+                           .arg(lotLevel));
+    QAction *sourceLevelsAction = verticalMenu->addAction(
+                tr("Source levels: %1 to %2")
+                .arg(sourceMinLevel).arg(sourceMaxLevel));
+    sourceLevelsAction->setEnabled(false);
+    QAction *worldLevelsAction = verticalMenu->addAction(
+                tr("Current world levels: %1 to %2")
+                .arg(lotLevel + sourceMinLevel)
+                .arg(lotLevel + sourceMaxLevel));
+    worldLevelsAction->setEnabled(false);
+    verticalMenu->addSeparator();
+    QAction *lowerAction = verticalMenu->addAction(
+                tr("Lower Entire Lot One Level..."));
+    QAction *raiseAction = verticalMenu->addAction(
+                tr("Raise Entire Lot One Level..."));
+    QAction *groundAction = verticalMenu->addAction(
+                tr("Return Entire Lot to Level 0..."));
     lowerAction->setEnabled(lotLevel - 1 + sourceMinLevel >=
                             MIN_WORLD_LEVEL);
     raiseAction->setEnabled(lotLevel + 1 + sourceMaxLevel <=
@@ -1373,11 +1417,34 @@ void SubMapTool::showContextMenu(const QPointF &scenePos, const QPoint &screenPo
         LightbulbsMgr::instance().toggleRoom(roomName);
     if (action == lightbulbMapAction)
         LightbulbsMgr::instance().toggleMap(mapName);
-    if (action == lowerAction)
+    const auto confirmVerticalPlacement = [&](int newLevel) {
+        const int newWorldMin = newLevel + sourceMinLevel;
+        const int newWorldMax = newLevel + sourceMaxLevel;
+        return QMessageBox::warning(
+                    mScene->views().value(0),
+                    tr("Move Entire Lot Vertically"),
+                    tr("This changes the world level of the complete lot "
+                       "\"%1\".\n\n"
+                       "Source levels: %2 to %3\n"
+                       "Current world levels: %4 to %5\n"
+                       "Resulting world levels: %6 to %7\n\n"
+                       "Every floor, wall, window, stair, RoomDef, object, "
+                       "and collision layer moves together. If this source "
+                       "already stores its basement on negative levels, "
+                       "keep the lot at level 0.\n\nContinue?")
+                    .arg(mapName)
+                    .arg(sourceMinLevel).arg(sourceMaxLevel)
+                    .arg(lotLevel + sourceMinLevel)
+                    .arg(lotLevel + sourceMaxLevel)
+                    .arg(newWorldMin).arg(newWorldMax),
+                    QMessageBox::Yes | QMessageBox::No,
+                    QMessageBox::No) == QMessageBox::Yes;
+    };
+    if (action == lowerAction && confirmVerticalPlacement(lotLevel - 1))
         mScene->worldDocument()->setLotLevel(item->lot(), lotLevel - 1);
-    if (action == raiseAction)
+    if (action == raiseAction && confirmVerticalPlacement(lotLevel + 1))
         mScene->worldDocument()->setLotLevel(item->lot(), lotLevel + 1);
-    if (action == groundAction)
+    if (action == groundAction && confirmVerticalPlacement(0))
         mScene->worldDocument()->setLotLevel(item->lot(), 0);
     if (action == pierceAction) {
         const QMessageBox::StandardButton confirmation =
@@ -1595,6 +1662,7 @@ void RoomToneTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
         PropertyDef *pd = mScene->world()->propertyDefinition(property->mDefinition->mName);
         obj->addProperty(obj->properties().size(), new Property(pd, pd->mDefaultValue));
     }
+    WorldObjectValidation::applyCreationDefaults(obj);
     mScene->worldDocument()->addCellObject(mScene->cell(),
                                            mScene->cell()->objects().size(),
                                            obj);
@@ -1897,8 +1965,7 @@ void SpawnPointTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
     PropertyEnum *pe = mScene->world()->propertyEnums().find(QLatin1String("Professions"));
     if (!pe) {
         QStringList professions;
-        professions << QLatin1String("all")
-                    << QLatin1String("burglar")
+        professions << QLatin1String("burglar")
                     << QLatin1String("burgerflipper")
                     << QLatin1String("carpenter")
                     << QLatin1String("chef")
@@ -1930,8 +1997,8 @@ void SpawnPointTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
     // Create the Professions property definition if needed
     PropertyDef *pd = mScene->world()->propertyDefinition(QLatin1String("Professions"));
     if (!pd) {
-        pd = new PropertyDef(QLatin1String("Professions"), QLatin1String("all"),
-                             tr("Comma-separated list of professions that may spawn here.  Use \"all\" to allow any profession to spawn here."),
+        pd = new PropertyDef(QLatin1String("Professions"), QLatin1String("unemployed"),
+                             tr("Comma-separated list of professions that may spawn here."),
                              pe);
         mScene->worldDocument()->addPropertyDefinition(pd);
     }
@@ -1956,6 +2023,7 @@ void SpawnPointTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
                                                mScene->document()->currentLevel(),
                                                1, 1);
     obj->addTemplate(obj->templates().size(), pt);
+    WorldObjectValidation::applyCreationDefaults(obj);
     mScene->worldDocument()->addCellObject(mScene->cell(),
                                            mScene->cell()->objects().size(),
                                            obj);
@@ -2770,6 +2838,15 @@ void AbstractCreatePolygonObjectTool::mouseReleaseEvent(QGraphicsSceneMouseEvent
 void AbstractCreatePolygonObjectTool::finishItem()
 {
     WorldObjectGroup *og = mScene->document()->currentObjectGroup();
+    if (og && og->type() && typeRequiresRectangle(og->type()->name())) {
+        QMessageBox::warning(
+                    MainWindow::instance(), tr("Rectangle required"),
+                    tr("%1 must be created with the rectangle object tool. Polygon, polyline and point geometry cannot be exported for this zone type.")
+                    .arg(og->type()->name()));
+        mPolygon.clear();
+        updatePathItem();
+        return;
+    }
 
     switch (mGeometryType) {
     case ObjectGeometryType::INVALID:
@@ -2910,6 +2987,13 @@ void AbstractCreatePolygonObjectTool::addPoint(const QPointF &scenePos)
     int level = mScene->document()->currentLevel();
     if (mGeometryType == ObjectGeometryType::Point) {
         WorldObjectGroup *og = mScene->document()->currentObjectGroup();
+        if (og && og->type() && typeRequiresRectangle(og->type()->name())) {
+            QMessageBox::warning(
+                        MainWindow::instance(), tr("Rectangle required"),
+                        tr("%1 must be created with the rectangle object tool. Point geometry cannot be exported for this zone type.")
+                        .arg(og->type()->name()));
+            return;
+        }
         QPointF cellPos = mScene->renderer()->pixelToTileCoordsNearest(scenePos, level);
         WorldCellObjectPoints points;
         points += WorldCellObjectPoint(cellPos.x(), cellPos.y());
@@ -3570,19 +3654,22 @@ void WorldCellTool::finishMoving(const QPointF &pos)
     QPoint startCellPos = mScene->pixelToCellCoordsInt(mStartScenePos);
     QPoint dropCellPos = mDropTilePos;
     if (startCellPos != dropCellPos) {
+        const QPoint cellOffset = dropCellPos - startCellPos;
         QUndoStack *undoStack = mScene->worldDocument()->undoStack();
         int count = mMovingCells.size();
         undoStack->beginMacro(tr("Move %1 Cell%2").arg(count).arg(QLatin1String((count > 1) ? "s" : "")));
         undoStack->push(new ProgressBegin(tr("Moving Cells"))); // in case of multiple loadMap() calls
         mOrderedMovingCells.clear();
         foreach (WorldCell *cell, mMovingCells)
-            pushCellToMove(cell, dropCellPos - startCellPos);
+            pushCellToMove(cell, cellOffset);
         QList<WorldCell*> newSelection;
         foreach (WorldCell *cell, mOrderedMovingCells) {
-            QPoint newPos = cell->pos() + dropCellPos - startCellPos;
+            QPoint newPos = cell->pos() + cellOffset;
             mScene->worldDocument()->moveCell(cell, newPos);
             newSelection += mScene->world()->cellAt(newPos);
         }
+        MainWindow::instance()->moveCellCoordinateData(
+                    mScene->worldDocument(), mMovingCells, cellOffset);
         mScene->worldDocument()->setSelectedCells(newSelection, true);
         undoStack->push(new ProgressEnd(tr("Undoing Move Cells"))); // in case of multiple loadMap() calls
         undoStack->endMacro();

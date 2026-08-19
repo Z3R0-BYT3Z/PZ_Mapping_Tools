@@ -44,6 +44,7 @@ class StreetNamesDock;
 class RegionsDock;
 class UndoDock;
 class World;
+class WorldCell;
 class WorldDocument;
 //class WorldScene;
 class Zoomable;
@@ -83,6 +84,12 @@ public:
 
     static bool validateInGameMapForestExport(
             QString *summary, QString *error);
+    static bool validateCellMoveCoordinateData(
+            QString *summary, QString *error);
+
+    void moveCellCoordinateData(WorldDocument *worldDocument,
+                                const QList<WorldCell *> &sourceCells,
+                                const QPoint &cellOffset);
 
     void readSettings();
     bool canRemoveEmptyBorderCells() const;
@@ -144,6 +151,7 @@ public slots:
     void TMXToBMPSelected();
 
     void resizeWorld();
+    void linkedWorldProjects();
 
     void preferencesDialog();
     void keyboardShortcuts();
@@ -227,6 +235,8 @@ private:
 
     bool confirmSave();
     bool confirmAllSave();
+    bool ensureSavedProjectForTerrainWorkflow(
+            WorldDocument *worldDocument);
 
     void writeSettings();
     void writeWindowSettings();

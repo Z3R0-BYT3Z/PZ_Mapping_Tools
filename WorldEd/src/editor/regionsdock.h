@@ -60,6 +60,7 @@ public:
                             QString *error) const;
     static bool validateEditor(QString *summary, QString *error);
     const QVector<RegionRecord> &regions() const { return mRegions; }
+    int selectedRegionIndex() const { return mSelectedRegion; }
     void applySnapshot(const QVector<RegionRecord> &regions,
                        int selectedRegion);
 protected:
@@ -103,6 +104,7 @@ private:
     void selectRegion(int index);
     void beginSnapshot();
     void commitSnapshot(const QString &text);
+    bool hasUnsavedChanges() const;
     void selectedCellBounds(int *x, int *y, int *width, int *height) const;
     QPointF worldToScene(const QPointF &worldPoint) const;
     QPointF sceneToWorld(const QPointF &scenePoint) const;
@@ -112,6 +114,7 @@ private:
     QPointer<WorldDocument> mWorldDocument;
     QPointer<BaseGraphicsScene> mScene;
     QVector<RegionRecord> mRegions;
+    QVector<RegionRecord> mSavedRegions;
     QVector<QGraphicsPathItem *> mPathItems;
     QVector<QGraphicsSimpleTextItem *> mLabelItems;
     QLineEdit *mFileNameEdit;

@@ -542,7 +542,8 @@ public:
     /////
     // Tile-editing-only methods
     virtual void setToolTiles(const FloorTileGrid *tiles,
-                      const QPoint &pos, const QString &layerName) = 0;
+                      const QPoint &pos, const QString &layerName,
+                      bool reusableSource = false) = 0;
     virtual void clearToolTiles() = 0;
     virtual QString buildingTileAt(int x, int y) = 0;
     virtual QString tileUnderPoint(int x, int y) = 0;
@@ -607,7 +608,8 @@ public:
     void clearDocument();
 
     void setToolTiles(const FloorTileGrid *tiles, const QPoint &pos,
-                      const QString &layerName);
+                      const QString &layerName,
+                      bool reusableSource = false);
     void clearToolTiles();
 
     QString buildingTileAt(int x, int y);

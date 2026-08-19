@@ -30,12 +30,14 @@
 #include "maprenderer.h"
 #include "tilelayer.h"
 
+#include <QApplication>
 #include <QDebug>
 #include <QDir>
 #include <QEvent>
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QMimeData>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QUndoStack>
 #include <QVBoxLayout>
@@ -574,6 +576,28 @@ bool LotsModel::dropMimeData(const QMimeData *data,
 
      // Note: parentItem may be destroyed by setCell()
      int level = parentItem->level->level;
+     int changingLevelCount = 0;
+     for (WorldCellLot *lot : qAsConst(lots)) {
+         if (lot->level() != level)
+             ++changingLevelCount;
+     }
+     if (changingLevelCount > 0) {
+         const QMessageBox::StandardButton confirmation =
+                 QMessageBox::warning(
+                     QApplication::activeWindow(),
+                     tr("Move Entire Lots Vertically"),
+                     tr("Dropping %n lot(s) on Level %1 changes the world "
+                        "level of the complete source. Every floor, wall, "
+                        "window, stair, RoomDef, object, and collision layer "
+                        "moves together.\n\nUse this only when the source "
+                        "levels intentionally require this vertical "
+                        "offset.\n\nContinue?", "", changingLevelCount)
+                     .arg(level),
+                     QMessageBox::Yes | QMessageBox::No,
+                     QMessageBox::No);
+         if (confirmation != QMessageBox::Yes)
+             return false;
+     }
 
      WorldCellLot *insertBefore = nullptr;
      if ((row == -1) || parentItem->children.isEmpty()) {

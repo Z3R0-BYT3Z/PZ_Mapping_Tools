@@ -39,6 +39,7 @@ See [configuration files](PZTools-Configuration-Files.md),
 | Zombie Heatmap | ZombieMap view | Editable heatmap PNG with Undo and backup |
 | Hole Detection | World tools | Missing level-zero tile detection and optional repair |
 | Generate Lots | File menu | Legacy300 or one-to-one Native256 LOT output |
+| Linked World Projects | World menu | Validated read-only PZW references aligned by World origin |
 | InGameMap Forest | InGameMap menu | Forest XML, binary, PNG, and pyramid |
 | Complete mod export | File menu | Map mod directory with generated map data |
 | Basement entrance preview | Selected Basement zone | Translucent editable TBX or TMX entrance overlay |
@@ -50,6 +51,7 @@ Detailed references:
 - [WorldGen editor](PZ-B42.20-WorldGen-Editor-and-Prefabs.md)
 - [Jumbo trees](PZ-B42.20-Jumbo-Trees.md)
 - [BiomeMapConfig](PZ-B42.20-BiomeMapConfig.md)
+- [Linked World Projects](PZWorldEd-Linked-World-Projects.md)
 
 ## TileZed
 
@@ -62,10 +64,10 @@ Detailed references:
 | Snow and replacements | Tools | SnowTile, BurntTile, and custom replacement properties |
 | Pack extraction | Tools | Individual tiles, tilesets, pages, or assembled objects |
 | Pack comparison | Tools | Pixel, metadata, and file comparison |
-| Depth Map Editor | Tools | Geometry and depth-atlas editing |
+| Depth Map Editor | Tools | Resizable geometry and depth-atlas editing with local and projected dimensions |
 | Automapper | Automapping dock | Full or interactive rules applied through Undo |
 | BMP Tools | Dockable BMP window | Terrain brush, fill, select, blending, and layer conversion |
-| Select Tiles | Main tools | Layer-aware and floor-aware copy, cut, delete, and paste |
+| Select Tiles | Main tools | Layer-aware and floor-aware copy and cut, followed by a movable Ctrl+V placement preview |
 | Procedural loot | Tools | Project loot manifest and generated post-merge Lua |
 | Lua mapping | Tools and console | Transactional map, object, and RoomDef changes |
 
@@ -84,7 +86,7 @@ Detailed references:
 |---|---|---|
 | Building and room editing | Main editor | TBX rooms, floors, walls, roofs, objects, and metadata |
 | Tile mode | Tile mode | Direct user-tile layer editing |
-| Select Tiles | Main tools | Layer-aware and floor-aware copy, cut, delete, and paste |
+| Select Tiles | Main tools | Layer-aware and floor-aware copy and cut, followed by a movable paste preview |
 | Object palettes | Ortho and Iso modes | Category-driven walls, furniture, and objects |
 | Templates | Building dialogs | Reusable building defaults and furniture groups |
 | Basements | Floor controls | Negative floors retained in supported formats |

@@ -292,6 +292,8 @@ public:
     WorldBMP *removeBmp(int index);
 
     void insertOtherWorld(int index, const QString &path);
+    void setOtherWorlds(const QStringList &paths)
+    { mOtherWorlds = paths; }
 
     const ObjectGroupList &objectGroups() const
     { return mObjectGroups; }

@@ -857,6 +857,22 @@ void ChangeLuaSettings::swap()
 
 /////
 
+ChangeOtherWorlds::ChangeOtherWorlds(WorldDocument *doc,
+                                     const QStringList &paths)
+    : QUndoCommand(QCoreApplication::translate(
+                       "Undo Commands", "Change Linked World Projects"))
+    , mDocument(doc)
+    , mPaths(paths)
+{
+}
+
+void ChangeOtherWorlds::swap()
+{
+    mPaths = mDocument->undoRedo().changeOtherWorlds(mPaths);
+}
+
+/////
+
 MoveBMP::MoveBMP(WorldDocument *doc, WorldBMP *bmp, const QPoint &topLeft) :
     QUndoCommand(QCoreApplication::translate("Undo Commands", "Move BMP Image")),
     mDocument(doc),

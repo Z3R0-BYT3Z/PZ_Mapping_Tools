@@ -25,6 +25,7 @@
 #include <QPoint>
 #include <QSize>
 #include <QString>
+#include <QStringList>
 #include <QUndoCommand>
 #include <QVector>
 
@@ -1098,6 +1099,23 @@ private:
 
     WorldDocument *mDocument;
     LuaSettings *mSettings;
+};
+
+/////
+
+class ChangeOtherWorlds : public QUndoCommand
+{
+public:
+    ChangeOtherWorlds(WorldDocument *doc, const QStringList &paths);
+
+    void undo() { swap(); }
+    void redo() { swap(); }
+
+private:
+    void swap();
+
+    WorldDocument *mDocument;
+    QStringList mPaths;
 };
 
 /////

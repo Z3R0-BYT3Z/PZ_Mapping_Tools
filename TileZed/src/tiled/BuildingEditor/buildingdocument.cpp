@@ -415,9 +415,15 @@ int BuildingDocument::reorderRoom(int index, Room *room)
 
 Room *BuildingDocument::changeRoom(Room *room, const Room *data)
 {
+    const bool colorChanged = room->Color != data->Color;
+    const bool tilesChanged = room->tiles() != data->tiles();
     Room *old = new Room(room);
     room->copy(data);
     emit roomChanged(room);
+    if (colorChanged)
+        emit roomColorChanged(room);
+    if (tilesChanged)
+        emit roomTilesChanged(room);
     delete data;
 
     foreach (BuildingTileEntry *entry, room->tiles())

@@ -38,6 +38,7 @@
 #include "biomemapitem.h"
 #include "osmterrainimportdialog.h"
 #include "osmterrainimporter.h"
+#include "otherworldsdialog.h"
 #include "cellscene.h"
 #include "defaultsfile.h"
 #include "toolmanager.h"
@@ -45,9 +46,11 @@
 #include "mapimagemanager.h"
 #include "mapmanager.h"
 #include "lotfilesmanager256.h"
+#include "luawriter.h"
 #include "progress.h"
 #include "tilemetainfomgr.h"
 #include "tilesetmanager.h"
+#include "vehiclemeshpreview.h"
 #include "streetnamesdock.h"
 #include "regionsdock.h"
 #include "InGameMap/ingamemapreader.h"
@@ -101,6 +104,45 @@ int main(int argc, char *argv[])
     QString validateWorldMapOverlays;
     bool validateTilesetCleanup = false;
     for (const QString &argument : commandLineArguments) {
+        if (argument == QLatin1String(
+                    "--validate-spawnpoint-export")) {
+            QString summary;
+            QString error;
+            if (!LuaWriter::validateSpawnPointExport(&summary, &error)) {
+                qCritical().noquote()
+                        << "SpawnPoint export validation failed:" << error;
+                return 55;
+            }
+            qInfo().noquote()
+                    << "SpawnPoint export validation passed:" << summary;
+            return 0;
+        }
+        if (argument == QLatin1String(
+                    "--validate-zone-export")) {
+            QString summary;
+            QString error;
+            if (!LuaWriter::validateZoneExport(&summary, &error)) {
+                qCritical().noquote()
+                        << "Zone export validation failed:" << error;
+                return 56;
+            }
+            qInfo().noquote()
+                    << "Zone export validation passed:" << summary;
+            return 0;
+        }
+        if (argument == QLatin1String(
+                    "--validate-linked-world-projects")) {
+            QString summary;
+            QString error;
+            if (!OtherWorldsDialog::validateWorkflow(&summary, &error)) {
+                qCritical().noquote()
+                        << "Linked-world validation failed:" << error;
+                return 53;
+            }
+            qInfo().noquote()
+                    << "Linked-world validation passed:" << summary;
+            return 0;
+        }
         if (argument == QLatin1String(
                     "--validate-bmp-metadata-only")) {
             QString summary;
@@ -181,6 +223,38 @@ int main(int argc, char *argv[])
                               << ", red and green channel painting preserved "
                                  "the other bytes, and green strokes remained "
                                  "aligned to complete 8 x 8 chunks";
+            return 0;
+        }
+        if (argument == QLatin1String(
+                    "--validate-cell-move-coordinates")) {
+            QString summary;
+            QString error;
+            if (!MainWindow::validateCellMoveCoordinateData(
+                        &summary, &error)) {
+                qCritical().noquote()
+                        << "Cell move coordinate validation failed:"
+                        << error;
+                return 54;
+            }
+            qInfo().noquote()
+                    << "Cell move coordinate validation passed:"
+                    << summary;
+            return 0;
+        }
+        if (argument == QLatin1String(
+                    "--validate-ingamemap-road-generation")) {
+            QString summary;
+            QString error;
+            if (!InGameMapFeatureGenerator::validateRoadMaskProcessing(
+                        &summary, &error)) {
+                qCritical().noquote()
+                        << "InGameMap road-generation validation failed:"
+                        << error;
+                return 55;
+            }
+            qInfo().noquote()
+                    << "InGameMap road-generation validation passed:"
+                    << summary;
             return 0;
         }
         if (argument == QLatin1String(
@@ -473,6 +547,50 @@ int main(int argc, char *argv[])
                 return 3;
             }
             qInfo() << "Environment-preview overlay validation passed";
+            return 0;
+        }
+        const QString vehicleMeshPreviewPrefix =
+                QLatin1String("--validate-vehicle-mesh-preview=");
+        if (argument.startsWith(vehicleMeshPreviewPrefix)) {
+            QString summary;
+            QString error;
+            const QString gameDirectory =
+                    argument.mid(vehicleMeshPreviewPrefix.size());
+            if (!VehicleMeshPreview::validate(
+                        gameDirectory, &summary, &error)) {
+                qCritical().noquote()
+                        << "Vehicle mesh preview validation failed:"
+                        << error;
+                return 55;
+            }
+            qInfo().noquote()
+                    << "Vehicle mesh preview validation passed:"
+                    << summary;
+            return 0;
+        }
+        const QString renderVehicleMeshPreviewPrefix =
+                QLatin1String("--render-vehicle-mesh-preview=");
+        if (argument.startsWith(renderVehicleMeshPreviewPrefix)) {
+            const QString payload = argument.mid(
+                        renderVehicleMeshPreviewPrefix.size());
+            const int separator = payload.lastIndexOf(QLatin1Char('|'));
+            if (separator <= 0 || separator >= payload.size() - 1) {
+                qCritical() << "Vehicle mesh preview render requires a game directory and output path";
+                return 56;
+            }
+            QString error;
+            const QImage image = VehicleMeshPreview::validationImage(
+                        payload.left(separator), &error);
+            if (image.isNull()
+                    || !image.save(payload.mid(separator + 1))) {
+                qCritical().noquote()
+                        << "Vehicle mesh preview render failed:"
+                        << error;
+                return 57;
+            }
+            qInfo().noquote()
+                    << "Vehicle mesh preview image written to"
+                    << payload.mid(separator + 1);
             return 0;
         }
         if (argument == QLatin1String("--validate-regions-editor")) {

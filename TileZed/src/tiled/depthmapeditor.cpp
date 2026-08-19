@@ -53,6 +53,12 @@
 using namespace Tiled;
 using namespace Tiled::Internal;
 namespace {
+constexpr float TilePlanePixelsPerUnit = 64.0f;
+constexpr float VerticalGeometryPixelsPerUnit = 96.0f;
+constexpr float VerticalGeometryScale = 0.8164966667f;
+constexpr float VerticalPixelsPerUnit =
+        VerticalGeometryPixelsPerUnit * VerticalGeometryScale;
+
 QImage normalisedDepthTile(const QImage &image)
 {
     QImage result(128, 256, QImage::Format_ARGB32);
@@ -98,6 +104,23 @@ QRectF pointsBounds(const QVector<QPointF> &points)
     return QRectF(QPointF(minimumX, minimumY),
                   QPointF(maximumX, maximumY));
 }
+
+QRectF projectedBounds(const DepthPrimitive &primitive)
+{
+    const QVector<QLineF> lines =
+            DepthGeometryRasterizer::wireframe(primitive);
+    if (lines.isEmpty())
+        return QRectF();
+    QRectF bounds(lines.first().p1(), QSizeF(0, 0));
+    for (const QLineF &line : lines) {
+        bounds = bounds.united(
+                    QRectF(line.p1(), line.p2()).normalized());
+        bounds = bounds.united(
+                    QRectF(line.p2(), QSizeF(0, 0)));
+    }
+    return bounds.normalized();
+}
+
 class ScopedDepthMapSettings
 {
 public:
@@ -112,6 +135,19 @@ public:
                     QStringLiteral("DepthMapEditor/LastGeometryFile"));
         mGeometryFile = settings.value(
                     QStringLiteral("DepthMapEditor/LastGeometryFile"));
+        preserve(settings,
+                 QStringLiteral("DepthMapEditor/WindowGeometry"),
+                 mHadWindowGeometry, mWindowGeometry);
+        preserve(settings,
+                 QStringLiteral("DepthMapEditor/MainSplitter"),
+                 mHadMainSplitter, mMainSplitter);
+        preserve(settings,
+                 QStringLiteral("DepthMapEditor/GeometrySplitter"),
+                 mHadGeometrySplitter, mGeometrySplitter);
+        settings.remove(QStringLiteral("DepthMapEditor/WindowGeometry"));
+        settings.remove(QStringLiteral("DepthMapEditor/MainSplitter"));
+        settings.remove(QStringLiteral("DepthMapEditor/GeometrySplitter"));
+        settings.sync();
     }
     ~ScopedDepthMapSettings()
     {
@@ -122,9 +158,24 @@ public:
         restore(settings,
                 QStringLiteral("DepthMapEditor/LastGeometryFile"),
                 mHadGeometryFile, mGeometryFile);
+        restore(settings,
+                QStringLiteral("DepthMapEditor/WindowGeometry"),
+                mHadWindowGeometry, mWindowGeometry);
+        restore(settings,
+                QStringLiteral("DepthMapEditor/MainSplitter"),
+                mHadMainSplitter, mMainSplitter);
+        restore(settings,
+                QStringLiteral("DepthMapEditor/GeometrySplitter"),
+                mHadGeometrySplitter, mGeometrySplitter);
         settings.sync();
     }
 private:
+    static void preserve(QSettings &settings, const QString &key,
+                         bool &existed, QVariant &value)
+    {
+        existed = settings.contains(key);
+        value = settings.value(key);
+    }
     static void restore(QSettings &settings, const QString &key,
                         bool existed, const QVariant &value)
     {
@@ -137,6 +188,12 @@ private:
     QVariant mDirectory;
     bool mHadGeometryFile = false;
     QVariant mGeometryFile;
+    bool mHadWindowGeometry = false;
+    QVariant mWindowGeometry;
+    bool mHadMainSplitter = false;
+    QVariant mMainSplitter;
+    bool mHadGeometrySplitter = false;
+    QVariant mGeometrySplitter;
 };
 }
 DepthMapCanvas::DepthMapCanvas(QWidget *parent)
@@ -604,6 +661,8 @@ DepthMapEditor::DepthMapEditor(QWidget *parent)
     copyAction->setShortcut(QKeySequence::Copy);
     QAction *pasteAction = editMenu->addAction(tr("Paste Tile Depth"));
     pasteAction->setShortcut(QKeySequence::Paste);
+    QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
+    QAction *resetLayoutAction = viewMenu->addAction(tr("Reset Layout"));
     QWidget *central = new QWidget(this);
     QVBoxLayout *outerLayout = new QVBoxLayout(central);
     outerLayout->setContentsMargins(8, 8, 8, 8);
@@ -645,9 +704,11 @@ DepthMapEditor::DepthMapEditor(QWidget *parent)
     outerLayout->addWidget(sourceGroup);
     mMainSplitter = new QSplitter(Qt::Horizontal, central);
     mMainSplitter->setChildrenCollapsible(false);
+    mMainSplitter->setHandleWidth(7);
+    mMainSplitter->setOpaqueResize(true);
     mTileTable = new QTableWidget(mMainSplitter);
     mTileTable->setColumnCount(DepthColumns);
-    mTileTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    mTileTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     mTileTable->setSelectionMode(QAbstractItemView::SingleSelection);
     mTileTable->setSelectionBehavior(QAbstractItemView::SelectItems);
     mTileTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -655,33 +716,43 @@ DepthMapEditor::DepthMapEditor(QWidget *parent)
     mTileTable->verticalHeader()->hide();
     mTileTable->setShowGrid(false);
     mTileTable->setIconSize(QSize(48, 96));
-    mTileTable->setMinimumWidth(8 * 52 + 18);
+    mTileTable->setMinimumWidth(220);
     QWidget *editorPanel = new QWidget(mMainSplitter);
-    editorPanel->setMinimumWidth(360);
+    editorPanel->setMinimumWidth(240);
     QVBoxLayout *editorLayout = new QVBoxLayout(editorPanel);
     editorLayout->setContentsMargins(8, 0, 0, 0);
     mModeTabs = new QTabWidget(mMainSplitter);
-    mModeTabs->setMinimumWidth(560);
+    mModeTabs->setMinimumWidth(320);
     QWidget *geometryTab = new QWidget(mModeTabs);
-    QHBoxLayout *geometryTabLayout = new QHBoxLayout(geometryTab);
+    QVBoxLayout *geometryTabLayout = new QVBoxLayout(geometryTab);
     geometryTabLayout->setContentsMargins(6, 6, 6, 6);
-    QVBoxLayout *geometryListLayout = new QVBoxLayout;
-    mGeometryList = new QListWidget(geometryTab);
-    mGeometryList->setMinimumWidth(180);
+    mGeometrySplitter = new QSplitter(Qt::Horizontal, geometryTab);
+    mGeometrySplitter->setChildrenCollapsible(false);
+    mGeometrySplitter->setHandleWidth(7);
+    mGeometrySplitter->setOpaqueResize(true);
+    QWidget *geometryListPanel = new QWidget(mGeometrySplitter);
+    geometryListPanel->setMinimumWidth(180);
+    QVBoxLayout *geometryListLayout = new QVBoxLayout(geometryListPanel);
+    geometryListLayout->setContentsMargins(0, 0, 0, 0);
+    mGeometryList = new QListWidget(geometryListPanel);
     geometryListLayout->addWidget(new QLabel(
-        tr("3D primitives for this tile"), geometryTab));
+        tr("3D primitives for this tile"), geometryListPanel));
     geometryListLayout->addWidget(mGeometryList, 1);
     QGridLayout *addGeometryLayout = new QGridLayout;
-    QPushButton *addXYButton = new QPushButton(tr("Add XY wall"), geometryTab);
-    QPushButton *addXZButton = new QPushButton(tr("Add XZ floor"), geometryTab);
-    QPushButton *addYZButton = new QPushButton(tr("Add YZ wall"), geometryTab);
-    QPushButton *addBoxButton = new QPushButton(tr("Add Box"), geometryTab);
+    QPushButton *addXYButton = new QPushButton(
+                tr("Add XY wall"), geometryListPanel);
+    QPushButton *addXZButton = new QPushButton(
+                tr("Add XZ floor"), geometryListPanel);
+    QPushButton *addYZButton = new QPushButton(
+                tr("Add YZ wall"), geometryListPanel);
+    QPushButton *addBoxButton = new QPushButton(
+                tr("Add Box"), geometryListPanel);
     QPushButton *addCylinderButton =
-            new QPushButton(tr("Add Cylinder"), geometryTab);
+            new QPushButton(tr("Add Cylinder"), geometryListPanel);
     QPushButton *duplicateGeometryButton =
-            new QPushButton(tr("Duplicate"), geometryTab);
+            new QPushButton(tr("Duplicate"), geometryListPanel);
     QPushButton *removeGeometryButton =
-            new QPushButton(tr("Remove"), geometryTab);
+            new QPushButton(tr("Remove"), geometryListPanel);
     addGeometryLayout->addWidget(addXYButton, 0, 0);
     addGeometryLayout->addWidget(addXZButton, 0, 1);
     addGeometryLayout->addWidget(addYZButton, 0, 2);
@@ -691,7 +762,7 @@ DepthMapEditor::DepthMapEditor(QWidget *parent)
     addGeometryLayout->addWidget(removeGeometryButton, 2, 1);
     geometryListLayout->addLayout(addGeometryLayout);
     QGroupBox *presetGroup = new QGroupBox(
-                tr("Reusable primitive presets"), geometryTab);
+                tr("Reusable primitive presets"), geometryListPanel);
     QVBoxLayout *presetLayout = new QVBoxLayout(presetGroup);
     mPresetCombo = new QComboBox(presetGroup);
     presetLayout->addWidget(mPresetCombo);
@@ -710,8 +781,13 @@ DepthMapEditor::DepthMapEditor(QWidget *parent)
         "Presets are stored in portable settings and can be inserted "
         "into any similar tile, including tiles from another tileset."));
     geometryListLayout->addWidget(presetGroup);
-    geometryTabLayout->addLayout(geometryListLayout, 1);
-    QWidget *geometryProperties = new QWidget(geometryTab);
+    QScrollArea *geometryPropertiesScroll =
+            new QScrollArea(mGeometrySplitter);
+    geometryPropertiesScroll->setWidgetResizable(true);
+    geometryPropertiesScroll->setFrameShape(QFrame::NoFrame);
+    geometryPropertiesScroll->setMinimumWidth(260);
+    QWidget *geometryProperties = new QWidget;
+    geometryProperties->setMinimumWidth(360);
     QVBoxLayout *geometryPropertiesLayout =
             new QVBoxLayout(geometryProperties);
     geometryPropertiesLayout->setContentsMargins(0, 0, 0, 0);
@@ -727,11 +803,18 @@ DepthMapEditor::DepthMapEditor(QWidget *parent)
         mTranslateSpins[axis]->setRange(-20.0, 20.0);
         mTranslateSpins[axis]->setDecimals(4);
         mTranslateSpins[axis]->setSingleStep(axis == 1
-                                            ? 1.0 / 96.0 : 1.0 / 64.0);
+                                            ? 1.0 / VerticalGeometryPixelsPerUnit
+                                            : 1.0 / TilePlanePixelsPerUnit);
         mRotateSpins[axis] = new QDoubleSpinBox(geometryProperties);
         mRotateSpins[axis]->setRange(-360.0, 360.0);
         mRotateSpins[axis]->setDecimals(2);
         mRotateSpins[axis]->setSingleStep(1.0);
+        for (QDoubleSpinBox *spin :
+             { mTranslateSpins[axis], mRotateSpins[axis] }) {
+            spin->setAccelerated(true);
+            spin->setKeyboardTracking(false);
+            spin->setMinimumWidth(88);
+        }
         transformLayout->addWidget(mTranslateSpins[axis], 1, axis + 1);
         transformLayout->addWidget(mRotateSpins[axis], 2, axis + 1);
     }
@@ -751,7 +834,12 @@ DepthMapEditor::DepthMapEditor(QWidget *parent)
              { mMinimumSpins[axis], mMaximumSpins[axis] }) {
             spin->setRange(-20.0, 20.0);
             spin->setDecimals(4);
-            spin->setSingleStep(1.0 / 64.0);
+            spin->setSingleStep(axis == 1
+                                ? 1.0 / VerticalGeometryPixelsPerUnit
+                                : 1.0 / TilePlanePixelsPerUnit);
+            spin->setAccelerated(true);
+            spin->setKeyboardTracking(false);
+            spin->setMinimumWidth(88);
         }
         boxLayout->addWidget(mMinimumSpins[axis], 1, axis + 1);
         boxLayout->addWidget(mMaximumSpins[axis], 2, axis + 1);
@@ -768,7 +856,11 @@ DepthMapEditor::DepthMapEditor(QWidget *parent)
          { mRadiusSpins[0], mRadiusSpins[1], mHeightSpin }) {
         spin->setRange(0.001, 20.0);
         spin->setDecimals(4);
-        spin->setSingleStep(1.0 / 64.0);
+        spin->setSingleStep(spin == mHeightSpin
+                            ? 1.0 / VerticalGeometryPixelsPerUnit
+                            : 1.0 / TilePlanePixelsPerUnit);
+        spin->setAccelerated(true);
+        spin->setKeyboardTracking(false);
     }
     cylinderLayout->addWidget(new QLabel(tr("Base radius")), 0, 0);
     cylinderLayout->addWidget(mRadiusSpins[0], 0, 1);
@@ -794,7 +886,7 @@ DepthMapEditor::DepthMapEditor(QWidget *parent)
     mShapeStack->addWidget(polygonPage);
     geometryPropertiesLayout->addWidget(mShapeStack);
     QGroupBox *pixelSizeGroup =
-            new QGroupBox(tr("Primitive size in pixels"),
+            new QGroupBox(tr("Local primitive size in depth pixels"),
                           geometryProperties);
     QGridLayout *pixelSizeLayout = new QGridLayout(pixelSizeGroup);
     for (int dimension = 0; dimension < 3; ++dimension) {
@@ -805,6 +897,8 @@ DepthMapEditor::DepthMapEditor(QWidget *parent)
         mPixelSizeSpins[dimension]->setDecimals(0);
         mPixelSizeSpins[dimension]->setSingleStep(1.0);
         mPixelSizeSpins[dimension]->setSuffix(tr(" px"));
+        mPixelSizeSpins[dimension]->setAccelerated(true);
+        mPixelSizeSpins[dimension]->setKeyboardTracking(false);
         pixelSizeLayout->addWidget(
                     mPixelSizeLabels[dimension], dimension, 0);
         pixelSizeLayout->addWidget(
@@ -818,13 +912,20 @@ DepthMapEditor::DepthMapEditor(QWidget *parent)
                 QLatin1String("DepthMapEditor/SnapToPixelGrid"),
                 true).toBool());
     pixelSizeLayout->addWidget(mSnapPixelCheck, 3, 0, 1, 2);
+    mProjectedSizeLabel = new QLabel(pixelSizeGroup);
+    mProjectedSizeLabel->setWordWrap(true);
+    pixelSizeLayout->addWidget(mProjectedSizeLabel, 4, 0, 1, 2);
     QLabel *pixelSizeHelp = new QLabel(
-        tr("Tile-plane units use 64 pixels. Vertical height uses "
-           "96 pixels. Drag a gold corner handle to resize the "
-           "selected primitive."),
+        tr("Local geometry uses 64 pixel steps on X/Z and 96 on Y, "
+           "matching the Build 42 editor. Projection applies Z_SCALE "
+           "%1, so vertical Y contributes %2 depth pixels per unit "
+           "before the isometric X/Z footprint. Drag a gold corner "
+           "handle to resize the selected primitive.")
+           .arg(VerticalGeometryScale, 0, 'f', 4)
+           .arg(VerticalPixelsPerUnit, 0, 'f', 2),
         pixelSizeGroup);
     pixelSizeHelp->setWordWrap(true);
-    pixelSizeLayout->addWidget(pixelSizeHelp, 4, 0, 1, 2);
+    pixelSizeLayout->addWidget(pixelSizeHelp, 5, 0, 1, 2);
     geometryPropertiesLayout->addWidget(pixelSizeGroup);
     mRespectAlphaCheck = new QCheckBox(
         tr("Restrict generated pixels to the source tile opacity"),
@@ -844,7 +945,13 @@ DepthMapEditor::DepthMapEditor(QWidget *parent)
     generateLayout->addWidget(generateAllButton);
     geometryPropertiesLayout->addLayout(generateLayout);
     geometryPropertiesLayout->addStretch();
-    geometryTabLayout->addWidget(geometryProperties, 2);
+    geometryPropertiesScroll->setWidget(geometryProperties);
+    mGeometrySplitter->addWidget(geometryListPanel);
+    mGeometrySplitter->addWidget(geometryPropertiesScroll);
+    mGeometrySplitter->setStretchFactor(0, 1);
+    mGeometrySplitter->setStretchFactor(1, 2);
+    mGeometrySplitter->setSizes({ 240, 390 });
+    geometryTabLayout->addWidget(mGeometrySplitter);
     mModeTabs->addTab(geometryTab, tr("3D Geometry"));
     QWidget *pixelTab = new QWidget(mModeTabs);
     QVBoxLayout *pixelTabLayout = new QVBoxLayout(pixelTab);
@@ -943,10 +1050,10 @@ DepthMapEditor::DepthMapEditor(QWidget *parent)
     mMainSplitter->addWidget(mTileTable);
     mMainSplitter->addWidget(editorPanel);
     mMainSplitter->addWidget(mModeTabs);
-    mMainSplitter->setStretchFactor(0, 0);
-    mMainSplitter->setStretchFactor(1, 1);
-    mMainSplitter->setStretchFactor(2, 0);
-    mMainSplitter->setSizes({ 434, 600, 590 });
+    mMainSplitter->setStretchFactor(0, 1);
+    mMainSplitter->setStretchFactor(1, 2);
+    mMainSplitter->setStretchFactor(2, 2);
+    mMainSplitter->setSizes({ 380, 620, 650 });
     outerLayout->addWidget(mMainSplitter, 1);
     setCentralWidget(central);
     mCursorLabel = new QLabel(this);
@@ -1099,6 +1206,42 @@ DepthMapEditor::DepthMapEditor(QWidget *parent)
                    "drag it to move on X/Z, or drag a gold corner "
                    "handle to resize it."), 5000);
     });
+    connect(resetLayoutAction, &QAction::triggered,
+            this, [this]() {
+        const QRect screenArea = screen()
+                ? screen()->availableGeometry()
+                : QRect(0, 0, 1920, 1080);
+        const QSize target(qMin(1760, screenArea.width() - 80),
+                           qMin(940, screenArea.height() - 80));
+        resize(target);
+        move(screenArea.center() - rect().center());
+        mMainSplitter->setSizes({ 380, 620, 650 });
+        mGeometrySplitter->setSizes({ 240, 390 });
+        QSettings settings;
+        settings.remove(QStringLiteral("DepthMapEditor/WindowGeometry"));
+        settings.remove(QStringLiteral("DepthMapEditor/MainSplitter"));
+        settings.remove(QStringLiteral("DepthMapEditor/GeometrySplitter"));
+        settings.sync();
+    });
+    QSettings layoutSettings;
+    if (layoutSettings.contains(
+                QStringLiteral("DepthMapEditor/WindowGeometry"))) {
+        restoreGeometry(layoutSettings.value(
+                QStringLiteral("DepthMapEditor/WindowGeometry"))
+                .toByteArray());
+    }
+    if (layoutSettings.contains(
+                QStringLiteral("DepthMapEditor/MainSplitter"))) {
+        mMainSplitter->restoreState(layoutSettings.value(
+                QStringLiteral("DepthMapEditor/MainSplitter"))
+                .toByteArray());
+    }
+    if (layoutSettings.contains(
+                QStringLiteral("DepthMapEditor/GeometrySplitter"))) {
+        mGeometrySplitter->restoreState(layoutSettings.value(
+                QStringLiteral("DepthMapEditor/GeometrySplitter"))
+                .toByteArray());
+    }
     updatePrimitivePresetUi();
     updateWindowState();
 }
@@ -1166,10 +1309,15 @@ bool DepthMapEditor::runFormatSelfTest(QString *error)
     editor.show();
     QApplication::processEvents();
     const QList<int> paneSizes = editor.mMainSplitter->sizes();
+    const QList<int> geometryPaneSizes =
+            editor.mGeometrySplitter->sizes();
     if (paneSizes.size() != 3
-            || paneSizes.at(0) < 420
+            || paneSizes.at(0) < 300
             || paneSizes.at(1) < 340
-            || paneSizes.at(2) < 550
+            || paneSizes.at(2) < 440
+            || geometryPaneSizes.size() != 2
+            || geometryPaneSizes.at(0) < 180
+            || geometryPaneSizes.at(1) < 260
             || editor.mCanvasScrollArea->viewport()->width() < 330
             || editor.mCanvasScrollArea->viewport()->height() < 480) {
         if (error) {
@@ -1209,9 +1357,12 @@ bool DepthMapEditor::runFormatSelfTest(QString *error)
     if (qRound(resizePixels.x()) != 96 ||
             qRound(resizePixels.y()) != 144 ||
             qRound(resizePixels.z()) != 96 ||
-            qRound(resizeProbe.translate.x() * 64.0f) != 1 ||
-            qRound(resizeProbe.translate.y() * 96.0f) != 2 ||
-            qRound(resizeProbe.translate.z() * 64.0f) != 1) {
+            qRound(resizeProbe.translate.x() *
+                   TilePlanePixelsPerUnit) != 1 ||
+            qRound(resizeProbe.translate.y() *
+                   VerticalGeometryPixelsPerUnit) != 2 ||
+            qRound(resizeProbe.translate.z() *
+                   TilePlanePixelsPerUnit) != 1) {
         if (error)
             *error = QStringLiteral(
                 "Primitive pixel sizing or grid snap is incorrect");
@@ -1401,10 +1552,19 @@ bool DepthMapEditor::setTileset(
 }
 void DepthMapEditor::closeEvent(QCloseEvent *event)
 {
-    if (confirmDiscardChanges())
+    if (confirmDiscardChanges()) {
+        QSettings settings;
+        settings.setValue(QStringLiteral("DepthMapEditor/WindowGeometry"),
+                          saveGeometry());
+        settings.setValue(QStringLiteral("DepthMapEditor/MainSplitter"),
+                          mMainSplitter->saveState());
+        settings.setValue(QStringLiteral("DepthMapEditor/GeometrySplitter"),
+                          mGeometrySplitter->saveState());
+        settings.sync();
         event->accept();
-    else
+    } else {
         event->ignore();
+    }
 }
 void DepthMapEditor::chooseTileset()
 {
@@ -2496,6 +2656,8 @@ void DepthMapEditor::updateGeometryControls()
             mPixelSizeLabels[dimension]->setText(
                         tr("Dimension %1")
                         .arg(dimension + 1));
+        mProjectedSizeLabel->setText(
+                    tr("Projected outline: no primitive selected"));
         return;
     }
     const DepthPrimitive &primitive = geometry.at(index);
@@ -2527,6 +2689,11 @@ void DepthMapEditor::updateGeometryControls()
     const QVector3D pixelSize = primitivePixelSize(primitive);
     for (int dimension = 0; dimension < 3; ++dimension)
         mPixelSizeSpins[dimension]->setValue(pixelSize[dimension]);
+    const QRectF projection = projectedBounds(primitive);
+    mProjectedSizeLabel->setText(
+        tr("Projected outline on the 128 × 256 depth tile: %1 × %2 px")
+        .arg(projection.width(), 0, 'f', 1)
+        .arg(projection.height(), 0, 'f', 1));
     mPlaneCombo->setCurrentIndex(static_cast<int>(primitive.plane));
     QStringList points;
     for (const QPointF &point : primitive.points) {
@@ -2601,22 +2768,27 @@ QVector3D DepthMapEditor::primitivePixelSize(
 {
     if (primitive.type == DepthPrimitiveType::Box) {
         return QVector3D(
-            qAbs(primitive.maximum.x() - primitive.minimum.x()) * 64.0f,
-            qAbs(primitive.maximum.y() - primitive.minimum.y()) * 96.0f,
-            qAbs(primitive.maximum.z() - primitive.minimum.z()) * 64.0f);
+            qAbs(primitive.maximum.x() - primitive.minimum.x()) *
+                TilePlanePixelsPerUnit,
+            qAbs(primitive.maximum.y() - primitive.minimum.y()) *
+                VerticalGeometryPixelsPerUnit,
+            qAbs(primitive.maximum.z() - primitive.minimum.z()) *
+                TilePlanePixelsPerUnit);
     }
     if (primitive.type == DepthPrimitiveType::Cylinder) {
         return QVector3D(
-            qMax(primitive.radius1, primitive.radius2) * 128.0f,
-            primitive.height * 96.0f, 0.0f);
+            qMax(primitive.radius1, primitive.radius2) *
+                2.0f * TilePlanePixelsPerUnit,
+            primitive.height * VerticalGeometryPixelsPerUnit, 0.0f);
     }
     if (primitive.points.isEmpty())
         return QVector3D();
     const QRectF bounds = pointsBounds(primitive.points);
     const float heightScale =
             primitive.plane == DepthPolygonPlane::XZ
-            ? 64.0f : 96.0f;
-    return QVector3D(bounds.width() * 64.0f,
+            ? TilePlanePixelsPerUnit
+            : VerticalGeometryPixelsPerUnit;
+    return QVector3D(bounds.width() * TilePlanePixelsPerUnit,
                      bounds.height() * heightScale, 0.0f);
 }
 void DepthMapEditor::setPrimitivePixelSize(
@@ -2624,7 +2796,11 @@ void DepthMapEditor::setPrimitivePixelSize(
 {
     pixels = qMax(1.0, pixels);
     if (primitive.type == DepthPrimitiveType::Box) {
-        const float scales[] = { 64.0f, 96.0f, 64.0f };
+        const float scales[] = {
+            TilePlanePixelsPerUnit,
+            VerticalGeometryPixelsPerUnit,
+            TilePlanePixelsPerUnit
+        };
         const float center =
                 (primitive.minimum[dimension] +
                  primitive.maximum[dimension]) * 0.5f;
@@ -2638,7 +2814,8 @@ void DepthMapEditor::setPrimitivePixelSize(
         if (dimension == 0) {
             const float currentRadius =
                     qMax(primitive.radius1, primitive.radius2);
-            const float targetRadius = float(pixels / 128.0);
+            const float targetRadius = float(
+                        pixels / (2.0 * TilePlanePixelsPerUnit));
             if (currentRadius > 0.000001f) {
                 const float factor = targetRadius / currentRadius;
                 primitive.radius1 *= factor;
@@ -2648,7 +2825,8 @@ void DepthMapEditor::setPrimitivePixelSize(
                 primitive.radius2 = targetRadius;
             }
         } else if (dimension == 1) {
-            primitive.height = float(pixels / 96.0);
+            primitive.height = float(
+                        pixels / VerticalGeometryPixelsPerUnit);
         }
         return;
     }
@@ -2660,9 +2838,10 @@ void DepthMapEditor::setPrimitivePixelSize(
     if (currentSize <= 0.000001)
         return;
     const double scale =
-            dimension == 0 ? 64.0
+            dimension == 0 ? TilePlanePixelsPerUnit
             : primitive.plane == DepthPolygonPlane::XZ
-              ? 64.0 : 96.0;
+              ? TilePlanePixelsPerUnit
+              : VerticalGeometryPixelsPerUnit;
     const double targetSize = pixels / scale;
     const double factor = targetSize / currentSize;
     const QPointF center = bounds.center();
@@ -2681,11 +2860,19 @@ void DepthMapEditor::snapPrimitiveToPixelGrid(
     const auto snap = [](float value, float scale) {
         return qRound(value * scale) / scale;
     };
-    primitive.translate.setX(snap(primitive.translate.x(), 64.0f));
-    primitive.translate.setY(snap(primitive.translate.y(), 96.0f));
-    primitive.translate.setZ(snap(primitive.translate.z(), 64.0f));
+    primitive.translate.setX(snap(
+                primitive.translate.x(), TilePlanePixelsPerUnit));
+    primitive.translate.setY(snap(
+                primitive.translate.y(),
+                VerticalGeometryPixelsPerUnit));
+    primitive.translate.setZ(snap(
+                primitive.translate.z(), TilePlanePixelsPerUnit));
     if (primitive.type == DepthPrimitiveType::Box) {
-        const float scales[] = { 64.0f, 96.0f, 64.0f };
+        const float scales[] = {
+            TilePlanePixelsPerUnit,
+            VerticalGeometryPixelsPerUnit,
+            TilePlanePixelsPerUnit
+        };
         for (int dimension = 0; dimension < 3; ++dimension) {
             if (primitive.minimum[dimension] >
                     primitive.maximum[dimension]) {
@@ -2707,20 +2894,27 @@ void DepthMapEditor::snapPrimitiveToPixelGrid(
         }
     } else if (primitive.type == DepthPrimitiveType::Cylinder) {
         primitive.radius1 = qMax(
-            1.0f / 128.0f,
-            qRound(primitive.radius1 * 128.0f) / 128.0f);
+            1.0f / (2.0f * TilePlanePixelsPerUnit),
+            qRound(primitive.radius1 *
+                   2.0f * TilePlanePixelsPerUnit) /
+                   (2.0f * TilePlanePixelsPerUnit));
         primitive.radius2 = qMax(
-            1.0f / 128.0f,
-            qRound(primitive.radius2 * 128.0f) / 128.0f);
+            1.0f / (2.0f * TilePlanePixelsPerUnit),
+            qRound(primitive.radius2 *
+                   2.0f * TilePlanePixelsPerUnit) /
+                   (2.0f * TilePlanePixelsPerUnit));
         primitive.height = qMax(
-            1.0f / 96.0f,
-            qRound(primitive.height * 96.0f) / 96.0f);
+            1.0f / VerticalGeometryPixelsPerUnit,
+            qRound(primitive.height * VerticalGeometryPixelsPerUnit) /
+                   VerticalGeometryPixelsPerUnit);
     } else {
         const float heightScale =
                 primitive.plane == DepthPolygonPlane::XZ
-                ? 64.0f : 96.0f;
+                ? TilePlanePixelsPerUnit
+                : VerticalGeometryPixelsPerUnit;
         for (QPointF &point : primitive.points) {
-            point.setX(snap(float(point.x()), 64.0f));
+            point.setX(snap(float(point.x()),
+                            TilePlanePixelsPerUnit));
             point.setY(snap(float(point.y()), heightScale));
         }
     }
