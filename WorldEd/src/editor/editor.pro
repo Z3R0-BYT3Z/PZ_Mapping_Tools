@@ -83,6 +83,7 @@ SOURCES += main.cpp\
     BuildingEditor/buildingtilesfile.cpp \
     exportlotsprogressdialog.cpp \
     environmentpreviewitem.cpp \
+    expectedpropertiesdialog.cpp \
     generatelotsfailuredialog.cpp \
     loadthumbnailsdialog.cpp \
     lotfilesmanager256.cpp \
@@ -228,6 +229,7 @@ HEADERS  += mainwindow.h \
     BuildingEditor/buildingtilesfile.h \
     exportlotsprogressdialog.h \
     environmentpreviewitem.h \
+    expectedpropertiesdialog.h \
     generatelotsfailuredialog.h \
     InGameMap/clipper.hpp \
     InGameMap/ingamemapcell.h \

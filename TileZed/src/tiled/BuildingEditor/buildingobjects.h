@@ -276,8 +276,7 @@ public:
 
     WallObject *asWall() { return this; }
 
-    void setLength(int length)
-    { mLength = length; }
+    void setLength(int length);
 
     int length() const
     { return mLength; }

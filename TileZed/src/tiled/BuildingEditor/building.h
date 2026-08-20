@@ -36,6 +36,7 @@ class FurnitureTiles;
 class Room;
 
 #define MAX_BUILDING_FLOORS 32
+#define MAX_BUILDING_DIMENSION 300
 
 class Building
 {

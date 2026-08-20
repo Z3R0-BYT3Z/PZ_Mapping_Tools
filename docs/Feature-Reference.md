@@ -26,6 +26,7 @@ See [configuration files](PZTools-Configuration-Files.md),
 | Function | Menu or location | Main result |
 |---|---|---|
 | New 300 or 256 world | File > New World | PZW project with the selected native grid |
+| Cell Copy and Paste | Edit menu or Ctrl+C and Ctrl+V | Complete cell data with a pointer-following preview, occupied-target warning, one placement per confirmation, and one Undo transaction |
 | OpenStreetMap project | Terrain & Environment | New project with terrain, vegetation, roads, buildings, streets, and zones |
 | Terrain and vegetation editor | Terrain & Environment | Atomic Map and vegetation PNG editing |
 | BMP to TMX | Conversion & Export | Project-sized TMX cells with validation, repair, and metadata-only Rules/Blends synchronization |

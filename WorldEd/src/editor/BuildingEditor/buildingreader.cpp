@@ -35,6 +35,7 @@ using namespace SharedTools;
 #include <QFileInfo>
 #include <QString>
 #include <QXmlStreamReader>
+#include <limits>
 
 using namespace BuildingEditor;
 
@@ -148,7 +149,13 @@ public:
         if (tileName.isEmpty())
             return noneTile();
 
+        QString tilesetName;
+        int tileIndex;
+        if (!parseTileName(tileName, tilesetName, tileIndex))
+            return noneTile();
         QString adjustedName = adjustTileNameIndex(tileName, offset); // also normalized
+        if (adjustedName.isEmpty())
+            return noneTile();
 
         if (!mTileByName.contains(adjustedName))
             add(adjustedName);
@@ -172,15 +179,19 @@ public:
 
     static bool parseTileName(const QString &tileName, QString &tilesetName, int &index)
     {
-        tilesetName = tileName.mid(0, tileName.lastIndexOf(QLatin1Char('_')));
-        QString indexString = tileName.mid(tileName.lastIndexOf(QLatin1Char('_')) + 1);
+        const int separator = tileName.lastIndexOf(QLatin1Char('_'));
+        if (separator <= 0)
+            return false;
+        tilesetName = tileName.left(separator);
+        QString indexString = tileName.mid(separator + 1);
         // Strip leading zeroes from the tile index
         int i = 0;
         while (i < indexString.length() - 1 && indexString[i] == QLatin1Char('0'))
             i++;
         indexString.remove(0, i);
-        index = indexString.toInt();
-        return true;
+        bool ok;
+        index = indexString.toInt(&ok);
+        return ok && index >= 0;
     }
 
     QString adjustTileNameIndex(const QString &tileName, int offset)
@@ -201,8 +212,11 @@ public:
             }
         }
 #endif
-        index += offset;
-        return nameForTile(tilesetName, index);
+        const qint64 adjustedIndex = qint64(index) + offset;
+        if (adjustedIndex < 0 ||
+                adjustedIndex > std::numeric_limits<int>::max())
+            return QString();
+        return nameForTile(tilesetName, int(adjustedIndex));
     }
 
     BuildingTile *noneTile() const
@@ -434,8 +448,17 @@ Building *BuildingReaderPrivate::readBuilding()
             return 0;
         }
     }
-    const int width = atts.value(QLatin1String("width")).toString().toInt();
-    const int height = atts.value(QLatin1String("height")).toString().toInt();
+    bool widthOk;
+    bool heightOk;
+    const int width = atts.value(QLatin1String("width")).toString().toInt(&widthOk);
+    const int height = atts.value(QLatin1String("height")).toString().toInt(&heightOk);
+    if (!widthOk || !heightOk || width < 1 ||
+            width > MAX_BUILDING_DIMENSION || height < 1 ||
+            height > MAX_BUILDING_DIMENSION) {
+        xml.raiseError(tr("Invalid building dimensions %1x%2. Width and height must be between 1 and %3 tiles.")
+                       .arg(width).arg(height).arg(MAX_BUILDING_DIMENSION));
+        return 0;
+    }
 
     mBuilding = new Building(width, height);
 
@@ -599,11 +622,14 @@ BuildingTile *BuildingReaderPrivate::readFurnitureTile(FurnitureTile *ftile, QPo
     Q_UNUSED(ftile)
     Q_ASSERT(xml.isStartElement() && xml.name() == QLatin1String("tile"));
     const QXmlStreamAttributes atts = xml.attributes();
-    int x = atts.value(QLatin1String("x")).toString().toInt();
-    int y = atts.value(QLatin1String("y")).toString().toInt();
-    if (x < 0 || y < 0) {
-        xml.raiseError(tr("invalid furniture tile coordinates (%1,%2)")
-                       .arg(x).arg(y));
+    bool xOk;
+    bool yOk;
+    const int x = atts.value(QLatin1String("x")).toString().toInt(&xOk);
+    const int y = atts.value(QLatin1String("y")).toString().toInt(&yOk);
+    if (!xOk || !yOk || x < 0 || x >= MAX_BUILDING_DIMENSION ||
+            y < 0 || y >= MAX_BUILDING_DIMENSION) {
+        xml.raiseError(tr("Invalid furniture tile coordinates (%1,%2). Coordinates must be between 0 and %3.")
+                       .arg(x).arg(y).arg(MAX_BUILDING_DIMENSION - 1));
         return 0;
     }
     pos.setX(x);
@@ -761,11 +787,27 @@ Room *BuildingReaderPrivate::readRoom()
         }
     }
 
+    QStringList rgb = color.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (rgb.size() != 3) {
+        xml.raiseError(tr("Invalid room color '%1'").arg(color));
+        return 0;
+    }
+    bool redOk;
+    bool greenOk;
+    bool blueOk;
+    const int red = rgb.at(0).toInt(&redOk);
+    const int green = rgb.at(1).toInt(&greenOk);
+    const int blue = rgb.at(2).toInt(&blueOk);
+    if (!redOk || !greenOk || !blueOk ||
+            red < 0 || red > 255 || green < 0 || green > 255 ||
+            blue < 0 || blue > 255) {
+        xml.raiseError(tr("Invalid room color '%1'").arg(color));
+        return 0;
+    }
     Room *room = new Room();
     room->Name = name;
     room->internalName = internalName;
-    QStringList rgb = color.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-    room->Color = qRgb(rgb[0].toInt(), rgb[1].toInt(), rgb[2].toInt());
+    room->Color = qRgb(red, green, blue);
     for (int i = 0; i < Room::TileCount; i++) {
         room->setTile(i, getEntry(tiles[i]));
     }
@@ -830,13 +872,16 @@ BuildingObject *BuildingReaderPrivate::readObject(BuildingFloor *floor)
 
     const QXmlStreamAttributes atts = xml.attributes();
     const QString type = atts.value(QLatin1String("type")).toString();
-    const int x = atts.value(QLatin1String("x")).toString().toInt();
-    const int y = atts.value(QLatin1String("y")).toString().toInt();
+    bool xOk;
+    bool yOk;
+    const int x = atts.value(QLatin1String("x")).toString().toInt(&xOk);
+    const int y = atts.value(QLatin1String("y")).toString().toInt(&yOk);
     const QString dirString = atts.value(QLatin1String("dir")).toString();
     QString tile = atts.value(QLatin1String("Tile")).toString();
 
-    if (x < 0 || x >= mBuilding->width() + 1 || y < 0 || y >= mBuilding->height() + 1) {
-        xml.raiseError(tr("Invalid object coordinates (%1,%2")
+    if (!xOk || !yOk || x < 0 || x >= mBuilding->width() + 1 ||
+            y < 0 || y >= mBuilding->height() + 1) {
+        xml.raiseError(tr("Invalid object coordinates (%1,%2)")
                        .arg(x).arg(y));
         return 0;
     }
@@ -903,8 +948,17 @@ BuildingObject *BuildingReaderPrivate::readObject(BuildingFloor *floor)
         furniture->setFurnitureTile(mFurnitureTiles.at(index)->tile(orient));
         object = furniture;
     } else if (type == QLatin1String("roof")) {
-        int width = atts.value(QLatin1String("width")).toString().toInt();
-        int height = atts.value(QLatin1String("height")).toString().toInt();
+        bool widthOk;
+        bool heightOk;
+        const int width = atts.value(QLatin1String("width")).toString().toInt(&widthOk);
+        const int height = atts.value(QLatin1String("height")).toString().toInt(&heightOk);
+        if (!widthOk || !heightOk || width < 1 ||
+                width > MAX_BUILDING_DIMENSION || height < 1 ||
+                height > MAX_BUILDING_DIMENSION) {
+            xml.raiseError(tr("Invalid roof dimensions %1x%2. Width and height must be between 1 and %3 tiles.")
+                           .arg(width).arg(height).arg(MAX_BUILDING_DIMENSION));
+            return 0;
+        }
         QString typeString = atts.value(QLatin1String("RoofType")).toString();
         RoofObject::RoofType roofType = RoofObject::typeFromString(typeString);
         if (roofType == RoofObject::InvalidType) {
@@ -945,7 +999,13 @@ BuildingObject *BuildingReaderPrivate::readObject(BuildingFloor *floor)
         roof->setTopTiles(topTiles);
         object = roof;
     } else if (type == QLatin1String("wall")) {
-        int length = atts.value(QLatin1String("length")).toString().toInt();
+        bool lengthOk;
+        const int length = atts.value(QLatin1String("length")).toString().toInt(&lengthOk);
+        if (!lengthOk || length < 1 || length > MAX_BUILDING_DIMENSION) {
+            xml.raiseError(tr("Invalid wall length %1. Length must be between 1 and %2 tiles.")
+                           .arg(length).arg(MAX_BUILDING_DIMENSION));
+            return 0;
+        }
         WallObject *wall = new WallObject(floor, x, y, dir, length);
 
         BuildingTileEntry *entry = getEntry(tile);
@@ -1050,8 +1110,16 @@ bool BuildingReaderPrivate::readPoint(const QString &name, QPoint &result)
         xml.raiseError(tr("expected point, got '%1'").arg(s));
         return false;
     }
-    result.setX(split[0].toInt());
-    result.setY(split[1].toInt());
+    bool xOk;
+    bool yOk;
+    const int x = split.at(0).toInt(&xOk);
+    const int y = split.at(1).toInt(&yOk);
+    if (!xOk || !yOk) {
+        xml.raiseError(tr("expected point, got '%1'").arg(s));
+        return false;
+    }
+    result.setX(x);
+    result.setY(y);
     return true;
 }
 

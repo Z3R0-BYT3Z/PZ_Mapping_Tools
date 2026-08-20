@@ -22,6 +22,7 @@
 #include <QMutex>
 #include <QWaitCondition>
 #include <QThread>
+#include <atomic>
 
 #define IN_APP_THREAD Q_ASSERT(QThread::currentThread() == qApp->thread());
 #define IN_WORKER_THREAD Q_ASSERT(QThread::currentThread() != qApp->thread());
@@ -82,10 +83,10 @@ public:
 
     void resume() { mInterrupted = false; }
 
-    bool *var() { return &mInterrupted; }
+    std::atomic_bool *var() { return &mInterrupted; }
 
 private:
-    bool mInterrupted;
+    std::atomic_bool mInterrupted;
     bool mWorkerBusy;
     bool mWaiting;
     QMutex mMutex;

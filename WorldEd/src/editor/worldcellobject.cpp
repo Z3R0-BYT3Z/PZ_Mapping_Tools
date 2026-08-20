@@ -47,7 +47,8 @@ WorldCellObject::WorldCellObject(WorldCell *cell, WorldCellObject *other)
     , mWidth(other->width())
     , mHeight(other->height())
     , mGeometryType(other->geometryType())
-    , mPolylineWidth(0)
+    , mPoints(other->points())
+    , mPolylineWidth(other->polylineWidth())
     , mCell(cell)
     , mVisible(other->isVisible())
 {
@@ -58,6 +59,23 @@ WorldCellObject::WorldCellObject(WorldCell *cell, WorldCellObject *other)
 
     ObjectType *ot = world->objectTypes().find(other->type()->name());
     mType = ot ? ot : world->nullObjectType();
+
+    for (PropertyTemplate *source : other->templates()) {
+        PropertyTemplate *target =
+                world->propertyTemplates().find(source->mName);
+        if (target)
+            addTemplate(templates().size(), target);
+    }
+    for (Property *source : other->properties()) {
+        PropertyDef *definition =
+                world->propertyDefinitions().findPropertyDef(
+                    source->mDefinition->mName);
+        if (!definition)
+            continue;
+        Property *target = new Property(definition, source->mValue);
+        target->mNote = source->mNote;
+        addProperty(properties().size(), target);
+    }
 }
 
 QPointF WorldCellObject::absoluteWorldPosition() const

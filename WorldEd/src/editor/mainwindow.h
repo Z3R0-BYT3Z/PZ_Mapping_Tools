@@ -86,6 +86,8 @@ public:
             QString *summary, QString *error);
     static bool validateCellMoveCoordinateData(
             QString *summary, QString *error);
+    bool validateCellPasteInteraction(
+            QString *summary, QString *error);
 
     void moveCellCoordinateData(WorldDocument *worldDocument,
                                 const QList<WorldCell *> &sourceCells,

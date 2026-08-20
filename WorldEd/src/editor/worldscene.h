@@ -164,7 +164,7 @@ public:
                const QStyleOptionGraphicsItem *option,
                QWidget *widget = 0);
 
-    void paintThumbnails(QPainter *painter);
+    void paintThumbnails(QPainter *painter, bool force = false);
 
     virtual QPoint cellPos() const = 0;
     virtual QString mapFilePath() const = 0;
@@ -294,11 +294,13 @@ public:
     const QList<WorldCellLot*> &lots() const { return mContents->lots(); }
 
     void setDragOffset(const QPointF &offset);
+    void setTargetOccupied(bool occupied);
 
     WorldCellContents *contents() const { return mContents; }
 
 private:
     WorldCellContents *mContents;
+    bool mTargetOccupied = false;
 };
 
 /**

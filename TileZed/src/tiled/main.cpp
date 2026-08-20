@@ -72,6 +72,7 @@
 #include "tilelayer.h"
 #include "tileset.h"
 #include "map.h"
+#include <QAbstractButton>
 #include <QDataStream>
 #include <QDir>
 #include <QElapsedTimer>
@@ -705,6 +706,48 @@ static bool validateBuildingClipboard(
                     "Redo did not restore the complete pasted state");
     }
     document->undoStack()->undo();
+
+    const QSize sizeBeforeLimitedPaste = building->size();
+    const int roomsBeforeLimitedPaste = building->roomCount();
+    QTimer::singleShot(0, []() {
+        for (QWidget *widget : QApplication::topLevelWidgets()) {
+            QMessageBox *box = qobject_cast<QMessageBox *>(widget);
+            if (box && box->standardButtons().testFlag(QMessageBox::Yes)) {
+                if (QAbstractButton *button = box->button(QMessageBox::Yes)) {
+                    button->click();
+                    return;
+                }
+            }
+        }
+    });
+    const bool limitedPaste = window->pasteClipboardAt(
+                QPoint(MAX_BUILDING_DIMENSION - 1,
+                       MAX_BUILDING_DIMENSION - 1));
+    Room *limitedRoom = building->roomCount() > roomsBeforeLimitedPaste
+            ? building->room(roomsBeforeLimitedPaste) : nullptr;
+    valid = valid
+            && limitedPaste
+            && building->size() == QSize(MAX_BUILDING_DIMENSION,
+                                         MAX_BUILDING_DIMENSION)
+            && building->roomCount() == roomsBeforeLimitedPaste + 1
+            && floor->GetRoomAt(MAX_BUILDING_DIMENSION - 1,
+                                MAX_BUILDING_DIMENSION - 1) == limitedRoom;
+    document->undoStack()->undo();
+    valid = valid
+            && building->size() == sizeBeforeLimitedPaste
+            && building->roomCount() == roomsBeforeLimitedPaste
+            && floor->GetRoomAt(1, 1) == sourceRoom;
+    document->undoStack()->redo();
+    valid = valid
+            && building->size() == QSize(MAX_BUILDING_DIMENSION,
+                                         MAX_BUILDING_DIMENSION)
+            && floor->GetRoomAt(MAX_BUILDING_DIMENSION - 1,
+                                MAX_BUILDING_DIMENSION - 1) != nullptr;
+    document->undoStack()->undo();
+    if (!valid && errorString->isEmpty()) {
+        *errorString = QStringLiteral(
+                    "Maximum-size paste did not crop or restore correctly");
+    }
     return valid;
 }
 

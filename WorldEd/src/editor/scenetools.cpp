@@ -25,6 +25,7 @@
 #include "cellscene.h"
 #include "cellview.h"
 #include "clipboard.h"
+#include "expectedpropertiesdialog.h"
 #include "mapcomposite.h"
 #include "mapimagemanager.h"
 #include "mapmanager.h"
@@ -282,6 +283,127 @@ QString chooseBasementAccess(QWidget *parent, const QString &currentAccess)
         return QString();
     return accessList.currentItem()->text();
 }
+
+ObjectItem *contextObjectItemAt(CellScene *scene, const QPointF &scenePos)
+{
+    QTransform transform;
+    if (!scene->views().isEmpty())
+        transform = scene->views().first()->viewportTransform();
+    for (QGraphicsItem *graphicsItem : scene->items(
+             scenePos, Qt::IntersectsItemShape,
+             Qt::DescendingOrder, transform)) {
+        ObjectItem *objectItem = dynamic_cast<ObjectItem *>(graphicsItem);
+        if (objectItem && !objectItem->isAdjacent())
+            return objectItem;
+    }
+    return nullptr;
+}
+
+enum class ObjectContextChoice
+{
+    None,
+    Properties,
+    BasementAccess,
+    Remove
+};
+
+ObjectContextChoice objectContextChoice(
+        QAction *action, QAction *propertiesAction,
+        QAction *accessAction, QAction *removeAction)
+{
+    if (!action)
+        return ObjectContextChoice::None;
+    if (propertiesAction && action == propertiesAction)
+        return ObjectContextChoice::Properties;
+    if (accessAction && action == accessAction)
+        return ObjectContextChoice::BasementAccess;
+    if (removeAction && action == removeAction)
+        return ObjectContextChoice::Remove;
+    return ObjectContextChoice::None;
+}
+
+QString removeObjectActionText(WorldCellObject *object)
+{
+    if (object->isRoomTone())
+        return QObject::tr("Remove Room Tone");
+    if (object->isSpawnPoint())
+        return QObject::tr("Remove Spawn Point");
+    return QObject::tr("Remove Object");
+}
+
+void showObjectContextMenu(CellScene *scene, ObjectItem *item,
+                           const QPoint &screenPos)
+{
+    if (!item || !item->object())
+        return;
+
+    WorldCellObject *object = item->object();
+    scene->document()->setSelectedObjects(
+                WorldCellObjectList() << object);
+
+    QMenu menu;
+    QAction *propertiesAction = nullptr;
+    if (ExpectedPropertiesDialog::canEdit(object)) {
+        propertiesAction = menu.addAction(
+                    QIcon(QLatin1String(
+                              ":images/16x16/document-properties.png")),
+                    QObject::tr("Edit %1 Properties...")
+                    .arg(object->type()->name()));
+    }
+
+    QAction *accessAction = nullptr;
+    if (WorldObjectValidation::supportsBasementAccess(object)) {
+        accessAction = menu.addAction(
+                    QIcon(QLatin1String(":images/tiled-icon-16.png")),
+                    QObject::tr("Choose Basement Access..."));
+    }
+
+    if (propertiesAction || accessAction)
+        menu.addSeparator();
+    QAction *removeAction = menu.addAction(
+                QIcon(QLatin1String(":images/16x16/edit-delete.png")),
+                removeObjectActionText(object));
+
+    const ObjectContextChoice choice = objectContextChoice(
+                menu.exec(screenPos), propertiesAction,
+                accessAction, removeAction);
+    if (choice == ObjectContextChoice::Properties) {
+        ExpectedPropertiesDialog::edit(
+                    scene->worldDocument(), object,
+                    MainWindow::instance());
+    } else if (choice == ObjectContextChoice::BasementAccess) {
+        PropertyDef *definition = scene->world()->propertyDefinition(
+                    QStringLiteral("Access"));
+        Property *property = definition
+                ? object->properties().find(definition) : nullptr;
+        QString currentAccess;
+        if (property)
+            currentAccess = property->mValue;
+        else if (definition) {
+            PropertyList resolved;
+            resolvedObjectProperties(object, resolved);
+            Property *resolvedProperty = resolved.find(definition);
+            if (resolvedProperty)
+                currentAccess = resolvedProperty->mValue;
+        }
+        const QString selectedAccess = chooseBasementAccess(
+                    scene->views().isEmpty()
+                    ? static_cast<QWidget *>(MainWindow::instance())
+                    : scene->views().first(), currentAccess);
+        if (!selectedAccess.isEmpty() && definition) {
+            if (property)
+                scene->worldDocument()->setPropertyValue(
+                            object, property, selectedAccess);
+            else
+                scene->worldDocument()->addProperty(
+                            object, QStringLiteral("Access"),
+                            selectedAccess);
+        }
+    } else if (choice == ObjectContextChoice::Remove) {
+        scene->worldDocument()->removeCellObject(
+                    scene->cell(), object->index());
+    }
+}
 }
 /////
 
@@ -483,7 +605,12 @@ void CreateObjectTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
         if (mItem) {
             cancelNewMapObject();
             event->accept();
+        } else if (ObjectItem *item = contextObjectItemAt(
+                       mScene, event->scenePos())) {
+            showObjectContextMenu(mScene, item, event->screenPos());
+            event->accept();
         }
+        mMousePressed = false;
     }
 }
 
@@ -616,6 +743,34 @@ SelectMoveObjectTool *SelectMoveObjectTool::instance()
 void SelectMoveObjectTool::deleteInstance()
 {
     delete mInstance;
+}
+
+bool SelectMoveObjectTool::validateContextMenuDispatch(QString *error)
+{
+    QAction propertiesAction(nullptr);
+    QAction accessAction(nullptr);
+    QAction removeAction(nullptr);
+    QAction unrelatedAction(nullptr);
+
+    if (objectContextChoice(nullptr, &propertiesAction, nullptr,
+                            &removeAction) != ObjectContextChoice::None
+            || objectContextChoice(&propertiesAction, &propertiesAction,
+                                   nullptr, &removeAction)
+               != ObjectContextChoice::Properties
+            || objectContextChoice(&accessAction, &propertiesAction,
+                                   &accessAction, &removeAction)
+               != ObjectContextChoice::BasementAccess
+            || objectContextChoice(&removeAction, &propertiesAction,
+                                   nullptr, &removeAction)
+               != ObjectContextChoice::Remove
+            || objectContextChoice(&unrelatedAction, &propertiesAction,
+                                   nullptr, &removeAction)
+               != ObjectContextChoice::None) {
+        if (error)
+            *error = tr("Object context-menu action dispatch is invalid");
+        return false;
+    }
+    return true;
 }
 
 void SelectMoveObjectTool::deactivate()
@@ -905,71 +1060,9 @@ void SelectMoveObjectTool::finishMoving(const QPointF &pos)
 
 void SelectMoveObjectTool::showContextMenu(const QPointF &scenePos, const QPoint &screenPos)
 {
-    ObjectItem *item = topmostItemAt(scenePos);
-    if (!item) {
-        return;
-    }
-
-    QList<WorldCellObject*> objects;
-    if (mScene->document()->selectedObjects().contains(item->object()))
-        objects = mScene->document()->selectedObjects();
-    else {
-        objects << item->object();
-        mScene->document()->setSelectedObjects(objects);
-    }
-    int count = objects.size();
-
-    QMenu menu;
-    QAction *accessAction = nullptr;
-    if (count == 1 && item->object()->isBasement()) {
-        accessAction = menu.addAction(
-                    QIcon(QLatin1String(":images/tiled-icon-16.png")),
-                    tr("Choose Basement Access..."));
-        menu.addSeparator();
-    }
-    QIcon removeIcon(QLatin1String(":images/16x16/edit-delete.png"));
-    QAction *removeAction = menu.addAction(removeIcon, (count > 1)
-                                           ? tr("Remove %1 Objects").arg(count)
-                                           : tr("Remove Object"));
-
-    QAction *action = menu.exec(screenPos);
-    if (action == accessAction) {
-        WorldCellObject *object = objects.first();
-        PropertyDef *definition = mScene->world()->propertyDefinition(
-                    QStringLiteral("Access"));
-        Property *property = definition
-                ? object->properties().find(definition) : nullptr;
-        QString currentAccess;
-        if (property)
-            currentAccess = property->mValue;
-        else if (definition) {
-            PropertyList resolved;
-            resolvedObjectProperties(object, resolved);
-            Property *resolvedProperty = resolved.find(definition);
-            if (resolvedProperty)
-                currentAccess = resolvedProperty->mValue;
-        }
-        const QString selectedAccess = chooseBasementAccess(
-                    mScene->views().isEmpty()
-                    ? static_cast<QWidget *>(MainWindow::instance())
-                    : mScene->views().first(), currentAccess);
-        if (!selectedAccess.isEmpty() && definition) {
-            if (property)
-                mScene->worldDocument()->setPropertyValue(
-                            object, property, selectedAccess);
-            else
-                mScene->worldDocument()->addProperty(
-                            object, QStringLiteral("Access"),
-                            selectedAccess);
-        }
-    } else if (action == removeAction) {
-        if (count > 1)
-            mScene->worldDocument()->undoStack()->beginMacro(removeAction->text());
-        foreach (WorldCellObject *obj, objects)
-            mScene->worldDocument()->removeCellObject(mScene->cell(), obj->index());
-        if (count > 1)
-            mScene->worldDocument()->undoStack()->endMacro();
-    }
+    showObjectContextMenu(mScene,
+                          contextObjectItemAt(mScene, scenePos),
+                          screenPos);
 }
 
 ObjectItem *SelectMoveObjectTool::topmostItemAt(const QPointF &scenePos, bool editable)
@@ -1685,24 +1778,13 @@ void RoomToneTool::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 
 void RoomToneTool::showContextMenu(const QPointF &scenePos, const QPoint &screenPos)
 {
-    RoomToneItem *item = topmostItemAt(scenePos);
+    ObjectItem *item = contextObjectItemAt(mScene, scenePos);
     if (!item) {
         return;
     }
 
     mContextMenuVisible = true;
-
-//    mScene->document()->setSelectedObjects(WorldCellObjectList() << item->object());
-
-    QMenu menu;
-    QIcon removeIcon(QLatin1String(":images/16x16/edit-delete.png"));
-    QAction *removeAction = menu.addAction(removeIcon, tr("Remove Room Tone"));
-
-    QAction *action = menu.exec(screenPos);
-    if (action == removeAction) {
-        mScene->worldDocument()->removeCellObject(mScene->cell(), item->object()->index());
-    }
-
+    showObjectContextMenu(mScene, item, screenPos);
     mContextMenuVisible = false;
     mContextMenuShown = QTime::currentTime();
 }
@@ -2046,24 +2128,13 @@ void SpawnPointTool::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 
 void SpawnPointTool::showContextMenu(const QPointF &scenePos, const QPoint &screenPos)
 {
-    SpawnPointItem *item = topmostItemAt(scenePos);
+    ObjectItem *item = contextObjectItemAt(mScene, scenePos);
     if (!item) {
         return;
     }
 
     mContextMenuVisible = true;
-
-//    mScene->document()->setSelectedObjects(WorldCellObjectList() << item->object());
-
-    QMenu menu;
-    QIcon removeIcon(QLatin1String(":images/16x16/edit-delete.png"));
-    QAction *removeAction = menu.addAction(removeIcon, tr("Remove Spawn Point"));
-
-    QAction *action = menu.exec(screenPos);
-    if (action == removeAction) {
-        mScene->worldDocument()->removeCellObject(mScene->cell(), item->object()->index());
-    }
-
+    showObjectContextMenu(mScene, item, screenPos);
     mContextMenuVisible = false;
     mContextMenuShown = QTime::currentTime();
 }
@@ -4398,6 +4469,41 @@ PasteCellsTool::~PasteCellsTool()
 {
 }
 
+bool PasteCellsTool::validateCellPastePlacement(QString *summary,
+                                                QString *error)
+{
+    QVector<QPoint> sourceCells;
+    sourceCells << QPoint(2, 3) << QPoint(3, 3) << QPoint(2, 4);
+    const QPoint sourceAnchor = topLeftCell(sourceCells, QPoint(-1, -1));
+    const QPoint selectedAnchor = topLeftCell(
+                QVector<QPoint>() << QPoint(7, 5), sourceAnchor);
+    const QRect worldBounds(0, 0, 10, 10);
+    const QPoint dropAnchor = boundedDropCell(
+                sourceCells, sourceAnchor, selectedAnchor, worldBounds);
+    if (sourceAnchor != QPoint(2, 3)
+            || dropAnchor != QPoint(7, 5)
+            || pastedCellPosition(QPoint(2, 3), sourceAnchor, dropAnchor)
+               != QPoint(7, 5)
+            || pastedCellPosition(QPoint(3, 3), sourceAnchor, dropAnchor)
+               != QPoint(8, 5)
+            || pastedCellPosition(QPoint(2, 4), sourceAnchor, dropAnchor)
+               != QPoint(7, 6)) {
+        if (error)
+            *error = tr("The selected target cell did not anchor the paste.");
+        return false;
+    }
+    if (boundedDropCell(sourceCells, sourceAnchor, QPoint(9, 9),
+                        worldBounds) != QPoint(8, 8)) {
+        if (error)
+            *error = tr("The paste footprint was not kept inside the world.");
+        return false;
+    }
+    if (summary)
+        *summary = tr("selected-cell anchoring, relative multi-cell positions "
+                      "and world-bound clamping verified");
+    return true;
+}
+
 void PasteCellsTool::activate()
 {
     BaseWorldSceneTool::activate();
@@ -4407,9 +4513,12 @@ void PasteCellsTool::activate()
 void PasteCellsTool::deactivate()
 {
     BaseWorldSceneTool::deactivate();
-
-    // The user might switch tools while this tool is active
     cancelMoving();
+}
+
+void PasteCellsTool::restart()
+{
+    startMoving();
 }
 
 void PasteCellsTool::setScene(BaseGraphicsScene *scene)
@@ -4434,34 +4543,50 @@ void PasteCellsTool::updateEnabledState()
 void PasteCellsTool::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) {
+        qInfo() << "Cell paste cancelled";
         ToolManager::instance()->selectTool(WorldCellTool::instance());
         if (!isCurrent()) {
             cancelMoving();
         }
         event->accept();
+        return;
     }
+    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+        if (confirmOccupiedTargets() && pasteCells())
+            ToolManager::instance()->selectTool(WorldCellTool::instance());
+        event->accept();
+        return;
+    }
+    event->ignore();
 }
 
 void PasteCellsTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
-        pasteCells(event->scenePos());
+        if (!updateDropPosition(event->scenePos())) {
+            event->accept();
+            return;
+        }
+        if (confirmOccupiedTargets() && pasteCells())
+            ToolManager::instance()->selectTool(WorldCellTool::instance());
         event->accept();
         return;
     }
-    // Right-clicks exits pasting mode, same as the Escape key.
     if (event->button() == Qt::RightButton) {
+        qInfo() << "Cell paste cancelled";
         ToolManager::instance()->selectTool(WorldCellTool::instance());
         if (!isCurrent()) {
             cancelMoving();
         }
         event->accept();
+        return;
     }
+    event->ignore();
 }
 
 void PasteCellsTool::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 {
-    updateMovingItems(event->scenePos(), event->modifiers());
+    updateDropPosition(event->scenePos());
     event->accept();
 }
 
@@ -4473,69 +4598,117 @@ void PasteCellsTool::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
 
 void PasteCellsTool::startMoving()
 {
-    QRectF tileBounds;
+    cancelMoving();
+    if (!mScene)
+        return;
+
+    mSourceCellPositions.clear();
 
     foreach (WorldCellContents *contents, Clipboard::instance()->cellsInClipboard()) {
         PasteCellItem *dndItem = new PasteCellItem(contents, mScene);
         mDnDItems.append(dndItem);
         dndItem->setZValue(1000);
         mScene->addItem(dndItem);
-
-        tileBounds |= QRectF(contents->pos(), QSize(1, 1));
+        mSourceCellPositions.append(contents->pos());
     }
 
-    mStartScenePos = mScene->cellToPixelCoords(tileBounds.center());
+    if (mSourceCellPositions.isEmpty())
+        return;
+
+    mSourceCellPos = topLeftCell(mSourceCellPositions, QPoint());
+    mStartScenePos = mScene->cellToPixelCoords(mSourceCellPos);
+
+    QPoint requestedDrop = mSourceCellPos;
+    const QList<WorldCell*> &selectedCells =
+            mScene->worldDocument()->selectedCells();
+    if (!selectedCells.isEmpty()) {
+        QVector<QPoint> selectedPositions;
+        selectedPositions.reserve(selectedCells.size());
+        for (WorldCell *cell : selectedCells)
+            selectedPositions.append(cell->pos());
+        requestedDrop = topLeftCell(selectedPositions, mSourceCellPos);
+    }
+
+    mDropTilePos = boundedDropCell(mSourceCellPositions, mSourceCellPos,
+                                   requestedDrop,
+                                   mScene->world()->bounds());
+    const QPointF dropScenePos = mScene->cellToPixelCoords(mDropTilePos);
+    for (PasteCellItem *item : std::as_const(mDnDItems)) {
+        item->setDragOffset(dropScenePos - mStartScenePos);
+        const QPoint targetPosition = pastedCellPosition(
+                    item->cellPos(), mSourceCellPos, mDropTilePos);
+        item->setTargetOccupied(!mScene->world()->cellAt(targetPosition)->isEmpty());
+    }
+    qInfo() << "Cell paste preview started" << mDnDItems.size()
+            << "source anchor" << mSourceCellPos
+            << "target anchor" << mDropTilePos;
+    setStatusInfo(tr("Cell paste preview at %1,%2. Move the pointer, then "
+                     "left-click or press Enter once to place it. "
+                     "Right-click or Escape cancels.")
+                  .arg(mDropTilePos.x()).arg(mDropTilePos.y()));
 }
 
-void PasteCellsTool::updateMovingItems(const QPointF &pos, Qt::KeyboardModifiers modifiers)
+bool PasteCellsTool::updateDropPosition(const QPointF &pos)
 {
-    Q_UNUSED(modifiers)
-#if 0
-    // Snap-to-grid
-    QPointF pt = mScene->pixelToCellCoords(mStartScenePos);
-    qreal x1 = pt.x() - (int)pt.x();
-    qreal y1 = pt.y() - (int)pt.y();
+    if (!mScene || mDnDItems.isEmpty())
+        return false;
+    WorldCell *targetCell = mScene->pointToCell(pos);
+    if (!targetCell)
+        return false;
 
-    pt = mScene->pixelToCellCoords(pos);
-
-    // Pick the correct quadrant of the mouse-over cell depending on
-    // the quadrant the hot-spot is in
-    qreal x2 = pt.x() - int(pt.x());
-    qreal y2 = pt.y() - int(pt.y());
-    if (x2 - x1 > 0.5)
-        pt.setX(pt.x() + 1);
-    else if (x2 - x1 < -0.5)
-        pt.setX(pt.x() - 1);
-    if (y2 - y1 > 0.5)
-        pt.setY(pt.y() + 1);
-    else if (y2 - y1 < -0.5)
-        pt.setY(pt.y() - 1);
-
-    Q_ASSERT(mEventView);
-    qreal frac = 0.25, halfFrac = frac/2;
-    qreal scale = qMin(qMax(frac, mEventView->zoomable()->scale()),1.0);
-    QPolygonF poly = mScene->cellRectToPolygon(QRectF(int(pt.x())+x1-halfFrac/scale, int(pt.y())+y1-halfFrac/scale, frac/scale, frac/scale));
-    if (poly.containsPoint(pos, Qt::OddEvenFill))
-        pt = mScene->cellToPixelCoords(int(pt.x())+x1, int(pt.y())+y1);
-    else
-        pt = pos;
-#endif
-    QVector<QPoint> cellPositions;(mDnDItems.size());
-    cellPositions.clear();
-    foreach (PasteCellItem *item, mDnDItems)
-        cellPositions.append(item->cellPos());
-    QPointF pt = restrictDragging(cellPositions, mStartScenePos, pos);
-
-    foreach (PasteCellItem *item, mDnDItems)
-        item->setDragOffset(pt - mStartScenePos);
-
-    mDropTilePos = mScene->pixelToCellCoordsInt(pt);
+    const QPoint requestedDrop = targetCell->pos();
+    mDropTilePos = boundedDropCell(mSourceCellPositions, mSourceCellPos,
+                                   requestedDrop,
+                                   mScene->world()->bounds());
+    const QPointF dropScenePos = mScene->cellToPixelCoords(mDropTilePos);
+    for (PasteCellItem *item : std::as_const(mDnDItems)) {
+        item->setDragOffset(dropScenePos - mStartScenePos);
+        const QPoint targetPosition = pastedCellPosition(
+                    item->cellPos(), mSourceCellPos, mDropTilePos);
+        item->setTargetOccupied(!mScene->world()->cellAt(targetPosition)->isEmpty());
+    }
+    setStatusInfo(tr("Cell paste preview at %1,%2. Green targets are empty. "
+                     "Orange targets already contain data. Left-click or "
+                     "press Enter once to place. Right-click or Escape cancels.")
+                  .arg(mDropTilePos.x()).arg(mDropTilePos.y()));
+    return true;
 }
 
-void PasteCellsTool::pasteCells(const QPointF &pos)
+bool PasteCellsTool::confirmOccupiedTargets() const
 {
-    Q_UNUSED(pos)
-    QPoint startCellPos = mScene->pixelToCellCoordsInt(mStartScenePos);
+    QStringList occupied;
+    for (PasteCellItem *item : mDnDItems) {
+        const QPoint targetPosition = pastedCellPosition(
+                    item->cellPos(), mSourceCellPos, mDropTilePos);
+        WorldCell *targetCell = mScene->world()->cellAt(targetPosition);
+        if (targetCell && !targetCell->isEmpty())
+            occupied += QStringLiteral("%1,%2")
+                    .arg(targetPosition.x()).arg(targetPosition.y());
+    }
+    if (occupied.isEmpty())
+        return true;
+
+    const QString targets = occupied.mid(0, 12).join(QLatin1String(", "))
+            + (occupied.size() > 12
+               ? tr(" and %1 more").arg(occupied.size() - 12)
+               : QString());
+    return QMessageBox::warning(
+                MainWindow::instance(), tr("Paste Into Non-Empty Cells"),
+                tr("The target contains %1 non-empty cell(s): %2\n\n"
+                   "Pasting will merge the copied map, lots, zones, "
+                   "properties and features with the existing cell data. "
+                   "Overlapping content may result. Continue?")
+                .arg(occupied.size()).arg(targets),
+                QMessageBox::Yes | QMessageBox::No,
+                QMessageBox::No) == QMessageBox::Yes;
+}
+
+bool PasteCellsTool::pasteCells()
+{
+    if (mDnDItems.isEmpty())
+        return false;
+
+    QPoint startCellPos = mSourceCellPos;
     QPoint dropCellPos = mDropTilePos;
 
     QUndoStack *undoStack = mScene->worldDocument()->undoStack();
@@ -4544,12 +4717,12 @@ void PasteCellsTool::pasteCells(const QPointF &pos)
     undoStack->beginMacro(tr("Paste %1 Cell%2").arg(count).arg(QLatin1String((count > 1) ? "s" : "")));
     undoStack->push(new ProgressBegin(tr("Pasting Cells"))); // in case of multiple loadMap() calls
 #if 1
-    // This can be called multiple times.
     Clipboard::instance()->pasteEverythingButCells(mScene->worldDocument());
 #endif
     QList<WorldCell*> newSelection;
     foreach (PasteCellItem *item, mDnDItems) {
-        QPoint newPos = item->cellPos() + dropCellPos - startCellPos;
+        QPoint newPos = pastedCellPosition(item->cellPos(), startCellPos,
+                                           dropCellPos);
         WorldCell *replace = mScene->world()->cellAt(newPos);
         WorldCellContents *contents = new WorldCellContents(item->contents(), replace);
 #if 1
@@ -4564,12 +4737,60 @@ void PasteCellsTool::pasteCells(const QPointF &pos)
     undoStack->push(new ProgressEnd(tr("Undoing Paste Cells"))); // in case of multiple loadMap() calls
     undoStack->endMacro();
     MainWindow::instance()->endDocumentTransaction();
+    qInfo() << "Cell paste completed" << count
+            << "source anchor" << startCellPos
+            << "target anchor" << dropCellPos;
+    return true;
+}
+
+QPoint PasteCellsTool::topLeftCell(const QVector<QPoint> &cellPositions,
+                                   const QPoint &fallback)
+{
+    if (cellPositions.isEmpty())
+        return fallback;
+    QRect bounds(cellPositions.first(), QSize(1, 1));
+    for (const QPoint &cellPosition : cellPositions)
+        bounds |= QRect(cellPosition, QSize(1, 1));
+    return bounds.topLeft();
+}
+
+QPoint PasteCellsTool::boundedDropCell(const QVector<QPoint> &cellPositions,
+                                       const QPoint &sourceCell,
+                                       const QPoint &requestedDrop,
+                                       const QRect &worldBounds)
+{
+    if (cellPositions.isEmpty())
+        return requestedDrop;
+
+    const QPoint delta = requestedDrop - sourceCell;
+    QRect cellBounds(cellPositions.first() + delta, QSize(1, 1));
+    for (const QPoint &cellPos : cellPositions)
+        cellBounds |= QRect(cellPos + delta, QSize(1, 1));
+
+    QPoint drop = requestedDrop;
+    if (cellBounds.left() < worldBounds.left())
+        drop.rx() += worldBounds.left() - cellBounds.left();
+    if (cellBounds.top() < worldBounds.top())
+        drop.ry() += worldBounds.top() - cellBounds.top();
+    if (cellBounds.right() > worldBounds.right())
+        drop.rx() += worldBounds.right() - cellBounds.right();
+    if (cellBounds.bottom() > worldBounds.bottom())
+        drop.ry() += worldBounds.bottom() - cellBounds.bottom();
+    return drop;
+}
+
+QPoint PasteCellsTool::pastedCellPosition(const QPoint &cellPosition,
+                                          const QPoint &sourceCell,
+                                          const QPoint &dropCell)
+{
+    return cellPosition + dropCell - sourceCell;
 }
 
 void PasteCellsTool::cancelMoving()
 {
     qDeleteAll(mDnDItems);
     mDnDItems.clear();
+    mSourceCellPositions.clear();
 }
 
 /////

@@ -2113,15 +2113,38 @@ void MainWindow::resizeMap()
     ResizeDialog resizeDialog(this);
     resizeDialog.setOldSize(map->size());
 
-    if (resizeDialog.exec()) {
-        const QSize &newSize = resizeDialog.newSize();
-        const QPoint &offset = resizeDialog.offset();
-        if (newSize != map->size() || !offset.isNull()) {
-            beginDocumentTransaction();
-            mMapDocument->resizeMap(newSize, offset);
-            endDocumentTransaction();
-        }
+    if (resizeDialog.exec() != QDialog::Accepted)
+        return;
+
+    const QSize newSize = resizeDialog.newSize();
+    const QPoint offset = resizeDialog.offset();
+    if (newSize.width() < 1 || newSize.width() > MAX_MAP_DIMENSION ||
+            newSize.height() < 1 || newSize.height() > MAX_MAP_DIMENSION) {
+        QMessageBox::warning(
+                    this,
+                    tr("Invalid Map Size"),
+                    tr("Map dimensions must be between 1 and %1 tiles.")
+                    .arg(MAX_MAP_DIMENSION));
+        return;
     }
+    if (newSize == map->size() && offset.isNull())
+        return;
+
+    const QRect newBounds(QPoint(), newSize);
+    const QRect movedOldBounds =
+            QRect(QPoint(), map->size()).translated(offset);
+    if (!newBounds.contains(movedOldBounds) && QMessageBox::warning(
+                this,
+                tr("Resize Will Crop Map Content"),
+                tr("Tiles, objects, and map data outside the new map bounds will be cropped. Continue resizing?"),
+                QMessageBox::Yes | QMessageBox::Cancel,
+                QMessageBox::Cancel) != QMessageBox::Yes) {
+        return;
+    }
+
+    beginDocumentTransaction();
+    mMapDocument->resizeMap(newSize, offset);
+    endDocumentTransaction();
 }
 
 void MainWindow::offsetMap()

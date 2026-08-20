@@ -394,9 +394,7 @@ public:
         const_iterator it = constBegin();
         while (it != constEnd()) {
             WorldCellObject *obj = (*it);
-            copy += new WorldCellObject(cell, obj->name(), obj->type(),
-                                        obj->group(), obj->x(), obj->y(),
-                                        obj->level(), obj->width(), obj->height());
+            copy += new WorldCellObject(cell, obj);
             it++;
         }
         return copy;
@@ -546,6 +544,8 @@ public:
         mLots = other->lots().clone(newOwner);
         mObjects = other->objects().clone(newOwner);
         cloneInGameMapFeatures(other->mInGameMapFeatures, newOwner);
+        translateInGameMapFeatures((newOwner->pos() - other->pos())
+                                   * newOwner->bounds().width());
         mPos = other->pos();
     }
 
@@ -588,6 +588,17 @@ public:
     void swapWorld(World *world);
 
     void mergeOnto(WorldCell *cell);
+
+    void translateInGameMapFeatures(const QPoint &offset)
+    {
+        if (offset.isNull())
+            return;
+        for (InGameMapFeature *feature : std::as_const(mInGameMapFeatures)) {
+            for (InGameMapCoordinates &coordinates :
+                 feature->mGeometry.mCoordinates)
+                coordinates.translate(offset.x(), offset.y());
+        }
+    }
 
 private:
     void cloneInGameMapFeatures(const QList<InGameMapFeature*> &features,

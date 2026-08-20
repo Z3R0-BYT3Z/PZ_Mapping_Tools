@@ -670,7 +670,8 @@ int BuildingMap::defaultOrientation()
 
 bool BuildingMap::isTilesetUsed(Tileset *tileset)
 {
-    return mMap->isTilesetUsed(tileset) || mBlendMap->isTilesetUsed(tileset);
+    return (mMap && mMap->isTilesetUsed(tileset)) ||
+            (mBlendMap && mBlendMap->isTilesetUsed(tileset));
 }
 
 void BuildingMap::buildingRotated()

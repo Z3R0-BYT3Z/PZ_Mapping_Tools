@@ -258,14 +258,30 @@ Map *MapReaderPrivate::readMap()
         }
     }
 
+    bool mapWidthOk;
+    bool mapHeightOk;
+    bool tileWidthOk;
+    bool tileHeightOk;
     const int mapWidth =
-            atts.value(QLatin1String("width")).toString().toInt();
+            atts.value(QLatin1String("width")).toString().toInt(&mapWidthOk);
     const int mapHeight =
-            atts.value(QLatin1String("height")).toString().toInt();
+            atts.value(QLatin1String("height")).toString().toInt(&mapHeightOk);
     const int tileWidth =
-            atts.value(QLatin1String("tilewidth")).toString().toInt();
+            atts.value(QLatin1String("tilewidth")).toString().toInt(&tileWidthOk);
     const int tileHeight =
-            atts.value(QLatin1String("tileheight")).toString().toInt();
+            atts.value(QLatin1String("tileheight")).toString().toInt(&tileHeightOk);
+    if (!mapWidthOk || !mapHeightOk || mapWidth < 1 ||
+            mapWidth > MAX_MAP_DIMENSION || mapHeight < 1 ||
+            mapHeight > MAX_MAP_DIMENSION) {
+        xml.raiseError(tr("Invalid map dimensions %1x%2. Width and height must be between 1 and %3 tiles.")
+                       .arg(mapWidth).arg(mapHeight).arg(MAX_MAP_DIMENSION));
+        return nullptr;
+    }
+    if (!tileWidthOk || !tileHeightOk || tileWidth < 1 || tileHeight < 1) {
+        xml.raiseError(tr("Invalid tile dimensions %1x%2")
+                       .arg(tileWidth).arg(tileHeight));
+        return nullptr;
+    }
 
     const QString orientationString =
             atts.value(QLatin1String("orientation")).toString();
@@ -282,8 +298,10 @@ Map *MapReaderPrivate::readMap()
     while (xml.readNextStartElement()) {
         if (xml.name() == QLatin1String("properties"))
             mMap->mergeProperties(readProperties());
-        else if (xml.name() == QLatin1String("tileset"))
-            mMap->addTileset(readTileset());
+        else if (xml.name() == QLatin1String("tileset")) {
+            if (Tileset *tileset = readTileset())
+                mMap->addTileset(tileset);
+        }
         else if (xml.name() == QLatin1String("layer")) {
             if (Layer *layer = readLayer())
                 mMap->addLayer(layer);
@@ -482,8 +500,18 @@ TileLayer *MapReaderPrivate::readLayer()
     /*const */QString name = atts.value(QLatin1String("name")).toString();
     const int x = atts.value(QLatin1String("x")).toString().toInt();
     const int y = atts.value(QLatin1String("y")).toString().toInt();
-    const int width = atts.value(QLatin1String("width")).toString().toInt();
-    const int height = atts.value(QLatin1String("height")).toString().toInt();
+    bool widthOk;
+    bool heightOk;
+    const int width = atts.value(QLatin1String("width")).toString().toInt(&widthOk);
+    const int height = atts.value(QLatin1String("height")).toString().toInt(&heightOk);
+    if (!widthOk || !heightOk || width < 1 ||
+            width > MAX_MAP_DIMENSION || height < 1 ||
+            height > MAX_MAP_DIMENSION) {
+        xml.raiseError(tr("Invalid layer dimensions %1x%2 for layer '%3'. Width and height must be between 1 and %4 tiles.")
+                       .arg(width).arg(height).arg(name)
+                       .arg(MAX_MAP_DIMENSION));
+        return nullptr;
+    }
 
     int level = 0;
     if (readLayerLevel(name, level) == false) {
@@ -568,7 +596,9 @@ void MapReaderPrivate::decodeBinaryLayerData(TileLayer *tileLayer,
     const QByteArray latin1Text = text.toLatin1();
 #endif
     QByteArray tileData = QByteArray::fromBase64(latin1Text);
-    const int size = (tileLayer->width() * tileLayer->height()) * 4;
+    const qint64 byteCount = qint64(tileLayer->width()) *
+            tileLayer->height() * qint64(sizeof(quint32));
+    const int size = int(byteCount);
 
     if (compression == QLatin1String("zlib")
         || compression == QLatin1String("gzip")) {
@@ -1235,7 +1265,9 @@ void MapReaderPrivate::decodeBmpPixels(int bmpIndex, const QList<QRgb> &colors, 
     const QByteArray latin1Text = text.toLatin1();
 #endif
     QByteArray tileData = QByteArray::fromBase64(latin1Text);
-    const int size = (mMap->width() * mMap->height()) * 4;
+    const qint64 byteCount = qint64(mMap->width()) *
+            mMap->height() * qint64(sizeof(quint32));
+    const int size = int(byteCount);
 
     tileData = decompress(tileData, size);
 
@@ -1300,7 +1332,8 @@ void MapReaderPrivate::decodeNoBlendBits(MapNoBlend *noBlend, QStringView text)
     const QByteArray latin1Text = text.toLatin1();
 #endif
     QByteArray tileData = QByteArray::fromBase64(latin1Text);
-    const int size = (noBlend->width() * noBlend->height());
+    const qint64 byteCount = qint64(noBlend->width()) * noBlend->height();
+    const int size = int(byteCount);
 
     tileData = decompress(tileData, size);
 

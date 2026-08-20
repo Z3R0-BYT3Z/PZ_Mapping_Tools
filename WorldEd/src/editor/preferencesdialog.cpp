@@ -481,8 +481,6 @@ void PreferencesDialog::gridColorChanged(const QColor &gridColor)
 
 void PreferencesDialog::accept()
 {
-    QDialog::accept();
-
     Preferences *prefs = Preferences::instance();
     Tiled::TileMetaInfoMgr::instance()->changeTilesDirectory(mTilesDirectory);
     prefs->setProjectZomboidDirectory(mProjectZomboidDirectory);
@@ -513,6 +511,7 @@ void PreferencesDialog::accept()
     prefs->setTertiaryRoadFeatureTiles(tileNames(mTertiaryRoadFeatureTiles));
     prefs->setShowAdjacentMaps(ui->showAdjacent->isChecked());
     prefs->setZombieSpawnImageOpacity(ui->zombieSpawnImageOpacity->value() / 100.0);
+    QDialog::accept();
 }
 
 QStringList PreferencesDialog::tileNames(QListWidget *list) const

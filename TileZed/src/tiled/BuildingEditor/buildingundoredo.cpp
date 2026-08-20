@@ -17,6 +17,7 @@
 
 #include "buildingundoredo.h"
 
+#include "building.h"
 #include "buildingdocument.h"
 #include "buildingfloor.h"
 #include "buildingobjects.h"
@@ -425,7 +426,8 @@ ResizeBuilding::ResizeBuilding(BuildingDocument *doc, const QPoint &offset, cons
     QUndoCommand(QCoreApplication::translate("Undo Commands", "Resize Building")),
     mDocument(doc),
     mOffset(offset),
-    mSize(newSize)
+    mSize(qBound(1, newSize.width(), MAX_BUILDING_DIMENSION),
+          qBound(1, newSize.height(), MAX_BUILDING_DIMENSION))
 {
 }
 
@@ -476,21 +478,22 @@ ResizeFloor::ResizeFloor(BuildingDocument *doc, BuildingFloor *floor,
     QUndoCommand(QCoreApplication::translate("Undo Commands", "Resize Floor")),
     mDocument(doc),
     mFloor(floor),
-    mSize(newSize)
+    mSize(qBound(1, newSize.width(), MAX_BUILDING_DIMENSION),
+          qBound(1, newSize.height(), MAX_BUILDING_DIMENSION))
 {
-    mGrid.resize(newSize.width());
-    for (int x = 0; x < newSize.width(); ++x)
-        mGrid[x].resize(newSize.height());
+    mGrid.resize(mSize.width());
+    for (int x = 0; x < mSize.width(); ++x)
+        mGrid[x].resize(mSize.height());
     const QVector<QVector<Room *> > &sourceGrid = floor->grid();
     for (int x = 0; x < sourceGrid.size(); ++x) {
         for (int y = 0; y < sourceGrid.at(x).size(); ++y) {
             const QPoint destination = QPoint(x, y) + offset;
-            if (QRect(QPoint(), newSize).contains(destination))
+            if (QRect(QPoint(), mSize).contains(destination))
                 mGrid[destination.x()][destination.y()] = sourceGrid.at(x).at(y);
         }
     }
 
-    const QSize grimeSize = newSize + QSize(1, 1);
+    const QSize grimeSize = mSize + QSize(1, 1);
     for (const QString &layerName : floor->grimeLayers()) {
         FloorTileGrid *source = floor->grime().value(layerName);
         FloorTileGrid *destination = new FloorTileGrid(grimeSize.width(),
@@ -506,8 +509,8 @@ ResizeFloor::ResizeFloor(BuildingDocument *doc, BuildingFloor *floor,
         mGrime[layerName] = destination;
     }
 
-    mSquarePropertiesGrid = new Tiled::PropertiesGrid(newSize.width(),
-                                                       newSize.height());
+    mSquarePropertiesGrid = new Tiled::PropertiesGrid(mSize.width(),
+                                                       mSize.height());
     Tiled::PropertiesGrid *sourceProperties = floor->squarePropertiesGrid();
     for (int x = 0; x < sourceProperties->width(); ++x) {
         for (int y = 0; y < sourceProperties->height(); ++y) {

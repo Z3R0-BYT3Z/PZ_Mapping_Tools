@@ -37,6 +37,7 @@ class FurnitureTiles;
 class Room;
 
 #define MAX_BUILDING_FLOORS MAX_WORLD_LEVELS
+#define MAX_BUILDING_DIMENSION 300
 
 class Building
 {

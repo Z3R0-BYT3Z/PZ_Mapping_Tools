@@ -1088,8 +1088,21 @@ void BuildingEditorWindow::newBuilding()
     if (dialog.exec() != QDialog::Accepted)
         return;
 
-    Building *building = new Building(dialog.buildingWidth(),
-                                      dialog.buildingHeight(),
+    const QSize requestedSize(dialog.buildingWidth(), dialog.buildingHeight());
+    if (requestedSize.width() < 1 ||
+            requestedSize.width() > MAX_BUILDING_DIMENSION ||
+            requestedSize.height() < 1 ||
+            requestedSize.height() > MAX_BUILDING_DIMENSION) {
+        QMessageBox::warning(
+                    this,
+                    tr("Invalid Building Size"),
+                    tr("Building dimensions must be between 1 and %1 tiles.")
+                    .arg(MAX_BUILDING_DIMENSION));
+        return;
+    }
+
+    Building *building = new Building(requestedSize.width(),
+                                      requestedSize.height(),
                                       dialog.buildingTemplate());
     building->insertFloor(0, new BuildingFloor(building, 0));
 
@@ -1766,13 +1779,48 @@ bool BuildingEditorWindow::pasteClipboardAt(const QPoint &requestedTargetPos)
     QPoint targetPos = requestedTargetPos;
     const QRect requestedBounds(clipboardBounds.topLeft() + targetPos,
                                 clipboardBounds.size());
-    const QPoint offset(qMax(0, -requestedBounds.left()),
-                        qMax(0, -requestedBounds.top()));
+    const QPoint requiredOffset(qMax(0, -requestedBounds.left()),
+                                qMax(0, -requestedBounds.top()));
     const QSize oldSize = building->size();
-    const int requiredRight = requestedBounds.right() + offset.x() + 1;
-    const int requiredBottom = requestedBounds.bottom() + offset.y() + 1;
-    const QSize newSize(qMax(oldSize.width() + offset.x(), requiredRight),
-                        qMax(oldSize.height() + offset.y(), requiredBottom));
+    const int requiredRight = requestedBounds.right() + requiredOffset.x() + 1;
+    const int requiredBottom = requestedBounds.bottom() + requiredOffset.y() + 1;
+    const QSize requiredSize(
+                qMax(oldSize.width() + requiredOffset.x(), requiredRight),
+                qMax(oldSize.height() + requiredOffset.y(), requiredBottom));
+    const bool exceedsMaximum =
+            requiredSize.width() > MAX_BUILDING_DIMENSION ||
+            requiredSize.height() > MAX_BUILDING_DIMENSION;
+    if (exceedsMaximum && QMessageBox::warning(
+                this,
+                tr("Paste Exceeds Building Limit"),
+                tr("The paste would require a %1 x %2 building. Building dimensions are limited to %3 x %3 tiles.\n\nContinue and crop clipboard content outside the allowed building bounds?")
+                .arg(requiredSize.width()).arg(requiredSize.height())
+                .arg(MAX_BUILDING_DIMENSION),
+                QMessageBox::Yes | QMessageBox::Cancel,
+                QMessageBox::Cancel) != QMessageBox::Yes) {
+        return false;
+    }
+
+    const QPoint offset(
+                qMin(requiredOffset.x(),
+                     qMax(0, MAX_BUILDING_DIMENSION - oldSize.width())),
+                qMin(requiredOffset.y(),
+                     qMax(0, MAX_BUILDING_DIMENSION - oldSize.height())));
+    const QRect maximumBounds(0, 0, MAX_BUILDING_DIMENSION,
+                              MAX_BUILDING_DIMENSION);
+    const QRect boundedPasteBounds =
+            requestedBounds.translated(offset) & maximumBounds;
+    if (boundedPasteBounds.isEmpty()) {
+        statusBar()->showMessage(
+                    tr("Nothing was pasted because all clipboard content was outside the %1 x %1 building bounds.")
+                    .arg(MAX_BUILDING_DIMENSION), 5000);
+        return true;
+    }
+    const QSize newSize(
+                qMax(oldSize.width() + offset.x(),
+                     boundedPasteBounds.right() + 1),
+                qMax(oldSize.height() + offset.y(),
+                     boundedPasteBounds.bottom() + 1));
     targetPos += offset;
 
     QUndoStack *undoStack = mCurrentDocument->undoStack();
@@ -1821,8 +1869,12 @@ bool BuildingEditorWindow::pasteClipboardAt(const QPoint &requestedTargetPos)
                 roomLayer.level - mCurrentDocument->clipboardAnchorLevel();
         if (!building->floor(level))
             continue;
-        for (const QVector<int> &column : roomLayer.rooms) {
-            for (int roomIndex : column) {
+        for (int x = 0; x < roomLayer.rooms.size(); ++x) {
+            for (int y = 0; y < roomLayer.rooms.at(x).size(); ++y) {
+                const int roomIndex = roomLayer.rooms.at(x).at(y);
+                const QPoint destination = targetPos + QPoint(x, y);
+                if (!building->bounds().contains(destination))
+                    continue;
                 if (roomIndex >= 0 &&
                         roomIndex < pastedRooms.size()) {
                     usedRoomIndexes.insert(roomIndex);
@@ -1881,14 +1933,16 @@ bool BuildingEditorWindow::pasteClipboardAt(const QPoint &requestedTargetPos)
     }
 
     int pastedTileLayers = 0;
-    const QRegion targetRegion = mCurrentDocument->clipboardTilesRgn()
-            .translated(targetPos);
+    const QRegion requestedTargetRegion =
+            mCurrentDocument->clipboardTilesRgn().translated(targetPos);
+    const QRegion targetRegion = requestedTargetRegion & building->bounds();
+    const bool pasteCropped = targetRegion != requestedTargetRegion;
     for (const BuildingDocument::ClipboardTileLayer &clip :
          mCurrentDocument->clipboardTileLayers()) {
         const int level = mCurrentDocument->currentLevel() +
                 clip.level - mCurrentDocument->clipboardAnchorLevel();
         BuildingFloor *floor = building->floor(level);
-        if (!floor)
+        if (!floor || targetRegion.isEmpty())
             continue;
         undoStack->push(new PaintFloorTiles(
                             mCurrentDocument, floor, clip.layerName,
@@ -1903,11 +1957,15 @@ bool BuildingEditorWindow::pasteClipboardAt(const QPoint &requestedTargetPos)
             << "tile layers" << pastedTileLayers
             << "room layers" << pastedRoomLayers
             << "rooms" << insertedRoomCount
+            << "cropped" << pasteCropped
             << "building size" << building->size();
-    statusBar()->showMessage(
-                tr("Pasted %1 tile layer(s) and %2 room layout(s) at %3,%4")
-                .arg(pastedTileLayers).arg(pastedRoomLayers)
-                .arg(targetPos.x()).arg(targetPos.y()), 5000);
+    QString status = tr("Pasted %1 tile layer(s) and %2 room layout(s) at %3,%4")
+            .arg(pastedTileLayers).arg(pastedRoomLayers)
+            .arg(targetPos.x()).arg(targetPos.y());
+    if (pasteCropped) {
+        status += tr(". Content outside the building bounds was cropped");
+    }
+    statusBar()->showMessage(status, 5000);
     return true;
 }
 
@@ -2523,7 +2581,26 @@ void BuildingEditorWindow::resizeBuilding()
 
     QPoint offset = dialog.offset();
     QSize newSize = dialog.newSize();
+    if (newSize.width() < 1 || newSize.width() > MAX_BUILDING_DIMENSION ||
+            newSize.height() < 1 ||
+            newSize.height() > MAX_BUILDING_DIMENSION) {
+        QMessageBox::warning(
+                    this,
+                    tr("Invalid Building Size"),
+                    tr("Building dimensions must be between 1 and %1 tiles.")
+                    .arg(MAX_BUILDING_DIMENSION));
+        return;
+    }
     QRect newBounds(QPoint(), newSize);
+    const QRect movedOldBounds = currentBuilding()->bounds().translated(offset);
+    if (!newBounds.contains(movedOldBounds) && QMessageBox::warning(
+                this,
+                tr("Resize Will Crop Building Content"),
+                tr("Rooms, tiles, and objects outside the new building bounds will be cropped. Continue resizing?"),
+                QMessageBox::Yes | QMessageBox::Cancel,
+                QMessageBox::Cancel) != QMessageBox::Yes) {
+        return;
+    }
 //    QRect overlap = newBounds & currentBuilding()->bounds().translated(offset);
 
     QUndoStack *undoStack = mCurrentDocument->undoStack();

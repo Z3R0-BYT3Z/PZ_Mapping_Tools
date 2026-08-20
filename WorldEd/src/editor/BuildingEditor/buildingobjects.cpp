@@ -17,6 +17,7 @@
 
 #include "buildingobjects.h"
 
+#include "building.h"
 #include "buildingfloor.h"
 #include "buildingtiles.h"
 #include "furnituregroups.h"
@@ -852,6 +853,7 @@ void RoofObject::setType(RoofObject::RoofType type)
 
 void RoofObject::setWidth(int width)
 {
+    width = qBound(1, width, MAX_BUILDING_DIMENSION);
     switch (mType) {
     case SlopeW:
     case SlopeE:
@@ -1025,6 +1027,7 @@ void RoofObject::setWidth(int width)
 
 void RoofObject::setHeight(int height)
 {
+    height = qBound(1, height, MAX_BUILDING_DIMENSION);
     switch (mType) {
     case SlopeW:
     case SlopeE:
@@ -3981,11 +3984,16 @@ RoofObject::RoofDepth RoofObject::depthFromString(const QString &s)
 WallObject::WallObject(BuildingFloor *floor, int x, int y,
                        Direction dir, int length) :
     BuildingObject(floor, x, y, dir),
-    mLength(length),
+    mLength(qBound(1, length, MAX_BUILDING_DIMENSION)),
     mExteriorTrimTile(0),
     mInteriorTile(0),
     mInteriorTrimTile(0)
 {
+}
+
+void WallObject::setLength(int length)
+{
+    mLength = qBound(1, length, MAX_BUILDING_DIMENSION);
 }
 
 QRect WallObject::bounds() const

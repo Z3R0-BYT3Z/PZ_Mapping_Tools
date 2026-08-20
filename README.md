@@ -9,6 +9,11 @@ The project continues the work in Tim Baker's
 and negative-level support and adds current Build 42 mapping workflows,
 portable configuration, native 256-cell support, image editing, mapping
 automation, compatibility corrections, and safer project maintenance.
+Malformed project references and thumbnail cache metadata are validated before
+they can reach editor containers or be reused as valid cached data.
+TMX maps and tile layers are limited to 300 x 300 tiles, including Native256
+workflows that reuse legacy-size maps or building layouts. TileZed asks for
+confirmation before a map resize crops existing content.
 
 Tim Baker created the original WorldEd and TileZed foundation. The current
 unofficial Qt 5 continuation, maintenance, new features, and fixes are developed
@@ -56,9 +61,23 @@ Important additions include:
   values instead of the historical 300-square `worldX` and `worldY` format
 - Creation defaults and non-blocking export validation for SpawnPoint,
   WaterFlow, WaterZone, and RoomTone objects
+- A right-click guided property editor for WaterFlow, WaterZone, RoomTone,
+  SpawnPoint, ParkingStall, Vehicle, Mannequin, Animal, Basement, and WorldGen
+  objects. It is available with both Select and Create Object, targets only
+  the zone geometry directly under the pointer, and shows the fields expected
+  for that type through enum lists, profession checklists, booleans, and
+  numeric controls. Closing the context menu performs no action. The complete
+  Properties dock remains available unchanged.
 - Moving selected cells also translates Street points, Region anchors, Road
   endpoints, and fully covered terrain-image placements in the same Undo
   transaction
+- Cell Move, Copy, Paste, Undo, and Redo preserve the complete cell payload,
+  including maps, lots, cell and object properties, notes, templates, zone
+  geometry, visibility, polyline widths, and InGameMap features. Ctrl+V and
+  **Edit > Paste** both start the same pointer-following preview. Empty targets
+  use a green outline and occupied targets use orange. One click pastes into
+  the cell under the pointer and returns to the normal selection tool. Pasting
+  into a non-empty cell requires explicit confirmation.
 - InGameMap Forest export with the Forest pyramid and strict Build 42.20
   binary-header validation before existing files are replaced
 - InGameMap building outlines from both placed TBX lots and RoomDefs embedded
@@ -145,9 +164,13 @@ Important additions include:
 - Editing a room name or internal name commits when the field is finished or a
   list entry is selected. Text entry no longer rebuilds every isometric floor
   after each character.
-- Pasting beyond an edge expands the building while preserving and shifting
-  existing rooms, user tiles, square properties, objects, and basement access.
-  One Undo restores the complete pre-paste state.
+- Buildings are limited to 300 x 300 tiles during creation, loading, and
+  resizing. A resize that would crop content requires confirmation.
+- Pasting beyond an edge expands the building up to that limit while preserving
+  and shifting existing rooms, user tiles, square properties, objects, and
+  basement access. A paste that would exceed the limit requires confirmation
+  and crops only clipboard content outside the building bounds. One Undo
+  restores the complete pre-paste state.
 - Copy checkpoints the recoverable autosave when the document already contains
   unsaved changes. Timed autosave remains paused while a cut or paste
   transaction is incomplete and resumes only after the coherent final state is
@@ -260,8 +283,9 @@ WorldEd searches both portable resource directories recursively and detects
 files added while the application is running. A basement-access source does
 not need to contain a staircase or a dedicated anchor. WorldEd displays the
 complete TBX or TMX as a translucent overlay aligned to the Basement trace
-origin. Right-click a selected Basement object and choose **Choose Basement
-Access...** to browse the available access names with a visual preview.
+origin. Right-click the Basement zone itself with Select or Create Object and
+choose **Choose Basement Access...** to browse the available access names with
+a visual preview. This action is never offered for another zone type.
 
 Each application provides an autosave interval in Preferences. WorldEd and
 TileZed save only an existing modified PZW or TMX. BuildingEd retains its
@@ -431,6 +455,9 @@ Preferences and logs are stored under `settings`. Logs include OS, CPU, RAM,
 display-adapter, Qt, and process information useful for support without
 recording a username, hostname, serial number, IP address, or stable machine
 identifier.
+
+WorldEd reloads the tileset catalogue only when the effective Tiles directory
+changes. Confirming other Preferences does not rebuild open maps or lots.
 
 Packaged themes are refreshed automatically when the release provides a newer
 QSS definition. Built-in dark and colored themes also apply matching Qt

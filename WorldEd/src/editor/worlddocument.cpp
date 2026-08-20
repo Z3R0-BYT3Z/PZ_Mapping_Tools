@@ -685,6 +685,8 @@ void WorldDocument::moveCell(WorldCell *cell, const QPoint &newPos)
 {
     WorldCell *dest = mWorld->cellAt(newPos);
     WorldCellContents *srcContents = new WorldCellContents(cell, false);
+    srcContents->translateInGameMapFeatures(
+                (newPos - cell->pos()) * mWorld->cellSize());
     undoStack()->beginMacro(tr("Move Cell"));
     undoStack()->push(new ReplaceCell(this, dest, srcContents));
     WorldCellContents *emptyContents = new WorldCellContents(cell);

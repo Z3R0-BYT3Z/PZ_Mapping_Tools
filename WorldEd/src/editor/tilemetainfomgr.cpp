@@ -132,15 +132,22 @@ void TileMetaInfoMgr::deleteInstance()
     mInstance = nullptr;
 }
 
-void TileMetaInfoMgr::changeTilesDirectory(const QString &path)
+bool TileMetaInfoMgr::changeTilesDirectory(const QString &path)
 {
-    Preferences::instance()->setTilesDirectory(path); // must be done before loading tilesets
+    Preferences *preferences = Preferences::instance();
+    const QString previousPath = preferences->tilesDirectory();
+    preferences->setTilesDirectory(path);
+    if (preferences->tilesDirectory() == previousPath) {
+        qInfo() << "Preferences kept the existing Tiles directory; tileset reload skipped";
+        return false;
+    }
     TilesetManager::instance()->tilesetDirectoryChanged();
     for (Tileset *ts : tilesets())
         ts->setLoaded(false);
     resolveTilesets();
     TilesetManager::instance()->waitForTilesets(
                 tilesets(), MainWindow::instance());
+    return true;
 }
 
 TileMetaInfoMgr::TileMetaInfoMgr(QObject *parent) :

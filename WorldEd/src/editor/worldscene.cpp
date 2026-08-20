@@ -623,8 +623,11 @@ QList<WorldBMP *> WorldScene::bmpsInRect(const QRectF &cellRect)
 
 void WorldScene::pasteCellsFromClipboard()
 {
+    if (mActiveTool == mPasteCellsTool) {
+        mPasteCellsTool->restart();
+        return;
+    }
     ToolManager::instance()->selectTool(mPasteCellsTool);
-    //    mActiveTool = mPasteCellsTool;
 }
 
 void WorldScene::cancelLoadingThumbnails()
@@ -1367,6 +1370,10 @@ void WorldScene::updateThumbnailProgress()
 
 void WorldScene::keyPressEvent(QKeyEvent *event)
 {
+    if (mActiveTool == mPasteCellsTool) {
+        mActiveTool->keyPressEvent(event);
+        return;
+    }
     QGraphicsScene::keyPressEvent(event);
     if (event->isAccepted())
         return;
@@ -1377,6 +1384,11 @@ void WorldScene::keyPressEvent(QKeyEvent *event)
 
 void WorldScene::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
+    if (mActiveTool == mPasteCellsTool) {
+        mActiveTool->setEventView(mEventView);
+        mActiveTool->mousePressEvent(event);
+        return;
+    }
     QGraphicsScene::mousePressEvent(event);
     if (event->isAccepted())
         return;
@@ -1390,6 +1402,11 @@ void WorldScene::mousePressEvent(QGraphicsSceneMouseEvent *event)
 
 void WorldScene::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 {
+    if (mActiveTool == mPasteCellsTool) {
+        mActiveTool->setEventView(mEventView);
+        mActiveTool->mouseMoveEvent(event);
+        return;
+    }
     QGraphicsScene::mouseMoveEvent(event);
     if (event->isAccepted())
         return;
@@ -1402,6 +1419,11 @@ void WorldScene::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 
 void WorldScene::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
 {
+    if (mActiveTool == mPasteCellsTool) {
+        mActiveTool->setEventView(mEventView);
+        mActiveTool->mouseReleaseEvent(event);
+        return;
+    }
     QGraphicsScene::mouseReleaseEvent(event);
     if (event->isAccepted())
         return;
@@ -1641,9 +1663,9 @@ void BaseCellItem::paint(QPainter *painter,
     painter->drawRect(mBoundingRect);
 #endif
 }
-void BaseCellItem::paintThumbnails(QPainter *painter)
+void BaseCellItem::paintThumbnails(QPainter *painter, bool force)
 {
-    if (Preferences::instance()->showWorldThumbnails()) {
+    if (force || Preferences::instance()->showWorldThumbnails()) {
         if (mLotImagesRenderOrder.size() != mLotImages.size())
             sortLotImages();
         int firstAboveGroundIndex = mLotImagesRenderOrder.size();
@@ -2098,12 +2120,20 @@ PasteCellItem::PasteCellItem(WorldCellContents *contents, WorldScene *scene, QGr
 
 void PasteCellItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
 {
-    BaseCellItem::paint(painter, option, widget);
+    Q_UNUSED(option)
+    Q_UNUSED(widget)
+    painter->save();
+    painter->setOpacity(0.72);
+    paintThumbnails(painter, true);
+    painter->restore();
 
-    QPen pen(Qt::blue);
-//    pen.setWidth(2);
+    QPen pen(mTargetOccupied ? QColor(255, 128, 32) : QColor(48, 220, 120));
+    pen.setWidth(3);
+    pen.setCosmetic(true);
     painter->setPen(pen);
-    painter->setBrush(QBrush(QColor(0x33,0x99,0xff,255/8)));
+    painter->setBrush(QBrush(mTargetOccupied
+                             ? QColor(255, 96, 32, 64)
+                             : QColor(48, 220, 120, 52)));
     QPolygonF poly = mScene->cellRectToPolygon(QRectF(cellPos(), QSize(1, 1))).translated(mDrawOffset);
     painter->drawPolygon(poly);
 }
@@ -2112,6 +2142,14 @@ void PasteCellItem::setDragOffset(const QPointF &offset)
 {
     mDrawOffset = offset;
     updateBoundingRect();
+}
+
+void PasteCellItem::setTargetOccupied(bool occupied)
+{
+    if (mTargetOccupied == occupied)
+        return;
+    mTargetOccupied = occupied;
+    update();
 }
 
 /////

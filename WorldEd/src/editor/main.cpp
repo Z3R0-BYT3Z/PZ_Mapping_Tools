@@ -41,6 +41,8 @@
 #include "otherworldsdialog.h"
 #include "cellscene.h"
 #include "defaultsfile.h"
+#include "expectedpropertiesdialog.h"
+#include "scenetools.h"
 #include "toolmanager.h"
 #include "preferences.h"
 #include "mapimagemanager.h"
@@ -58,6 +60,7 @@
 #include "InGameMap/ingamemapwriterbinary.h"
 #include "world.h"
 #include "worlddocument.h"
+#include "worldobjectvalidation.h"
 #include "worldscene.h"
 #include "worldview.h"
 #include "zlevelrenderer.h"
@@ -103,6 +106,7 @@ int main(int argc, char *argv[])
     QString validateInGameMapBuildingGeneration;
     QString validateWorldMapOverlays;
     bool validateTilesetCleanup = false;
+    bool validateCellMoveCoordinates = false;
     for (const QString &argument : commandLineArguments) {
         if (argument == QLatin1String(
                     "--validate-spawnpoint-export")) {
@@ -227,19 +231,8 @@ int main(int argc, char *argv[])
         }
         if (argument == QLatin1String(
                     "--validate-cell-move-coordinates")) {
-            QString summary;
-            QString error;
-            if (!MainWindow::validateCellMoveCoordinateData(
-                        &summary, &error)) {
-                qCritical().noquote()
-                        << "Cell move coordinate validation failed:"
-                        << error;
-                return 54;
-            }
-            qInfo().noquote()
-                    << "Cell move coordinate validation passed:"
-                    << summary;
-            return 0;
+            validateCellMoveCoordinates = true;
+            continue;
         }
         if (argument == QLatin1String(
                     "--validate-ingamemap-road-generation")) {
@@ -255,6 +248,17 @@ int main(int argc, char *argv[])
             qInfo().noquote()
                     << "InGameMap road-generation validation passed:"
                     << summary;
+            return 0;
+        }
+        if (argument == QLatin1String(
+                    "--validate-preferences-noop")) {
+            Preferences *preferences = Preferences::instance();
+            if (TileMetaInfoMgr::instance()->changeTilesDirectory(
+                        preferences->tilesDirectory())) {
+                qCritical() << "Preferences no-op validation failed: unchanged Tiles directory triggered a reload";
+                return 56;
+            }
+            qInfo() << "Preferences no-op validation passed: unchanged Tiles directory did not reload tilesets";
             return 0;
         }
         if (argument == QLatin1String(
@@ -355,12 +359,48 @@ int main(int argc, char *argv[])
                         << defaults.errorString();
                 return 25;
             }
+            for (const QString &typeName :
+                 WorldObjectValidation::expectedObjectTypes()) {
+                const QStringList propertyNames =
+                        WorldObjectValidation::expectedPropertyNames(typeName);
+                for (const QString &propertyName : propertyNames) {
+                    if (!defaults.mPropertyDefs.findPropertyDef(propertyName)) {
+                        qCritical().noquote()
+                                << "WorldDefaults.txt guided-property validation failed:"
+                                << typeName << "requires" << propertyName;
+                        return 25;
+                    }
+                }
+            }
+            QString guidedSummary;
+            QString guidedError;
+            if (!ExpectedPropertiesDialog::validate(
+                    path, &guidedSummary, &guidedError)) {
+                qCritical().noquote()
+                        << "WorldDefaults.txt guided-property dialog validation failed:"
+                        << guidedError;
+                return 25;
+            }
+            QString contextMenuError;
+            if (!SelectMoveObjectTool::validateContextMenuDispatch(
+                    &contextMenuError)) {
+                qCritical().noquote()
+                        << "WorldDefaults.txt object context-menu validation failed:"
+                        << contextMenuError;
+                return 25;
+            }
             qInfo() << "WorldDefaults.txt validation passed:"
                     << defaults.mEnums.size() << "enum(s),"
                     << defaults.mPropertyDefs.size() << "property definition(s),"
                     << defaults.mTemplates.size() << "template(s),"
                     << defaults.mObjectTypes.size() << "object type(s),"
-                    << defaults.mObjectGroups.size() << "object group(s)";
+                    << defaults.mObjectGroups.size() << "object group(s),"
+                    << WorldObjectValidation::expectedObjectTypes().size()
+                    << "guided property type(s)";
+            qInfo().noquote()
+                    << "Guided-property dialog validation passed:"
+                    << guidedSummary;
+            qInfo() << "Object context-menu dispatch validation passed";
             return 0;
         }
         if (argument == QLatin1String("--validate-tileset-cleanup")) {
@@ -661,9 +701,29 @@ int main(int argc, char *argv[])
             || !validateInGameMapBuildingGeneration.isEmpty()
             || !validateWorldMapOverlays.isEmpty()
             || !renderTilesetCleanupRoot.isEmpty()
-            || validateTilesetCleanup;
+            || validateTilesetCleanup
+            || validateCellMoveCoordinates;
     if (configuredCommand && !w.InitConfigFiles())
         return 0;
+
+    if (validateCellMoveCoordinates) {
+        QString dataSummary;
+        QString interactionSummary;
+        QString error;
+        if (!MainWindow::validateCellMoveCoordinateData(
+                    &dataSummary, &error)
+                || !w.validateCellPasteInteraction(
+                    &interactionSummary, &error)) {
+            qCritical().noquote()
+                    << "Cell move coordinate validation failed:"
+                    << error;
+            return 54;
+        }
+        qInfo().noquote()
+                << "Cell move coordinate validation passed:"
+                << dataSummary << interactionSummary;
+        return 0;
+    }
 
     if (validateTilesetCleanup) {
         QString summary;

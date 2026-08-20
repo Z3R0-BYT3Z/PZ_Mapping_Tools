@@ -94,7 +94,7 @@ MapManager::MapManager() :
     connect(&mChangedFilesTimer, &QTimer::timeout,
             this, &MapManager::fileChangedTimeout);
 
-    qRegisterMetaType<MapInfo*>("BuildingEditor::Building*");
+    qRegisterMetaType<BuildingEditor::Building*>("BuildingEditor::Building*");
     qRegisterMetaType<MapInfo*>("MapInfo*");
 
     const int mapReaderCount =

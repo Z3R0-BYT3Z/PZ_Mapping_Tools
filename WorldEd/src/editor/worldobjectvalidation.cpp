@@ -94,6 +94,75 @@ QString WorldObjectValidation::resolvedValue(WorldCellObject *object,
     return property ? property->mValue.trimmed() : QString();
 }
 
+QStringList WorldObjectValidation::expectedObjectTypes()
+{
+    return QStringList() << QLatin1String("SpawnPoint")
+                         << QLatin1String("ParkingStall")
+                         << QLatin1String("Vehicle")
+                         << QLatin1String("WaterFlow")
+                         << QLatin1String("WaterZone")
+                         << QLatin1String("RoomTone")
+                         << QLatin1String("Mannequin")
+                         << QLatin1String("Animal")
+                         << QLatin1String("Basement")
+                         << QLatin1String("WorldGen");
+}
+
+QStringList WorldObjectValidation::expectedPropertyNames(
+        const QString &typeName)
+{
+    if (typeName == QLatin1String("SpawnPoint"))
+        return QStringList() << QLatin1String("Professions");
+    if (typeName == QLatin1String("ParkingStall")
+            || typeName == QLatin1String("Vehicle")) {
+        return QStringList() << QLatin1String("Direction")
+                             << QLatin1String("FaceDirection");
+    }
+    if (typeName == QLatin1String("WaterFlow")) {
+        return QStringList() << QLatin1String("WaterDirection")
+                             << QLatin1String("WaterSpeed");
+    }
+    if (typeName == QLatin1String("WaterZone")) {
+        return QStringList() << QLatin1String("WaterGround")
+                             << QLatin1String("WaterShore");
+    }
+    if (typeName == QLatin1String("RoomTone")) {
+        return QStringList() << QLatin1String("RoomTone")
+                             << QLatin1String("EntireBuilding");
+    }
+    if (typeName == QLatin1String("Mannequin")) {
+        return QStringList() << QLatin1String("Female")
+                             << QLatin1String("Skin")
+                             << QLatin1String("Direction");
+    }
+    if (typeName == QLatin1String("Animal")) {
+        return QStringList() << QLatin1String("Action")
+                             << QLatin1String("AnimalType")
+                             << QLatin1String("SpawnAnimals");
+    }
+    if (typeName == QLatin1String("Basement")) {
+        return QStringList() << QLatin1String("Access")
+                             << QLatin1String("StairDirection")
+                             << QLatin1String("StairX")
+                             << QLatin1String("StairY");
+    }
+    if (typeName == QLatin1String("WorldGen"))
+        return QStringList() << QLatin1String("Rocks");
+    return QStringList();
+}
+
+QStringList WorldObjectValidation::expectedPropertyNames(
+        WorldCellObject *object)
+{
+    return expectedPropertyNames(typeName(object));
+}
+
+bool WorldObjectValidation::supportsBasementAccess(
+        WorldCellObject *object)
+{
+    return typeName(object) == QLatin1String("Basement");
+}
+
 void WorldObjectValidation::applyCreationDefaults(WorldCellObject *object)
 {
     if (!object || !object->cell())

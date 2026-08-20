@@ -70,6 +70,7 @@
 #include "tmxtobmp.h"
 #include "tmxtobmpdialog.h"
 #include "toolmanager.h"
+#include "undoredo.h"
 #include "undodock.h"
 #include "world.h"
 #include "worlddocument.h"
@@ -120,6 +121,7 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QColorDialog>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QComboBox>
 #include <QDebug>
@@ -127,6 +129,7 @@
 #include <QFileDialog>
 #include <QFile>
 #include <QFileInfo>
+#include <QGraphicsSceneMouseEvent>
 #include <QMessageBox>
 #include <QLabel>
 #include <QHBoxLayout>
@@ -3472,10 +3475,340 @@ bool MainWindow::validateCellMoveCoordinateData(
         return false;
     }
 
+    QString pasteSummary;
+    if (!PasteCellsTool::validateCellPastePlacement(&pasteSummary, error))
+        return false;
+
+    World *world = new World(4, 4, WorldGridFormat::Native256);
+    PropertyDef *propertyDefinition = new PropertyDef(
+                QStringLiteral("ValidationProperty"), QString(), QString(),
+                nullptr);
+    world->addPropertyDefinition(0, propertyDefinition);
+    PropertyTemplate *propertyTemplate = new PropertyTemplate;
+    propertyTemplate->mName = QStringLiteral("ValidationTemplate");
+    world->addPropertyTemplate(0, propertyTemplate);
+    ObjectType *objectType = new ObjectType(QStringLiteral("ValidationType"));
+    world->insertObjectType(0, objectType);
+    WorldObjectGroup *objectGroup = new WorldObjectGroup(
+                world, QStringLiteral("ValidationGroup"), Qt::red);
+    world->insertObjectGroup(0, objectGroup);
+
+    WorldCell *cell = world->cellAt(1, 2);
+    cell->setMapFilePath(QStringLiteral("validation.tmx"));
+    cell->addTemplate(0, propertyTemplate);
+    Property *cellProperty = new Property(propertyDefinition,
+                                          QStringLiteral("cell-value"));
+    cellProperty->mNote = QStringLiteral("cell-note");
+    cell->addProperty(0, cellProperty);
+    cell->addLot(QStringLiteral("validation.tbx"), 5, 6, -1, 7, 8);
+
+    WorldCellObject *object = new WorldCellObject(
+                cell, QStringLiteral("ValidationObject"), objectType,
+                objectGroup, 11.5, 12.5, 3, 13.5, 14.5);
+    object->setGeometryType(ObjectGeometryType::Polyline);
+    WorldCellObjectPoints points;
+    points << WorldCellObjectPoint{1, 2}
+           << WorldCellObjectPoint{17, 19};
+    object->setPoints(points);
+    object->setPolylineWidth(9);
+    object->setVisible(false);
+    object->addTemplate(0, propertyTemplate);
+    Property *objectProperty = new Property(propertyDefinition,
+                                            QStringLiteral("object-value"));
+    objectProperty->mNote = QStringLiteral("object-note");
+    object->addProperty(0, objectProperty);
+    cell->insertObject(0, object);
+
+    InGameMapFeature *feature = new InGameMapFeature(&cell->inGameMap());
+    feature->mGeometry.mType = QStringLiteral("LineString");
+    InGameMapCoordinates featureCoordinates;
+    featureCoordinates << InGameMapPoint(260.0, 520.0)
+                       << InGameMapPoint(270.0, 530.0);
+    feature->mGeometry.mCoordinates << featureCoordinates;
+    feature->mProperties << InGameMapProperty(
+                                QStringLiteral("highway"),
+                                QStringLiteral("primary"));
+    cell->inGameMap().features().append(feature);
+
+    WorldDocument document(world);
+    const QPoint targetPosition(3, 1);
+    document.moveCell(cell, targetPosition);
+    WorldCell *target = world->cellAt(targetPosition);
+    const QPoint featureOffset = (targetPosition - QPoint(1, 2)) * cellSize;
+
+    auto verifyCell = [&](WorldCell *candidate,
+                          const QPoint &expectedFeatureOffset) {
+        if (!candidate
+                || candidate->mapFilePath() != QStringLiteral("validation.tmx")
+                || candidate->templates().size() != 1
+                || candidate->templates().first()->mName
+                   != QStringLiteral("ValidationTemplate")
+                || candidate->properties().size() != 1
+                || candidate->properties().first()->mValue
+                   != QStringLiteral("cell-value")
+                || candidate->properties().first()->mNote
+                   != QStringLiteral("cell-note")
+                || candidate->lots().size() != 1
+                || candidate->lots().first()->mapName()
+                   != QStringLiteral("validation.tbx")
+                || candidate->objects().size() != 1
+                || candidate->inGameMap().features().isEmpty())
+            return false;
+        WorldCellObject *candidateObject = candidate->objects().first();
+        if (candidateObject->name() != QStringLiteral("ValidationObject")
+                || candidateObject->geometryType()
+                   != ObjectGeometryType::Polyline
+                || candidateObject->points() != points
+                || candidateObject->polylineWidth() != 9
+                || candidateObject->isVisible()
+                || candidateObject->templates().size() != 1
+                || candidateObject->properties().size() != 1
+                || candidateObject->properties().first()->mValue
+                   != QStringLiteral("object-value")
+                || candidateObject->properties().first()->mNote
+                   != QStringLiteral("object-note"))
+            return false;
+        InGameMapFeature *primaryFeature = nullptr;
+        for (InGameMapFeature *candidateFeature :
+             candidate->inGameMap().features()) {
+            if (candidateFeature->mProperties.contains(
+                        QStringLiteral("highway"),
+                        QStringLiteral("primary"))) {
+                primaryFeature = candidateFeature;
+                break;
+            }
+        }
+        if (!primaryFeature || primaryFeature->mGeometry.mCoordinates.isEmpty())
+            return false;
+        const InGameMapCoordinates &candidateCoordinates =
+                primaryFeature->mGeometry.mCoordinates.first();
+        return candidateCoordinates.size() == 2
+                && candidateCoordinates.first().x
+                   == featureCoordinates.first().x
+                      + expectedFeatureOffset.x()
+                && candidateCoordinates.first().y
+                   == featureCoordinates.first().y
+                      + expectedFeatureOffset.y()
+                && candidateCoordinates.last().x
+                   == featureCoordinates.last().x
+                      + expectedFeatureOffset.x()
+                && candidateCoordinates.last().y
+                   == featureCoordinates.last().y
+                      + expectedFeatureOffset.y();
+    };
+
+    if (!cell->isEmpty() || !verifyCell(target, featureOffset)) {
+        if (error)
+            *error = tr("Moving a cell did not preserve its complete contents.");
+        return false;
+    }
+    document.undoStack()->undo();
+    if (!target->isEmpty() || !verifyCell(cell, QPoint())) {
+        if (error)
+            *error = tr("Undo did not restore the complete source cell.");
+        return false;
+    }
+    document.undoStack()->redo();
+    if (!cell->isEmpty() || !verifyCell(target, featureOffset)) {
+        if (error)
+            *error = tr("Redo did not restore the complete destination cell.");
+        return false;
+    }
+
+    document.setSelectedCells(QList<WorldCell*>() << target);
+    World *clipboardWorld = nullptr;
+    {
+        CopyPasteDialog dialog(&document);
+        clipboardWorld = dialog.toWorld();
+    }
+    WorldCell *clipboardCell = clipboardWorld
+            ? clipboardWorld->cellAt(targetPosition) : nullptr;
+    if (!clipboardWorld
+            || clipboardWorld->gridFormat() != WorldGridFormat::Native256
+            || !verifyCell(clipboardCell, featureOffset)) {
+        delete clipboardWorld;
+        if (error)
+            *error = tr("Copy omitted part of the selected cell contents.");
+        return false;
+    }
+
+    WorldCell *pasteTarget = world->cellAt(0, 0);
+    InGameMapFeature *retainedFeature = new InGameMapFeature(
+                &pasteTarget->inGameMap());
+    retainedFeature->mGeometry.mType = QStringLiteral("Point");
+    InGameMapCoordinates retainedCoordinates;
+    retainedCoordinates << InGameMapPoint(4.0, 5.0);
+    retainedFeature->mGeometry.mCoordinates << retainedCoordinates;
+    retainedFeature->mProperties << InGameMapProperty(
+                                      QStringLiteral("validation"),
+                                      QStringLiteral("retained"));
+    pasteTarget->inGameMap().features().append(retainedFeature);
+
+    WorldCellContents clipboardContents(clipboardCell, false);
+    WorldCellContents *pasteContents = new WorldCellContents(
+                &clipboardContents, pasteTarget);
+    pasteContents->swapWorld(world);
+    pasteContents->mergeOnto(pasteTarget);
+    document.undoStack()->push(new ReplaceCell(
+                                   &document, pasteTarget, pasteContents));
+    delete clipboardWorld;
+
+    auto hasRetainedFeature = [](WorldCell *candidate) {
+        for (InGameMapFeature *candidateFeature :
+             candidate->inGameMap().features()) {
+            if (candidateFeature->mProperties.contains(
+                        QStringLiteral("validation"),
+                        QStringLiteral("retained")))
+                return true;
+        }
+        return false;
+    };
+    const QPoint pastedFeatureOffset = QPoint(-1, -2) * cellSize;
+    if (!verifyCell(pasteTarget, pastedFeatureOffset)
+            || pasteTarget->inGameMap().features().size() != 2
+            || !hasRetainedFeature(pasteTarget)) {
+        if (error)
+            *error = tr("Paste omitted copied data or replaced destination data.");
+        return false;
+    }
+    document.undoStack()->undo();
+    if (pasteTarget->inGameMap().features().size() != 1
+            || !hasRetainedFeature(pasteTarget)) {
+        if (error)
+            *error = tr("Undo did not restore the pre-paste destination cell.");
+        return false;
+    }
+    document.undoStack()->redo();
+    if (!verifyCell(pasteTarget, pastedFeatureOffset)
+            || pasteTarget->inGameMap().features().size() != 2
+            || !hasRetainedFeature(pasteTarget)) {
+        if (error)
+            *error = tr("Redo did not restore the complete pasted cell.");
+        return false;
+    }
+
     if (summary) {
         *summary = tr("Native 256 street points, region anchors and local "
-                      "road coordinates follow their source cells.");
+                      "road coordinates follow their source cells. Cell "
+                      "properties, templates, lots, objects and InGameMap "
+                      "features survive Move, Copy, Paste, Undo and Redo, "
+                      "including existing destination features. %1.")
+                .arg(pasteSummary);
     }
+    return true;
+}
+
+bool MainWindow::validateCellPasteInteraction(
+        QString *summary, QString *error)
+{
+    if (docman()->documentCount() != 0) {
+        if (error)
+            *error = tr("The interaction validator requires an empty document list.");
+        return false;
+    }
+
+    QTemporaryDir temporaryDirectory;
+    if (!temporaryDirectory.isValid()) {
+        if (error)
+            *error = tr("The interaction validator could not create its temporary directory.");
+        return false;
+    }
+    World *world = new World(5, 5, WorldGridFormat::Native256);
+    DefaultsFile::newWorld(world);
+    WorldDocument *document = new WorldDocument(
+                world, temporaryDirectory.filePath(
+                    QStringLiteral("cell-paste-interaction.pzw")));
+    docman()->addDocument(document);
+    WorldScene *scene = document->view()
+            ? document->view()->scene()->asWorldScene() : nullptr;
+
+    auto finish = [this, document]() {
+        ToolManager::instance()->selectTool(WorldCellTool::instance());
+        Clipboard::instance()->setWorld(nullptr);
+        if (docman()->documents().contains(document))
+            docman()->closeDocument(document);
+    };
+
+    if (!scene) {
+        finish();
+        if (error)
+            *error = tr("WorldEd did not create the world scene used for paste.");
+        return false;
+    }
+
+    const QPoint initialTarget(1, 1);
+    const QPoint clickedTarget(3, 2);
+    document->setSelectedCells(
+                QList<WorldCell*>() << world->cellAt(initialTarget));
+
+    World *clipboardWorld = new World(
+                1, 1, WorldGridFormat::Native256);
+    DefaultsFile::newWorld(clipboardWorld);
+    clipboardWorld->cellAt(0, 0)->setMapFilePath(
+                QStringLiteral("clipboard-interaction.tmx"));
+    Clipboard::instance()->setWorld(clipboardWorld);
+
+    scene->pasteCellsFromClipboard();
+    QCoreApplication::processEvents();
+
+    int previewCount = 0;
+    for (QGraphicsItem *item : scene->items()) {
+        if (dynamic_cast<PasteCellItem*>(item))
+            ++previewCount;
+    }
+    if (ToolManager::instance()->selectedTool() != PasteCellsTool::instance()
+            || previewCount != 1) {
+        finish();
+        if (error)
+            *error = tr("Ctrl+V did not enter one visible cell-paste preview.");
+        return false;
+    }
+
+    QGraphicsSceneMouseEvent moveEvent(QEvent::GraphicsSceneMouseMove);
+    moveEvent.setScenePos(scene->cellToPixelCoords(
+                              clickedTarget.x() + 0.5,
+                              clickedTarget.y() + 0.5));
+    QCoreApplication::sendEvent(scene, &moveEvent);
+
+    QGraphicsSceneMouseEvent pressEvent(QEvent::GraphicsSceneMousePress);
+    pressEvent.setButton(Qt::LeftButton);
+    pressEvent.setButtons(Qt::LeftButton);
+    pressEvent.setScenePos(moveEvent.scenePos());
+    QCoreApplication::sendEvent(scene, &pressEvent);
+    QCoreApplication::processEvents();
+
+    const int commandCount = document->undoStack()->count();
+    if (world->cellAt(clickedTarget)->mapFilePath()
+            != QStringLiteral("clipboard-interaction.tmx")
+            || !world->cellAt(initialTarget)->isEmpty()
+            || ToolManager::instance()->selectedTool()
+               != WorldCellTool::instance()
+            || commandCount != 1) {
+        finish();
+        if (error)
+            *error = tr("The first click did not paste once into the cell under the pointer.");
+        return false;
+    }
+
+    QGraphicsSceneMouseEvent secondPressEvent(
+                QEvent::GraphicsSceneMousePress);
+    secondPressEvent.setButton(Qt::LeftButton);
+    secondPressEvent.setButtons(Qt::LeftButton);
+    secondPressEvent.setScenePos(scene->cellToPixelCoords(4.5, 4.5));
+    QCoreApplication::sendEvent(scene, &secondPressEvent);
+    QCoreApplication::processEvents();
+
+    if (!world->cellAt(4, 4)->isEmpty()
+            || document->undoStack()->count() != commandCount) {
+        finish();
+        if (error)
+            *error = tr("Cell paste remained active after the confirmed placement.");
+        return false;
+    }
+
+    finish();
+    if (summary)
+        *summary = tr("visible preview, pointer target, single placement and automatic exit verified");
     return true;
 }
 

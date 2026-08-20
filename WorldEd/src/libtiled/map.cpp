@@ -119,7 +119,7 @@ MapLevel *Map::takeMapLevel(int level)
     for (int i = 0; i < mapLevels().size(); i++) {
         MapLevel *mapLevel = mapLevels().at(i);
         if (mapLevel->level() == level) {
-            return mLevels.takeAt(level);
+            return mLevels.takeAt(i);
         }
     }
     return nullptr;
@@ -165,6 +165,8 @@ int Map::layerCount(Layer::Type type) const
 
 Layer *Map::layerAt(int index) const
 {
+    if (index < 0)
+        return nullptr;
     int count = 0;
     for (MapLevel *mapLevel : mapLevels()) {
         if (count + mapLevel->layerCount() > index) {
@@ -213,6 +215,8 @@ QList<TileLayer*> Map::tileLayers() const
 
 void Map::addLayer(Layer *layer)
 {
+    if (layer == nullptr)
+        return;
     MapLevel *mapLevel = mapLevelForZ(layer->level());
     if (mapLevel == nullptr) {
         mapLevel = new MapLevel(this, layer->level());
@@ -297,7 +301,8 @@ Layer *Map::takeLayerAt(int index)
 
 void Map::addTileset(Tileset *tileset)
 {
-    mTilesets.append(tileset);
+    if (tileset != nullptr)
+        mTilesets.append(tileset);
 }
 
 void Map::insertTileset(int index, Tileset *tileset)

@@ -292,6 +292,7 @@ class SelectMoveObjectTool : public BaseCellSceneTool
 public:
     static SelectMoveObjectTool *instance();
     static void deleteInstance();
+    static bool validateContextMenuDispatch(QString *error);
 
     void deactivate() override;
 
@@ -1007,8 +1008,11 @@ public:
     explicit PasteCellsTool();
     ~PasteCellsTool();
 
+    static bool validateCellPastePlacement(QString *summary, QString *error);
+
     void activate();
     void deactivate();
+    void restart();
 
     void keyPressEvent(QKeyEvent *event);
     void mousePressEvent(QGraphicsSceneMouseEvent *event);
@@ -1028,12 +1032,24 @@ public slots:
 
 private:
     void startMoving();
-    void updateMovingItems(const QPointF &pos, Qt::KeyboardModifiers modifiers);
-    void pasteCells(const QPointF &pos);
+    bool updateDropPosition(const QPointF &pos);
+    bool confirmOccupiedTargets() const;
+    bool pasteCells();
     void cancelMoving();
+    static QPoint topLeftCell(const QVector<QPoint> &cellPositions,
+                              const QPoint &fallback);
+    static QPoint boundedDropCell(const QVector<QPoint> &cellPositions,
+                                  const QPoint &sourceCell,
+                                  const QPoint &requestedDrop,
+                                  const QRect &worldBounds);
+    static QPoint pastedCellPosition(const QPoint &cellPosition,
+                                     const QPoint &sourceCell,
+                                     const QPoint &dropCell);
 
+    QPoint mSourceCellPos;
     QPointF mStartScenePos;
     QPoint mDropTilePos;
+    QVector<QPoint> mSourceCellPositions;
     QList<PasteCellItem*> mDnDItems;
     static PasteCellsTool *mInstance;
 };

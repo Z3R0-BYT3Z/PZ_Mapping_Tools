@@ -235,6 +235,21 @@ void WorldCellContents::swapWorld(World *world)
 
         ObjectType *ot = world->objectTypes().find(obj->type()->name());
         obj->setType(ot ? ot : world->nullObjectType());
+
+        for (Property *p : obj->properties()) {
+            PropertyDef *pd = world->propertyDefinitions().findPropertyDef(
+                        p->mDefinition->mName);
+            Q_ASSERT(pd);
+            p->mDefinition = pd;
+        }
+        PropertyTemplateList templates;
+        for (PropertyTemplate *source : obj->templates()) {
+            PropertyTemplate *target = world->propertyTemplates().find(
+                        source->mName);
+            Q_ASSERT(target);
+            templates += target;
+        }
+        obj->setTemplates(templates);
     }
 }
 
@@ -261,6 +276,7 @@ void WorldCellContents::mergeOnto(WorldCell *cell)
         WorldCellObject *obj = new WorldCellObject(cell, objCell);
         mObjects.insert(index++, obj);
     }
+    cloneInGameMapFeatures(cell->inGameMap().features(), cell);
     if (mMapFilePath.isEmpty())
         mMapFilePath = cell->mapFilePath();
 }
