@@ -157,6 +157,7 @@ bool BuildingTilesetDock::validateTilesetCatalog(QString *errorString)
                 .arg(ui->tilesets->count()).arg(catalogCount);
         return false;
     }
+
     int validationRow = -1;
     int fallbackValidationRow = -1;
     QStringList failures;
@@ -171,16 +172,25 @@ bool BuildingTilesetDock::validateTilesetCatalog(QString *errorString)
             continue;
         if (fallbackValidationRow < 0)
             fallbackValidationRow = row;
+        // Prefer a metadata-only sheet so this test exercises Tile mode's
+        // lazy decode path instead of merely selecting an image already used
+        // by the object or building-template validation.
         if (validationRow < 0 && !candidate->isLoaded())
             validationRow = row;
         if (candidate->tileCount() <= 0) {
             failures += tr("%1 contains no tiles.").arg(candidate->name());
             continue;
         }
+        // Unselected catalog sheets intentionally remain metadata-only.
+        // Validate decoded tile storage only for sheets that were requested
+        // by the current building, object catalogs or Tile mode.
         if (candidate->isLoaded()) {
             for (int tileIndex = 0;
                  tileIndex < candidate->tileCount(); ++tileIndex) {
                 Tile *tile = candidate->tileAt(tileIndex);
+                // A fully-transparent sprite is represented by a null cropped
+                // QImage while retaining its original dimensions. This is
+                // valid for effects sheets such as Fire, Smoke and Rain.
                 if (!tile || tile->width() <= 0 || tile->height() <= 0) {
                     failures += tr("%1 has invalid storage for tile %2.")
                             .arg(candidate->name()).arg(tileIndex);
@@ -200,6 +210,7 @@ bool BuildingTilesetDock::validateTilesetCatalog(QString *errorString)
         *errorString = tr("No available tileset image was found in the catalog.");
         return false;
     }
+
     Tileset *validationTileset =
             TileMetaInfoMgr::instance()->tileset(validationRow);
     const bool validatesLazyLoad =
@@ -210,7 +221,9 @@ bool BuildingTilesetDock::validateTilesetCatalog(QString *errorString)
         *errorString = tr("Tile mode could not select a tileset.");
         return false;
     }
+
     setTilesList();
+
     if (mCurrentTileset->isMissing()) {
         *errorString = tr("The selected tileset image is missing: %1")
                 .arg(mCurrentTileset->name());
@@ -231,8 +244,10 @@ bool BuildingTilesetDock::validateTilesetCatalog(QString *errorString)
                 << "BuildingEd Tile mode lazy-load validation: PASS -"
                 << mCurrentTileset->name();
     }
+
     return true;
 }
+
 void BuildingTilesetDock::writeSettings(QSettings &settings)
 {
 #ifndef TILESET_LIST_FIXED_WIDTH
@@ -243,6 +258,8 @@ void BuildingTilesetDock::writeSettings(QSettings &settings)
         v += size;
         totalSize += size;
     }
+    // An inactive edit mode has no usable geometry and may report 0,0.
+    // Preserve the last valid splitter position in that case.
     if (mSplitter->isVisible() && totalSize > 0)
         settings.setValue(tr("%1/sizes").arg(mSplitter->objectName()), v);
     settings.endGroup();
@@ -428,6 +445,9 @@ void BuildingTilesetDock::currentTilesetChanged(int row)
         mCurrentTileset = TileMetaInfoMgr::instance()->tileset(row);
         if (mCurrentTileset && !mCurrentTileset->isLoaded() &&
                 !mCurrentTileset->isMissing()) {
+            // Decode only the selected sheet. The list itself is backed by
+            // catalog metadata, so BuildingEd does not need to preload every
+            // tileset merely to make Tile mode complete.
             TileMetaInfoMgr::instance()->loadTilesets(
                         QList<Tileset *>() << mCurrentTileset, false);
         }
@@ -493,6 +513,7 @@ void BuildingTilesetDock::tilesetDiscoveryFinished()
             ui->tilesets->setCurrentRow(row);
     }
 }
+
 void BuildingTilesetDock::tilesetAboutToBeRemoved(Tileset *tileset)
 {
     int row = TileMetaInfoMgr::instance()->indexOf(tileset);

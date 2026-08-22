@@ -89,7 +89,6 @@ class ZLevelsDock;
 class MapsDock;
 class TileDefDialog;
 class TileLayersPanel;
-class TileSelectionScope;
 class WorldEdDock;
 #endif
 
@@ -344,7 +343,6 @@ private:
     TilesetDock *mTilesetDock;
 #ifdef ZOMBOID
     TileLayersPanel *mTileLayersPanel;
-    TileSelectionScope *mTileSelectionScope = nullptr;
     QSplitter *mMainSplitter;
     QMenu *mCurrentLevelMenu;
     QToolButton *mCurrentLevelButton;
@@ -394,6 +392,7 @@ private:
     QAction *mRedoAction = nullptr;
     QAction *mBMPBrushSizeMinus = nullptr;
     QAction *mBMPBrushSizePlus = nullptr;
+    QAction *mNightPreviewAction = nullptr;
     QAction *mDepthMapEditorAction = nullptr;
     QMenu *mPartialChunksMenu = nullptr;
     QToolBar *mPartialChunksToolBar = nullptr;

@@ -246,11 +246,11 @@
   application are retained. Lines contain severity, PID, thread ID and an
   optional worker name. They record selected paths, tileset loading, missing
   images, Building catalogs, Automapper diagnostics, WorldGen/loot loading,
-  biomemap warnings, geometry repairs, and caught crashes.</p>
+  biomemap warnings, geometry repairs, validators, and caught crashes.</p>
   <p>Only the exact non-fatal libpng incorrect-sRGB-profile warning is omitted;
   other PNG warnings and errors remain visible. See
-  <a href="../Diagnostics-and-Logs.md">Logs and useful issue reports</a> for
-  interpretation and a report checklist.</p>
+  <a href="../Diagnostics-and-Logs.md">Logs, diagnostics, and useful issue
+  reports</a> for interpretation, validator commands, and a report checklist.</p>
 
   <h3>Changing shared paths</h3>
   <p>The initial setup assistant stores the catalog and extracted game Tiles
@@ -888,10 +888,10 @@
   <div class="success">
     When reporting a problem, include the application name, project grid format,
     exact menu action, affected cell/TMX path and the matching portable log
-    lines. For the complete checklist, use
-    <a href="../Diagnostics-and-Logs.md">Logs and useful issue reports</a>.
-    That is usually enough to identify whether the problem comes from source
-    data or the editor.
+    lines. For the complete checklist and regression commands, use
+    <a href="../Diagnostics-and-Logs.md">Logs, diagnostics, and useful issue
+    reports</a>. That is usually enough to distinguish bad source data from an
+    editor regression.
   </div>
 </body>
 </html>

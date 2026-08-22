@@ -69,7 +69,7 @@
      </column>
      <column>
       <property name="text">
-       <string>Texture</string>
+       <string>Texture and preview</string>
       </property>
      </column>
      <column>
@@ -97,6 +97,11 @@
        <string>Packed rectangle</string>
       </property>
      </column>
+     <column>
+      <property name="text">
+       <string>Pixel SHA-256</string>
+      </property>
+     </column>
     </widget>
    </item>
    <item>
@@ -112,43 +117,6 @@
       <widget class="QPushButton" name="clearVisibleButton">
        <property name="text">
         <string>Clear visible</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QLabel" name="allExportsLabel">
-       <property name="text">
-        <string>Prepare complete export:</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="allTilesButton">
-       <property name="toolTip">
-        <string>Clear the filter, select every texture, and prepare one unique PNG per tile. No prefix or name is required.</string>
-       </property>
-       <property name="text">
-        <string>All tiles</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="allTilesetsButton">
-       <property name="toolTip">
-        <string>Clear the filter, select every texture, and prepare every reconstructable tileset sheet. No prefix or tileset name is required.</string>
-       </property>
-       <property name="text">
-        <string>All tilesets</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="allObjectsButton">
-       <property name="toolTip">
-        <string>Clear the filter, select every texture, and prepare complete multi-tile furniture objects described by BuildingFurniture.txt.</string>
-       </property>
-       <property name="text">
-        <string>All objects</string>
        </property>
       </widget>
      </item>
@@ -191,16 +159,6 @@
        </widget>
       </item>
       <item row="0" column="2">
-       <widget class="QRadioButton" name="radioObjects">
-        <property name="text">
-         <string>Assembled multi-tile objects</string>
-        </property>
-        <property name="toolTip">
-         <string>Uses BuildingFurniture.txt to compose complete beds, sofas, tables, and other multi-square furniture. Incomplete definitions are reported and skipped.</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="3">
        <widget class="QRadioButton" name="radioPages">
         <property name="text">
          <string>Complete matching atlas pages</string>
@@ -217,7 +175,7 @@
       <item row="1" column="1">
        <widget class="QComboBox" name="geometryCombo"/>
       </item>
-      <item row="1" column="2" colspan="2">
+      <item row="1" column="2">
        <layout class="QHBoxLayout" name="customGeometryLayout">
         <item>
          <widget class="QSpinBox" name="cellWidthSpin">
@@ -279,7 +237,7 @@
       <item row="2" column="1">
        <widget class="QComboBox" name="outputLayoutCombo"/>
       </item>
-      <item row="2" column="2" colspan="2">
+      <item row="2" column="2">
        <layout class="QHBoxLayout" name="conflictLayout">
         <item>
          <widget class="QComboBox" name="conflictCombo"/>
@@ -295,26 +253,6 @@
          </widget>
         </item>
        </layout>
-      </item>
-      <item row="3" column="0" colspan="4">
-       <widget class="QCheckBox" name="excludeObjectTilesCheck">
-        <property name="toolTip">
-         <string>Individual export only. Skip every tile referenced by a multi-tile object in BuildingFurniture.txt. This is useful after exporting complete assembled objects.</string>
-        </property>
-        <property name="text">
-         <string>Exclude tiles that belong to multi-tile objects</string>
-        </property>
-       </widget>
-      </item>
-      <item row="4" column="0" colspan="4">
-       <widget class="QCheckBox" name="orphanPixelsCheck">
-        <property name="toolTip">
-         <string>Optional, non-destructive output cleanup inspired by TileSetZ. Removes alpha values 1 to 4 and visible pixels with no more than two visible neighbors. The source pack is never changed. Disabled for complete atlas-page export.</string>
-        </property>
-        <property name="text">
-         <string>Remove orphan pixels from reconstructed output</string>
-        </property>
-       </widget>
       </item>
      </layout>
     </widget>

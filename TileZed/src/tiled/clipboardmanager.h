@@ -32,7 +32,6 @@ class Map;
 namespace Internal {
 
 class MapDocument;
-class TileSelectionScope;
 
 /**
  * The clipboard manager deals with interaction with the clipboard.

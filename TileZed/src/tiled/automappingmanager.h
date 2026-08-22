@@ -54,6 +54,7 @@ struct AutomappingRuleInfo
     int radius = 0;
     bool noOverlappingRules = false;
 };
+
 /**
  * This class is a superior class to the AutoMapper and AutoMapperWrapper class.
  * It uses these classes to do the whole automapping process.
@@ -89,10 +90,14 @@ public:
     QVector<AutomappingRuleInfo> ruleInfos() const { return mRuleInfos; }
     bool hasMapDocument() const { return mMapDocument != nullptr; }
     bool isLoaded() const { return mLoaded; }
+
     bool reloadRules();
+
     QString worldEdRulesFilePath() const;
+
     static bool runRuleListSelfTest(QString *summary,
                                     QString *errorString);
+
 signals:
     /**
      * This signal is emited after automapping was done and an error occurred.
@@ -104,7 +109,9 @@ signals:
      */
     void warningsOccurred();
 
+    /** Emitted whenever the active document or loaded rule list changes. */
     void rulesChanged();
+
 public slots:
     void autoMap(QRegion where, Tiled::Layer *touchedLayer);
     void autoMapObjects(const QList<Tiled::MapObject*> &objects);
@@ -134,6 +141,7 @@ private:
     bool loadFile(const QString &filePath);
 
     bool loadRules();
+
     /**
      * Applies automapping to the Region \a where, considering only layer
      * \a touchedLayer has changed.

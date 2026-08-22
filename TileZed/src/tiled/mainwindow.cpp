@@ -57,7 +57,6 @@
 #include "newmapdialog.h"
 #include "newtilesetdialog.h"
 #include "pluginmanager.h"
-#include "painttilelayer.h"
 #include "propertiesdialog.h"
 #include "rearrangetiles.h"
 #include "resizedialog.h"
@@ -73,7 +72,6 @@
 #include "tile.h"
 #include "tilelayer.h"
 #include "tileselectiontool.h"
-#include "tileselectionscope.h"
 #include "tileset.h"
 #include "tilesetdock.h"
 #include "tilesetmanager.h"
@@ -86,7 +84,6 @@
 #include "zoomable.h"
 #include "commandbutton.h"
 #include "objectsdock.h"
-#include "../portablesettings.h"
 #ifdef ZOMBOID
 #include "bmpclipboard.h"
 #include "bmptool.h"
@@ -179,6 +176,7 @@ using namespace BuildingEditor;
 
 #ifdef ZOMBOID
 extern bool gStartupBlockRendering;
+
 static QString splitterSettingsKey(const QObject *root,
                                    const QSplitter *splitter)
 {
@@ -191,6 +189,7 @@ static QString splitterSettingsKey(const QObject *root,
     }
     return parts.join(QLatin1Char('.'));
 }
+
 static void saveSplitterStates(QWidget *root, QSettings &settings)
 {
     settings.beginGroup(QLatin1String("Splitters"));
@@ -199,11 +198,14 @@ static void saveSplitterStates(QWidget *root, QSettings &settings)
         int totalSize = 0;
         for (int size : splitter->sizes())
             totalSize += size;
+        // Hidden pages can report every pane as zero. Never replace the last
+        // usable state with that transient, non-layout value.
         if (!key.isEmpty() && splitter->isVisible() && totalSize > 0)
             settings.setValue(key, splitter->saveState());
     }
     settings.endGroup();
 }
+
 static void restoreSplitterStates(QWidget *root, QSettings &settings)
 {
     QList<QPair<QSplitter*, QByteArray>> states;
@@ -217,20 +219,29 @@ static void restoreSplitterStates(QWidget *root, QSettings &settings)
         }
     }
     settings.endGroup();
+
     QTimer::singleShot(0, root, [states]() {
         for (const auto &entry : states)
             entry.first->restoreState(entry.second);
     });
 }
+
 static QDockWidget *visibleDockInTabGroup(QMainWindow *window,
                                          QDockWidget *reference)
 {
     QList<QDockWidget*> group = window->tabifiedDockWidgets(reference);
     group.prepend(reference);
+
+    // isVisible() remains true for covered tabs. Only the selected tab has a
+    // visible region and therefore a current geometry.
     for (QDockWidget *dock : group) {
         if (!dock->isFloating() && !dock->visibleRegion().isEmpty())
             return dock;
     }
+
+    // visibleRegion() may still be empty during the first layout pass.
+    // Prefer the largest usable cached geometry rather than the arbitrary
+    // reference dock.
     QDockWidget *largestDock = nullptr;
     int largestArea = -1;
     for (QDockWidget *dock : group) {
@@ -244,8 +255,10 @@ static QDockWidget *visibleDockInTabGroup(QMainWindow *window,
     }
     if (largestDock)
         return largestDock;
+
     return reference;
 }
+
 MainWindow *MainWindow::mInstance = nullptr;
 #endif
 
@@ -265,7 +278,6 @@ MainWindow::MainWindow(QWidget *parent, Qt::WindowFlags flags)
     , mTilesetDock(new TilesetDock(this))
 #ifdef ZOMBOID
     , mTileLayersPanel(new TileLayersPanel())
-    , mTileSelectionScope(new TileSelectionScope(tr("Level"), this))
     , mMainSplitter(new QSplitter(this))
     , mCurrentLevelMenu(new QMenu(this))
     , mCurrentLevelButton(new QToolButton(this))
@@ -705,6 +717,7 @@ MainWindow::MainWindow(QWidget *parent, Qt::WindowFlags flags)
     mDepthMapEditorAction->setToolTip(
                 tr("Edit Build 42 tileGeometry.txt primitives and "
                    "DEPTH_<tileset>.png atlases"));
+
     initActionManager();
     QString CONTEXT_TOOL = QStringLiteral("Tool");
     QString CATEGORY_TOOL_TILE = QStringLiteral("Tile");
@@ -763,20 +776,6 @@ MainWindow::MainWindow(QWidget *parent, Qt::WindowFlags flags)
 
     addToolBar(toolManager->toolBar());
 
-#ifdef ZOMBOID
-    QToolButton *selectionScopeButton =
-            mTileSelectionScope->createToolButton(
-                toolManager->toolBar(), [this]() {
-        QStringList names;
-        if (!mMapDocument)
-            return names;
-        for (TileLayer *layer : mMapDocument->map()->tileLayers())
-            names.append(layer->name());
-        return names;
-    });
-    toolManager->toolBar()->addSeparator();
-    toolManager->toolBar()->addWidget(selectionScopeButton);
-#endif
 #ifdef ZOMBOID
     mStatusInfoLabel->setObjectName(QLatin1String("statusInfoLabel"));
     mStatusInfoLabel->setAlignment(Qt::AlignCenter);
@@ -838,6 +837,49 @@ MainWindow::MainWindow(QWidget *parent, Qt::WindowFlags flags)
         const QList<MapView *> views = findChildren<MapView *>();
         for (MapView *view : views)
             view->setRenderDiagnosticsEnabled(enabled);
+    });
+    mNightPreviewAction = new QAction(tr("Night Preview"), this);
+    mNightPreviewAction->setCheckable(true);
+    mNightPreviewAction->setToolTip(
+                tr("Dim the map and preview tiledef lights and powered rooms"));
+    mSettings.setValue(QLatin1String("NightPreview/Enabled"), false);
+    mNightPreviewAction->setChecked(false);
+    // Keep the prototype available in the source, but do not expose a
+    // renderer that cannot reproduce the game's lighting pipeline.
+    mNightPreviewAction->setVisible(false);
+    mNightPreviewAction->setEnabled(false);
+    mUi->menuView->addAction(mNightPreviewAction);
+    QToolButton *nightPreviewButton =
+            new QToolButton(mUi->statusBarFrame);
+    nightPreviewButton->setCheckable(true);
+    nightPreviewButton->setText(tr("DAY"));
+    nightPreviewButton->setToolTip(
+                tr("Toggle day/night and tiledef lighting preview"));
+    nightPreviewButton->setAutoRaise(false);
+    nightPreviewButton->setVisible(false);
+    nightPreviewButton->setStyleSheet(QStringLiteral(
+        "QToolButton { padding: 2px 7px; border: 1px solid #68717d;"
+        " border-radius: 4px; font-weight: bold; }"
+        "QToolButton:checked { border: 2px solid #76c7ff;"
+        " background: #235c84; color: white; }"));
+    if (QBoxLayout *statusLayout =
+            qobject_cast<QBoxLayout *>(mUi->statusBarFrame->layout()))
+        statusLayout->addWidget(nightPreviewButton);
+    connect(nightPreviewButton, &QToolButton::toggled,
+            mNightPreviewAction, &QAction::setChecked);
+    connect(mNightPreviewAction, &QAction::toggled,
+            nightPreviewButton, [nightPreviewButton](bool enabled) {
+        const QSignalBlocker blocker(nightPreviewButton);
+        nightPreviewButton->setChecked(enabled);
+        nightPreviewButton->setText(enabled
+                                    ? QObject::tr("NIGHT")
+                                    : QObject::tr("DAY"));
+    });
+    connect(mNightPreviewAction, &QAction::toggled, this,
+            [this](bool enabled) {
+        mSettings.setValue(QLatin1String("NightPreview/Enabled"), enabled);
+        if (MapScene *scene = mDocumentManager->currentMapScene())
+            scene->setNightPreviewEnabled(enabled);
     });
 #endif
 
@@ -1134,12 +1176,20 @@ bool MainWindow::openFile(const QString &fileName,
     qInfo() << "TMX tilesets:"
             << "declared" << map->tilesets().size()
             << "used" << usedTilesets.size();
+    // BMP rules, blend layers and adjacent-cell rendering can reference a
+    // tileset without storing one of its gids in a normal tile layer. Loading
+    // only Map::usedTilesets() therefore leaves valid procedural tiles red
+    // until the user clicks that sheet in the Tilesets dock. Preserve the
+    // complete ordered header and make every declared sheet ready before the
+    // document is exposed to the renderer. The shared image cache prevents a
+    // second decode when another cell declares the same sheet.
     if (!declaredTilesets.isEmpty()) {
         TileMetaInfoMgr::instance()->loadTilesets(
                     declaredTilesets, true, &progress);
         TilesetManager::instance()->waitForTilesets(declaredTilesets);
     }
 #endif
+
     addMapDocument(new MapDocument(map, fileName));
 
     setRecentFile(fileName);
@@ -1246,10 +1296,12 @@ bool MainWindow::InitConfigFiles()
 {
     return InitConfigFiles(this);
 }
+
 bool MainWindow::InitConfigFiles(QWidget *parent)
 {
     PROGRESS progress(tr("Preparing portable settings..."), parent);
 
+    // Create the portable settings directory if needed.
     QString configPath = Preferences::instance()->configPath();
     QDir dir(configPath);
     if (!dir.exists()) {
@@ -1261,6 +1313,7 @@ bool MainWindow::InitConfigFiles(QWidget *parent)
         }
     }
 
+    // Copy config files from the application directory to settings if they
     // don't exist there.
     QStringList configFiles;
     configFiles += TileMetaInfoMgr::instance()->txtName();
@@ -1311,6 +1364,7 @@ bool MainWindow::InitConfigFiles(QWidget *parent)
     }
     qInfo() << "Loaded tileset catalog metadata:"
             << TileMetaInfoMgr::instance()->tilesets().size() << "entries";
+
     progress.update(tr("Discovering additional tilesets..."));
     qInfo().noquote() << "Scanning for additional tilesets in"
                       << QDir::toNativeSeparators(
@@ -1323,6 +1377,12 @@ bool MainWindow::InitConfigFiles(QWidget *parent)
     }
     qInfo() << "Tileset discovery complete:"
             << TileMetaInfoMgr::instance()->tilesets().size() << "entries";
+
+    // PZ mapping rules can use any installed sheet without putting one of its
+    // gids in the currently-open TMX. Make the entire discovered catalogue
+    // ready before TileZed or BuildingEd exposes a renderer or palette.
+    // TilesetManager resolves every name through 2x first and falls back to 1x
+    // only when no readable 2x image exists.
     progress.update(tr("Loading complete tileset catalog..."));
     const QList<Tileset *> completeTilesetCatalog =
             TileMetaInfoMgr::instance()->tilesets();
@@ -1331,6 +1391,7 @@ bool MainWindow::InitConfigFiles(QWidget *parent)
     TilesetManager::instance()->waitForTilesets(completeTilesetCatalog);
     qInfo() << "Loaded complete tileset catalog before editor startup:"
             << completeTilesetCatalog.size() << "entries";
+
     progress.update(tr("Building configuration [1/4]: Reading %1...")
                     .arg(BuildingTMX::instance()->txtName()));
     qInfo().noquote() << "Loading building configuration"
@@ -1701,25 +1762,7 @@ void MainWindow::cut()
     stack->beginMacro(tr("Cut"));
 
     if (tileLayer && !tileSelection.isEmpty()) {
-        for (TileLayer *layer : mMapDocument->map()->tileLayers()) {
-            const bool sameLevel = layer->level() ==
-                    mMapDocument->currentLevel();
-            if (mTileSelectionScope->levelMode() ==
-                    TileSelectionScope::CurrentLevel && !sameLevel) {
-                continue;
-            }
-            const bool current = layer == tileLayer ||
-                    (mTileSelectionScope->levelMode() ==
-                     TileSelectionScope::AllLevels &&
-                     layer->name() == tileLayer->name());
-            if (!mTileSelectionScope->includesLayer(
-                        layer->name(), layer->isVisible(), current)) {
-                continue;
-            }
-            if (!(layer->region() & tileSelection).isEmpty())
-                stack->push(new EraseTiles(mMapDocument, layer,
-                                           tileSelection));
-        }
+        stack->push(new EraseTiles(mMapDocument, tileLayer, tileSelection));
     } else if (!selectedObjects.isEmpty()) {
         foreach (MapObject *mapObject, selectedObjects)
             stack->push(new RemoveMapObject(mMapDocument, mapObject));
@@ -1902,25 +1945,7 @@ void MainWindow::delete_()
     } else
 #endif // ZOMBOID
     if (tileLayer && !tileSelection.isEmpty()) {
-        for (TileLayer *layer : mMapDocument->map()->tileLayers()) {
-            const bool sameLevel = layer->level() ==
-                    mMapDocument->currentLevel();
-            if (mTileSelectionScope->levelMode() ==
-                    TileSelectionScope::CurrentLevel && !sameLevel) {
-                continue;
-            }
-            const bool current = layer == tileLayer ||
-                    (mTileSelectionScope->levelMode() ==
-                     TileSelectionScope::AllLevels &&
-                     layer->name() == tileLayer->name());
-            if (!mTileSelectionScope->includesLayer(
-                        layer->name(), layer->isVisible(), current)) {
-                continue;
-            }
-            if (!(layer->region() & tileSelection).isEmpty())
-                undoStack->push(new EraseTiles(
-                                    mMapDocument, layer, tileSelection));
-        }
+        undoStack->push(new EraseTiles(mMapDocument, tileLayer, tileSelection));
     } else if (!selectedObjects.isEmpty()) {
         foreach (MapObject *mapObject, selectedObjects)
             undoStack->push(new RemoveMapObject(mMapDocument, mapObject));
@@ -1964,6 +1989,7 @@ void MainWindow::resetInterfaceLayout()
 {
     mSettings.remove(QLatin1String("MainWindow"));
     mSettings.remove(QLatin1String("Splitters"));
+
     const QList<QDockWidget*> docks = {
         mLayerDock, mLevelsDock, mObjectsDock, mWorldEdDock, mMapsDock,
         mUndoDock, mTilesetDock, mAutomappingDock, mBmpToolsDock
@@ -1974,6 +2000,7 @@ void MainWindow::resetInterfaceLayout()
         dock->setFloating(false);
         removeDockWidget(dock);
     }
+
     addDockWidget(Qt::RightDockWidgetArea, mLayerDock);
     addDockWidget(Qt::RightDockWidgetArea, mLevelsDock);
     addDockWidget(Qt::RightDockWidgetArea, mObjectsDock);
@@ -1983,6 +2010,7 @@ void MainWindow::resetInterfaceLayout()
     addDockWidget(Qt::RightDockWidgetArea, mTilesetDock);
     addDockWidget(Qt::RightDockWidgetArea, mAutomappingDock);
     addDockWidget(Qt::RightDockWidgetArea, mBmpToolsDock);
+
     tabifyDockWidget(mLayerDock, mLevelsDock);
     tabifyDockWidget(mLevelsDock, mObjectsDock);
     tabifyDockWidget(mObjectsDock, mWorldEdDock);
@@ -1990,6 +2018,7 @@ void MainWindow::resetInterfaceLayout()
     tabifyDockWidget(mUndoDock, mTilesetDock);
     tabifyDockWidget(mTilesetDock, mAutomappingDock);
     tabifyDockWidget(mAutomappingDock, mBmpToolsDock);
+
     for (QDockWidget *dock : docks) {
         if (dock && dock != mBmpToolsDock)
             dock->show();
@@ -1998,6 +2027,7 @@ void MainWindow::resetInterfaceLayout()
     mLayerDock->raise();
     mTilesetDock->raise();
     mMainSplitter->setSizes(QList<int>() << 80 << 200);
+
     const QList<QToolBar*> toolBars =
             findChildren<QToolBar*>(
                 QString(), Qt::FindDirectChildrenOnly);
@@ -2006,6 +2036,7 @@ void MainWindow::resetInterfaceLayout()
         addToolBar(Qt::TopToolBarArea, toolBar);
         toolBar->show();
     }
+
     QTimer::singleShot(0, this, [this]() {
         resizeDocks(QList<QDockWidget*>() << mLayerDock,
                     QList<int>() << 330, Qt::Horizontal);
@@ -2018,6 +2049,7 @@ void MainWindow::resetInterfaceLayout()
     qInfo() << "TileZed interface layout reset to defaults";
 }
 #endif
+
 void MainWindow::zoomIn()
 {
     if (MapView *mapView = mDocumentManager->currentMapView())
@@ -2401,15 +2433,18 @@ void MainWindow::proceduralLootEditor()
     QString containerType;
     if (Tile *tile = mTilesetDock->currentTile())
         containerType = tile->property(QStringLiteral("container"));
+
     QString suggestedProjectRoot;
     if (mMapDocument && !mMapDocument->fileName().isEmpty()) {
         QDir directory(QFileInfo(mMapDocument->fileName()).absolutePath());
         suggestedProjectRoot = directory.absolutePath();
     }
+
     LootDistributionDialog dialog(
                 this, QString(), containerType, suggestedProjectRoot);
     dialog.exec();
 }
+
 void MainWindow::depthMapEditor()
 {
     Tile *tile = mTilesetDock->currentTile();
@@ -2420,6 +2455,7 @@ void MainWindow::depthMapEditor()
                "uses that tile's complete tileset as its source."));
         return;
     }
+
     if (!mDepthMapEditor)
         mDepthMapEditor = new DepthMapEditor(this);
     if (!mDepthMapEditor->setTileset(tile->tileset(), tile->id()))
@@ -2428,6 +2464,7 @@ void MainWindow::depthMapEditor()
     mDepthMapEditor->raise();
     mDepthMapEditor->activateWindow();
 }
+
 void MainWindow::launchWorldEd()
 {
     QString path = QApplication::applicationDirPath();
@@ -3172,6 +3209,7 @@ void MainWindow::ApplyScriptChanges(MapDocument *doc, const QString &undoText, L
                 if (o->mOrig && o->mClone) {
                     MapObject *original = o->mOrig;
                     MapObject *changed = o->mClone;
+
                     if (original->name() != changed->name()
                             || original->type() != changed->type()) {
                         us->push(new ChangeMapObject(doc, original,
@@ -3193,6 +3231,7 @@ void MainWindow::ApplyScriptChanges(MapDocument *doc, const QString &undoText, L
                     }
                 }
             }
+
             ObjectGroup *targetGroup = og->mOrig;
             if (!targetGroup) {
                 targetGroup = doc->map()->layerAt(
@@ -3419,6 +3458,7 @@ bool MainWindow::LuaScript(MapDocument *doc, const QString &filePath)
         else if (action == QLatin1String("launchWorldEd"))
             launchWorldEd();
     }
+
     return true;
 }
 
@@ -3874,27 +3914,18 @@ void MainWindow::writeSettings()
     mTilesetDock->writeSettings(mSettings);
     mSettings.sync();
 }
+
 void MainWindow::startSettingsAutoSave()
 {
     if (findChild<QTimer*>(QStringLiteral("settingsAutoSaveTimer")))
         return;
+
     QTimer *settingsSaveTimer = new QTimer(this);
     settingsSaveTimer->setObjectName(QStringLiteral("settingsAutoSaveTimer"));
     settingsSaveTimer->setInterval(5000);
     connect(settingsSaveTimer, &QTimer::timeout,
             this, &MainWindow::writeSettings);
     settingsSaveTimer->start();
-    if (!findChild<QTimer*>(QStringLiteral("documentAutoSaveTimer"))) {
-        QTimer *documentAutoSaveTimer = new QTimer(this);
-        documentAutoSaveTimer->setObjectName(
-                    QStringLiteral("documentAutoSaveTimer"));
-        connect(documentAutoSaveTimer, &QTimer::timeout,
-                this, &MainWindow::autoSaveCurrentDocument);
-        connect(Preferences::instance(),
-                &Preferences::autoSaveIntervalChanged,
-                this, &MainWindow::updateDocumentAutoSaveTimer);
-    }
-    updateDocumentAutoSaveTimer();
 }
 
 void MainWindow::updateDocumentAutoSaveTimer()
@@ -3960,13 +3991,10 @@ void MainWindow::endDocumentTransaction()
 }
 void MainWindow::writeWindowSettings()
 {
-    if (!PortableSettings::shouldPersistMainWindowGeometry(this)) {
-        qInfo() << "One-shot main-window session: persistent window layout skipped";
-        return;
-    }
     mSettings.beginGroup(QLatin1String("MainWindow"));
     mSettings.setValue(QLatin1String("geometry"), saveGeometry());
     mSettings.setValue(QLatin1String("state"), saveState());
+
     QVariantList v;
     foreach (int size, mMainSplitter->sizes())
         v += size;
@@ -3981,6 +4009,7 @@ void MainWindow::writeWindowSettings()
                        qMax(topDock->width(), bottomDock->width()));
     mSettings.setValue(QLatin1String("rightTopDockHeight"), topDock->height());
     mSettings.setValue(QLatin1String("rightBottomDockHeight"), bottomDock->height());
+
     mSettings.endGroup();
     saveSplitterStates(this, mSettings);
     mSettings.sync();
@@ -4000,6 +4029,7 @@ void MainWindow::readSettings()
                                              QByteArray()).toByteArray();
     if (!state.isEmpty())
         qInfo() << "Main-window dock layout restored:" << restoreState(state);
+
     const QByteArray mainSplitterState =
             mSettings.value(QLatin1String("mainSplitter/state")).toByteArray();
     if (!mainSplitterState.isEmpty()) {
@@ -4022,9 +4052,12 @@ void MainWindow::readSettings()
     const int rightTopDockHeight = mSettings.value(QLatin1String("rightTopDockHeight"), 0).toInt();
     const int rightBottomDockHeight = mSettings.value(QLatin1String("rightBottomDockHeight"), 0).toInt();
     mSettings.endGroup();
-    PortableSettings::applyOneShotMainWindowGeometry(this);
     mTilesetDock->readSettings(mSettings);
     restoreSplitterStates(this, mSettings);
+
+    // Dock contents and maximized-window geometry can alter the restored
+    // separator after restoreState(). Reapply explicit dimensions once Qt has
+    // processed the pending layout events.
     QTimer::singleShot(0, this, [this, rightDockWidth,
                                 rightTopDockHeight, rightBottomDockHeight]() {
         if (rightDockWidth > 0) {
@@ -4115,11 +4148,18 @@ void MainWindow::initLuaTileTools()
 
     QList<Lua::LuaToolInfo> toolsInfo;
     QSet<QString> loadedFiles;
+
+    // The shared configuration directory normally is the packaged application
+    // configuration directory in portable installs.  Do not load the same
+    // LuaTools.txt twice in that case.  When the user deliberately selects a
+    // separate configuration catalog, load it first and then add the packaged
+    // tools.
     QStringList fileNames;
     fileNames += Preferences::instance()->configPath(
                 QLatin1String("LuaTools.txt"));
     fileNames += QDir(Preferences::instance()->appConfigPath()).filePath(
                 QLatin1String("LuaTools.txt"));
+
     foreach (const QString &fileName, fileNames) {
         QFileInfo info(fileName);
         if (!info.isFile())
@@ -4218,6 +4258,13 @@ void MainWindow::mapDocumentChanged(MapDocument *mapDocument)
             mZoomable->connectToComboBox(mZoomComboBox);
         }
     }
+#ifdef ZOMBOID
+    if (mNightPreviewAction) {
+        if (MapScene *scene = mDocumentManager->currentMapScene())
+            scene->setNightPreviewEnabled(
+                        mNightPreviewAction->isChecked());
+    }
+#endif
     updateWindowTitle();
     updateActions();
 #ifdef ZOMBOID

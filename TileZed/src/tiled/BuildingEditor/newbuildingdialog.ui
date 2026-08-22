@@ -25,6 +25,12 @@
       </property>
       <item row="0" column="0">
        <widget class="QGroupBox" name="groupBox_2">
+        <property name="minimumSize">
+         <size>
+          <width>250</width>
+          <height>104</height>
+         </size>
+        </property>
         <property name="title">
          <string>Building size</string>
         </property>
@@ -137,6 +143,12 @@
    </item>
    <item row="0" column="0">
     <widget class="QGroupBox" name="groupBox">
+     <property name="minimumSize">
+      <size>
+       <width>0</width>
+       <height>64</height>
+      </size>
+     </property>
      <property name="title">
       <string>Building Template</string>
      </property>

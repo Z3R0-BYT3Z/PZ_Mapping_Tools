@@ -41,6 +41,7 @@ class TileLayer;
 class Tileset;
 
 namespace Internal {
+class NightPreviewItem;
 class Zoomable;
 }
 
@@ -238,12 +239,15 @@ public:
     void setCursorPosition(const QPoint &pos);
 
     void calculateUnlitRoomMask();
+    void setNightPreviewEnabled(bool enabled);
+    void rebuildNightPreview();
     void applyDeferredUpdates();
 
 private:
     void BuildingToMap();
     CompositeLayerGroupItem *itemForFloor(BuildingFloor *floor);
     bool hasVisibleView() const;
+    void requestNightPreviewRebuild();
 
     BuildingPreferences *prefs() const;
 
@@ -310,6 +314,9 @@ private:
     QMap<int,CompositeLayerGroupItem*> mLayerGroupItems;
     bool mLoading;
     QGraphicsRectItem *mDarkRectangle;
+    Tiled::Internal::NightPreviewItem *mNightPreviewItem;
+    bool mNightPreviewEnabled;
+    bool mDeferredNightPreviewRebuild;
     BaseTool *mCurrentTool;
     CompositeLayerGroup *mLayerGroupWithToolTiles;
     Tiled::TileLayer mToolTiles;
@@ -355,6 +362,8 @@ public:
 
     void setDocument(BuildingDocument *doc);
     void clearDocument();
+    void fitToBuilding();
+    void centerBuilding();
 
     void setHandScrolling(bool handScrolling);
     void setRenderDiagnosticsEnabled(bool enabled);

@@ -38,24 +38,19 @@
 #include "undoredo.h"
 #include "world.h"
 #include "worldcell.h"
-#include "worldconstants.h"
 #include "worlddocument.h"
 #include "worldproperties.h"
 #include "worldobjectvalidation.h"
 #include "zoomable.h"
 
-#include "../portablesettings.h"
-
 #include "maprenderer.h"
 
 #include <QApplication>
 #include <QComboBox>
-#include <QCursor>
 #include <QDebug>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
-#include <QDirIterator>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGraphicsSceneMouseEvent>
@@ -63,17 +58,12 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QKeyEvent>
-#include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
 #include <QProcess>
-#include <QPushButton>
 #include <QSettings>
-#include <QSplitter>
 #include <QStatusBar>
-#include <QVBoxLayout>
 #include <QtMath>
 #include <QUndoStack>
 
@@ -113,6 +103,7 @@ bool openInTileZed(const QString &mapPath, QWidget *parent)
                              .arg(tileZedPath));
         return false;
     }
+
     if (!QProcess::startDetached(tileZedPath, QStringList() << mapPath,
                                  QFileInfo(mapPath).absolutePath())) {
         QMessageBox::warning(parent, QObject::tr("Unable to open map"),
@@ -405,6 +396,7 @@ void showObjectContextMenu(CellScene *scene, ObjectItem *item,
     }
 }
 }
+
 /////
 
 AbstractTool::AbstractTool(const QString &name, const QIcon &icon,
@@ -423,9 +415,11 @@ void AbstractTool::setStatusInfo(const QString &statusInfo)
 {
     if (mStatusInfo == statusInfo)
         return;
+
     mStatusInfo = statusInfo;
     emit statusInfoChanged(mStatusInfo);
 }
+
 void AbstractTool::setEnabled(bool enabled)
 {
     if (mEnabled == enabled)
@@ -512,12 +506,14 @@ void CreateObjectTool::activate()
 {
     if (!mScene)
         return;
+
     WorldObjectGroup *group = mScene->document()->currentObjectGroup();
     QSettings settings;
     mObjectName = settings.value(
                 QLatin1String("ObjectCreation/Name")).toString();
     mObjectTypeName = settings.value(
                 QLatin1String("ObjectCreation/Type")).toString();
+
     const QList<WorldCellObject*> selected =
             mScene->document()->selectedObjects();
     if (selected.size() == 1) {
@@ -528,6 +524,7 @@ void CreateObjectTool::activate()
             mObjectTypeName = selected.first()->type()->name();
         }
     }
+
     if (group) {
         if (mObjectName.isEmpty())
             mObjectName = group->name();
@@ -537,12 +534,15 @@ void CreateObjectTool::activate()
             mObjectTypeName = group->type()->name();
         }
     }
+
     editObjectPreset();
 }
+
 void CreateObjectTool::editObjectPreset()
 {
     QDialog dialog(MainWindow::instance());
     dialog.setWindowTitle(tr("New Object Defaults"));
+
     QFormLayout layout(&dialog);
     QLineEdit nameEdit(mObjectName, &dialog);
     QComboBox typeCombo(&dialog);
@@ -552,6 +552,7 @@ void CreateObjectTool::editObjectPreset()
     const int typeIndex = typeCombo.findText(mObjectTypeName);
     if (typeIndex >= 0)
         typeCombo.setCurrentIndex(typeIndex);
+
     layout.addRow(tr("Name:"), &nameEdit);
     layout.addRow(tr("Type:"), &typeCombo);
     QDialogButtonBox buttons(QDialogButtonBox::Ok
@@ -562,8 +563,10 @@ void CreateObjectTool::editObjectPreset()
             &dialog, &QDialog::accept);
     connect(&buttons, &QDialogButtonBox::rejected,
             &dialog, &QDialog::reject);
+
     if (dialog.exec() != QDialog::Accepted)
         return;
+
     mObjectName = nameEdit.text().trimmed();
     mObjectTypeName = typeCombo.currentText();
     QSettings settings;
@@ -571,6 +574,7 @@ void CreateObjectTool::editObjectPreset()
     settings.setValue(QLatin1String("ObjectCreation/Type"),
                       mObjectTypeName);
 }
+
 void CreateObjectTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
@@ -664,6 +668,8 @@ void CreateObjectTool::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
         else {
             WorldCellObject *obj = mItem->object();
             finishNewMapObject();
+            // Keep Create Object active so several zones can be drawn in
+            // succession. The new object remains selected for feedback.
             mScene->document()->setSelectedObjects(
                         QList<WorldCellObject*>() << obj);
         }
@@ -2046,6 +2052,9 @@ void SpawnPointTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
     // Create the Professions property enum if needed
     PropertyEnum *pe = mScene->world()->propertyEnums().find(QLatin1String("Professions"));
     if (!pe) {
+        // Keep these identifiers and their casing in sync with the base
+        // profession registry in B42 CharacterProfession.java.  "all" is a
+        // WorldEd convenience value expanded by the spawnpoint exporter.
         QStringList professions;
         professions << QLatin1String("burglar")
                     << QLatin1String("burgerflipper")
@@ -3796,7 +3805,7 @@ void WorldCellTool::showContextMenu(const QPointF &scenePos, const QPoint &scree
     QAction *action = menu.exec(screenPos);
     if (action == removeEmptyBorderCellsAction) {
         MainWindow::instance()->removeEmptyBorderCells();
-        return;
+        return; // The resize invalidates WorldCellItem pointers.
     }
     if (action == openAction) {
         openInTileZed(item->cell()->mapFilePath(), mScene->views().value(0));
@@ -3815,6 +3824,10 @@ void WorldCellTool::showContextMenu(const QPointF &scenePos, const QPoint &scree
                     }
                 }
                 if (action == recreateThumbnailAction) {
+                    // Queue the forced render before enabling the display.
+                    // Otherwise thumbnailsAreGo() first starts a cached-image
+                    // read (or an automatic render), and the explicit rebuild
+                    // is needlessly queued behind that first operation.
                     if (MapImageManager::instance()->recreateMapImage(item2->mapFilePath())) {
                         ++recreated;
                         if (!item2->wantsImages())
@@ -3872,6 +3885,7 @@ WorldCellItem *WorldCellTool::topmostItemAt(const QPointF &scenePos)
 /////
 
 namespace {
+
 class ZombieHeatMapStrokeCommand : public QUndoCommand
 {
 public:
@@ -3884,19 +3898,23 @@ public:
         , mAfter(after)
     {
     }
+
     void undo() override
     {
         apply(mBefore);
     }
+
     void redo() override
     {
         apply(mAfter);
     }
+
 private:
     void apply(const QImage &image)
     {
         if (!mItem)
             return;
+
         QString error;
         if (!mItem->replaceSourceImage(image, true, &error)) {
             qWarning() << "Unable to save Zombie Heatmap edit:" << error;
@@ -3905,23 +3923,29 @@ private:
                                  error);
         }
     }
+
     ZombieSpawnImageItem *mItem;
     QImage mBefore;
     QImage mAfter;
 };
-}
+
+} // namespace
+
 ZombieHeatMapTool *ZombieHeatMapTool::mInstance = nullptr;
+
 ZombieHeatMapTool *ZombieHeatMapTool::instance()
 {
     if (!mInstance)
         mInstance = new ZombieHeatMapTool();
     return mInstance;
 }
+
 void ZombieHeatMapTool::deleteInstance()
 {
     delete mInstance;
     mInstance = nullptr;
 }
+
 ZombieHeatMapTool::ZombieHeatMapTool()
     : BaseWorldSceneTool(tr("Paint Zombie Heatmap"),
                          QIcon(QLatin1String(":/images/22x22/tool-zombie-heatmap.svg")),
@@ -3938,15 +3962,18 @@ ZombieHeatMapTool::ZombieHeatMapTool()
     mCursorItem->setBrush(QBrush(QColor(255, 0, 0, 40)));
     mCursorItem->setVisible(false);
 }
+
 ZombieHeatMapTool::~ZombieHeatMapTool()
 {
     delete mCursorItem;
 }
+
 void ZombieHeatMapTool::activate()
 {
     BaseWorldSceneTool::activate();
     if (!mScene || !Preferences::instance()->showZombieSpawnImage())
         return;
+
     ZombieSpawnImageItem *item = mScene->zombieSpawnImageItem();
     if (item) {
         item->setPreviewB42x40(mPreviewB42x40);
@@ -3959,6 +3986,7 @@ void ZombieHeatMapTool::activate()
                      "Preview: %1.")
                   .arg(mPreviewB42x40 ? tr("B42 x40") : tr("Raw 0-255")));
 }
+
 void ZombieHeatMapTool::deactivate()
 {
     finishStroke();
@@ -3971,6 +3999,7 @@ void ZombieHeatMapTool::deactivate()
     }
     BaseWorldSceneTool::deactivate();
 }
+
 void ZombieHeatMapTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
     if (!mScene || !Preferences::instance()->showZombieSpawnImage()
@@ -3978,18 +4007,22 @@ void ZombieHeatMapTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
                     && event->button() != Qt::RightButton)) {
         return;
     }
+
     ZombieSpawnImageItem *item = mScene->zombieSpawnImageItem();
     if (!item)
         return;
+
     QString error;
     if (!item->ensureEditable(&error)) {
         QMessageBox::warning(MainWindow::instance(),
                              tr("Zombie Heatmap Cannot Be Edited"), error);
         return;
     }
+
     const QPoint imagePoint = item->imagePointAt(event->scenePos());
     if (!item->containsImagePoint(imagePoint))
         return;
+
     mBeforeStroke = item->sourceImage();
     mPainting = true;
     mStrokeIntensity = event->button() == Qt::RightButton ? 0 : mIntensity;
@@ -3998,6 +4031,7 @@ void ZombieHeatMapTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
     updateCursor(event->scenePos());
     event->accept();
 }
+
 void ZombieHeatMapTool::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 {
     if (!Preferences::instance()->showZombieSpawnImage()) {
@@ -4011,34 +4045,41 @@ void ZombieHeatMapTool::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
         event->accept();
     }
 }
+
 void ZombieHeatMapTool::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
 {
     if (!mPainting)
         return;
     if (event->button() != Qt::LeftButton && event->button() != Qt::RightButton)
         return;
+
     paintTo(event->scenePos(), mStrokeIntensity);
     finishStroke();
     event->accept();
 }
+
 void ZombieHeatMapTool::languageChanged()
 {
     setName(tr("Paint Zombie Heatmap"));
 }
+
 void ZombieHeatMapTool::updateEnabledState()
 {
     setEnabled(mScene && mScene->zombieSpawnImageItem()
                && mScene->zombieSpawnImageItem()->canEdit()
                && Preferences::instance()->showZombieSpawnImage());
 }
+
 void ZombieHeatMapTool::setBrushRadius(int radius)
 {
     mBrushRadius = qBound(0, radius, 64);
 }
+
 void ZombieHeatMapTool::setIntensity(int intensity)
 {
     mIntensity = qBound(0, intensity, 255);
 }
+
 void ZombieHeatMapTool::setPreviewB42x40(bool enabled)
 {
     mPreviewB42x40 = enabled;
@@ -4048,10 +4089,12 @@ void ZombieHeatMapTool::setPreviewB42x40(bool enabled)
                      "Preview: %1.")
                   .arg(enabled ? tr("B42 x40") : tr("Raw 0-255")));
 }
+
 void ZombieHeatMapTool::expandImageToWorld()
 {
     if (!mScene || !mScene->zombieSpawnImageItem())
         return;
+
     QString error;
     if (!mScene->zombieSpawnImageItem()->expandToWorld(&error)) {
         QMessageBox::warning(MainWindow::instance(),
@@ -4060,16 +4103,19 @@ void ZombieHeatMapTool::expandImageToWorld()
     }
     qInfo() << "Zombie Heatmap expanded to cover the WorldEd project";
 }
+
 void ZombieHeatMapTool::updateCursor(const QPointF &scenePos)
 {
     if (!mScene || !mScene->zombieSpawnImageItem())
         return;
+
     ZombieSpawnImageItem *item = mScene->zombieSpawnImageItem();
     const QPoint imagePoint = item->imagePointAt(scenePos);
     if (!item->containsImagePoint(imagePoint)) {
         mCursorItem->setVisible(false);
         return;
     }
+
     const qreal samples = item->samplesPerCell();
     const QPointF center((imagePoint.x() + 0.5) / samples,
                          (imagePoint.y() + 0.5) / samples);
@@ -4085,58 +4131,71 @@ void ZombieHeatMapTool::updateCursor(const QPointF &scenePos)
     mCursorItem->setPolygon(polygon);
     mCursorItem->setVisible(true);
 }
+
 void ZombieHeatMapTool::paintTo(const QPointF &scenePos, int intensity)
 {
     ZombieSpawnImageItem *item = mScene->zombieSpawnImageItem();
     const QPoint imagePoint = item->imagePointAt(scenePos);
     if (!item->containsImagePoint(imagePoint))
         return;
+
     item->paintStroke(mLastImagePoint, imagePoint, mBrushRadius, intensity);
     mLastImagePoint = imagePoint;
 }
+
 void ZombieHeatMapTool::finishStroke()
 {
     if (!mPainting || !mScene || !mScene->zombieSpawnImageItem()) {
         mPainting = false;
         return;
     }
+
     ZombieSpawnImageItem *item = mScene->zombieSpawnImageItem();
     const QImage after = item->sourceImage();
     mPainting = false;
+
     if (mBeforeStroke == after)
         return;
+
     QString error;
     item->replaceSourceImage(mBeforeStroke, false, &error);
     mScene->worldDocument()->undoStack()->push(
                 new ZombieHeatMapStrokeCommand(item, mBeforeStroke, after));
 }
+
+/////
+
 namespace {
+
 class BiomeMapStrokeCommand : public QUndoCommand
 {
 public:
     BiomeMapStrokeCommand(BiomeMapItem *item,
                           const QImage &before,
-                          const QImage &after,
-                          const QString &description)
-        : QUndoCommand(description)
+                          const QImage &after)
+        : QUndoCommand(QObject::tr("Paint Biomemap Biome Layer"))
         , mItem(item)
         , mBefore(before)
         , mAfter(after)
     {
     }
+
     void undo() override
     {
         apply(mBefore);
     }
+
     void redo() override
     {
         apply(mAfter);
     }
+
 private:
     void apply(const QImage &image)
     {
         if (!mItem)
             return;
+
         QString error;
         if (!mItem->replaceSourceImage(image, true, &error)) {
             qWarning() << "Unable to save Biomemap edit:" << error;
@@ -4145,33 +4204,36 @@ private:
                                  error);
         }
     }
+
     BiomeMapItem *mItem;
     QImage mBefore;
     QImage mAfter;
 };
-}
+
+} // namespace
+
 BiomeMapTool *BiomeMapTool::mInstance = nullptr;
+
 BiomeMapTool *BiomeMapTool::instance()
 {
     if (!mInstance)
         mInstance = new BiomeMapTool();
     return mInstance;
 }
+
 void BiomeMapTool::deleteInstance()
 {
     delete mInstance;
     mInstance = nullptr;
 }
+
 BiomeMapTool::BiomeMapTool()
-    : BaseWorldSceneTool(tr("Paint Biomemap Channels"),
+    : BaseWorldSceneTool(tr("Paint Biomemap Biome Layer"),
                          QIcon(QLatin1String(":/images/22x22/tool-biome-map.svg")),
                          QKeySequence())
     , mPainting(false)
-    , mPaintChannel(BiomeChannel)
-    , mBiomeBrushRadius(4)
-    , mZoneBrushRadius(0)
+    , mBrushRadius(4)
     , mBiomeValue(255)
-    , mZoneValue(64)
     , mCursorItem(new QGraphicsPolygonItem())
 {
     mCursorItem->setZValue(2001);
@@ -4179,25 +4241,27 @@ BiomeMapTool::BiomeMapTool()
     setBiomeValue(mBiomeValue);
     mCursorItem->setVisible(false);
 }
+
 BiomeMapTool::~BiomeMapTool()
 {
     delete mCursorItem;
 }
+
 void BiomeMapTool::activate()
 {
     BaseWorldSceneTool::activate();
     if (!mScene || !Preferences::instance()->showBiomeMap())
         return;
+
     BiomeMapItem *item = mScene->biomeMapItem();
     if (item)
         item->setVisible(true);
-    if (item)
-        item->setDisplayZoneChannel(mPaintChannel == ZoneChannel);
     if (!mCursorItem->scene())
         mScene->addItem(mCursorItem);
     mCursorItem->setVisible(false);
     updateStatusInfo();
 }
+
 void BiomeMapTool::deactivate()
 {
     finishStroke();
@@ -4205,42 +4269,41 @@ void BiomeMapTool::deactivate()
     if (mCursorItem->scene())
         mCursorItem->scene()->removeItem(mCursorItem);
     if (mScene && mScene->biomeMapItem()) {
-        mScene->biomeMapItem()->setDisplayZoneChannel(false);
         mScene->biomeMapItem()->setVisible(
                     Preferences::instance()->showBiomeMap());
     }
     BaseWorldSceneTool::deactivate();
 }
+
 void BiomeMapTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
     if (!mScene || !Preferences::instance()->showBiomeMap()
             || event->button() != Qt::LeftButton)
         return;
+
     BiomeMapItem *item = mScene->biomeMapItem();
     if (!item)
         return;
+
     QString error;
     if (!item->ensureEditable(&error)) {
         QMessageBox::warning(MainWindow::instance(),
                              tr("Biomemap Cannot Be Edited"), error);
         return;
     }
+
     const QPoint imagePoint = item->imagePointAt(event->scenePos());
     if (!item->containsImagePoint(imagePoint))
         return;
+
     mBeforeStroke = item->sourceImage();
     mPainting = true;
     mLastImagePoint = imagePoint;
-    if (mPaintChannel == ZoneChannel) {
-        item->paintZoneStroke(imagePoint, imagePoint,
-                              mZoneBrushRadius, mZoneValue);
-    } else {
-        item->paintBiomeStroke(imagePoint, imagePoint,
-                               mBiomeBrushRadius, mBiomeValue);
-    }
+    item->paintStroke(imagePoint, imagePoint, mBrushRadius, mBiomeValue);
     updateCursor(event->scenePos());
     event->accept();
 }
+
 void BiomeMapTool::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 {
     if (!Preferences::instance()->showBiomeMap()) {
@@ -4254,196 +4317,127 @@ void BiomeMapTool::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
         event->accept();
     }
 }
+
 void BiomeMapTool::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
 {
     if (!mPainting || event->button() != Qt::LeftButton)
         return;
+
     paintTo(event->scenePos());
     finishStroke();
     event->accept();
 }
+
 void BiomeMapTool::languageChanged()
 {
-    setName(tr("Paint Biomemap Channels"));
+    setName(tr("Paint Biomemap Biome Layer"));
     updateStatusInfo();
 }
+
 void BiomeMapTool::updateEnabledState()
 {
     setEnabled(mScene && mScene->biomeMapItem()
                && mScene->biomeMapItem()->canEdit()
                && Preferences::instance()->showBiomeMap());
 }
-int BiomeMapTool::brushRadius() const
+
+void BiomeMapTool::setBrushRadius(int radius)
 {
-    return mPaintChannel == ZoneChannel
-            ? mZoneBrushRadius : mBiomeBrushRadius;
+    mBrushRadius = qBound(0, radius, 128);
 }
-int BiomeMapTool::paintValue() const
+
+void BiomeMapTool::setBiomeValue(int value)
 {
-    return mPaintChannel == ZoneChannel ? mZoneValue : mBiomeValue;
-}
-void BiomeMapTool::setPaintChannel(PaintChannel channel)
-{
-    if (mPaintChannel == channel)
-        return;
-    finishStroke();
-    mPaintChannel = channel;
-    if (mScene && mScene->biomeMapItem())
-        mScene->biomeMapItem()->setDisplayZoneChannel(
-                    mPaintChannel == ZoneChannel);
-    if (mScene && !mScene->views().isEmpty()) {
-        updateCursor(mScene->views().isEmpty()
-                     ? QPointF()
-                     : mScene->views().first()->mapToScene(
-                           mScene->views().first()->mapFromGlobal(
-                               QCursor::pos())));
-    } else {
-        mCursorItem->setVisible(false);
-    }
-    const QColor color = BiomeMapImageProcessor::displayColor(paintValue());
+    mBiomeValue = qBound(0, value, 255);
+    const QColor color = BiomeMapImageProcessor::displayColor(mBiomeValue);
     mCursorItem->setBrush(QBrush(QColor(color.red(), color.green(),
                                         color.blue(), 90)));
     updateStatusInfo();
 }
-void BiomeMapTool::setBrushRadius(int radius)
-{
-    if (mPaintChannel == ZoneChannel)
-        setZoneBrushRadius(radius);
-    else
-        setBiomeBrushRadius(radius);
-}
-void BiomeMapTool::setBiomeBrushRadius(int radius)
-{
-    mBiomeBrushRadius = qBound(0, radius, 128);
-}
-void BiomeMapTool::setZoneBrushRadius(int radius)
-{
-    mZoneBrushRadius = qBound(0, radius, 16);
-}
-void BiomeMapTool::setBiomeValue(int value)
-{
-    mBiomeValue = qBound(0, value, 255);
-    if (mPaintChannel == BiomeChannel) {
-        const QColor color = BiomeMapImageProcessor::displayColor(mBiomeValue);
-        mCursorItem->setBrush(QBrush(QColor(color.red(), color.green(),
-                                            color.blue(), 90)));
-    }
-    updateStatusInfo();
-}
-void BiomeMapTool::setZoneValue(int value)
-{
-    mZoneValue = qBound(0, value, 255);
-    if (mPaintChannel == ZoneChannel) {
-        const QColor color = BiomeMapImageProcessor::displayColor(mZoneValue);
-        mCursorItem->setBrush(QBrush(QColor(color.red(), color.green(),
-                                            color.blue(), 90)));
-    }
-    updateStatusInfo();
-}
+
 void BiomeMapTool::updateCursor(const QPointF &scenePos)
 {
     if (!mScene || !mScene->biomeMapItem())
         return;
+
     BiomeMapItem *item = mScene->biomeMapItem();
     const QPoint imagePoint = item->imagePointAt(scenePos);
     if (!item->containsImagePoint(imagePoint)) {
         mCursorItem->setVisible(false);
         return;
     }
-    QPolygonF polygon;
+
     const qreal pixels = item->pixelsPerCell();
-    if (mPaintChannel == ZoneChannel) {
-        const QRect chunkPixels = item->zoneChunkRectAt(
-                    imagePoint, mZoneBrushRadius);
-        const QRectF rect(chunkPixels.x() / pixels,
-                          chunkPixels.y() / pixels,
-                          chunkPixels.width() / pixels,
-                          chunkPixels.height() / pixels);
-        polygon = mScene->cellRectToPolygon(rect);
-    } else {
-        const QPointF center((imagePoint.x() + 0.5) / pixels,
-                             (imagePoint.y() + 0.5) / pixels);
-        const qreal radius = (mBiomeBrushRadius + 0.5) / pixels;
-        const int segments = 32;
-        for (int i = 0; i < segments; ++i) {
-            const qreal angle = (2.0 * 3.14159265358979323846 * i) / segments;
-            polygon += mScene->cellToPixelCoords(
-                        center + QPointF(qCos(angle) * radius,
-                                         qSin(angle) * radius));
-        }
+    const QPointF center((imagePoint.x() + 0.5) / pixels,
+                         (imagePoint.y() + 0.5) / pixels);
+    const qreal radius = (mBrushRadius + 0.5) / pixels;
+    QPolygonF polygon;
+    const int segments = 32;
+    for (int i = 0; i < segments; ++i) {
+        const qreal angle = (2.0 * 3.14159265358979323846 * i) / segments;
+        polygon += mScene->cellToPixelCoords(
+                    center + QPointF(qCos(angle) * radius,
+                                     qSin(angle) * radius));
     }
     mCursorItem->setPolygon(polygon);
     mCursorItem->setVisible(true);
 }
+
 void BiomeMapTool::paintTo(const QPointF &scenePos)
 {
     BiomeMapItem *item = mScene->biomeMapItem();
     const QPoint imagePoint = item->imagePointAt(scenePos);
     if (!item->containsImagePoint(imagePoint))
         return;
-    if (mPaintChannel == ZoneChannel) {
-        item->paintZoneStroke(mLastImagePoint, imagePoint,
-                              mZoneBrushRadius, mZoneValue);
-    } else {
-        item->paintBiomeStroke(mLastImagePoint, imagePoint,
-                               mBiomeBrushRadius, mBiomeValue);
-    }
+
+    item->paintStroke(mLastImagePoint, imagePoint,
+                      mBrushRadius, mBiomeValue);
     mLastImagePoint = imagePoint;
 }
+
 void BiomeMapTool::finishStroke()
 {
     if (!mPainting || !mScene || !mScene->biomeMapItem()) {
         mPainting = false;
         return;
     }
+
     BiomeMapItem *item = mScene->biomeMapItem();
     const QImage after = item->sourceImage();
     mPainting = false;
+
     if (mBeforeStroke == after)
         return;
+
     QString error;
     item->replaceSourceImage(mBeforeStroke, false, &error);
     mScene->worldDocument()->undoStack()->push(
-                new BiomeMapStrokeCommand(
-                    item, mBeforeStroke, after,
-                    mPaintChannel == ZoneChannel
-                    ? tr("Paint Biomemap Zone Layer")
-                    : tr("Paint Biomemap Biome Layer")));
+                new BiomeMapStrokeCommand(item, mBeforeStroke, after));
 }
+
 void BiomeMapTool::updateStatusInfo()
 {
-    const int value = paintValue();
-    QString name = tr("value %1").arg(value);
+    QString name = tr("value %1").arg(mBiomeValue);
     QString config;
     const BiomeMapImageProcessor::PaletteEntry *entry =
-            BiomeMapImageProcessor::entryForValue(value);
+            BiomeMapImageProcessor::entryForValue(mBiomeValue);
     if (entry) {
         name = tr("%1 (ID %2)").arg(entry->name).arg(entry->value);
-        if (mPaintChannel == ZoneChannel) {
-            config = tr(" Foraging zone: %1.%2")
-                    .arg(entry->zone)
-                    .arg(entry->enabledByDefault
-                         ? QString()
-                         : tr(" Map override required."));
-        } else {
-            config = tr(" Biome: %1. Ore selector: %2.%3")
-                    .arg(entry->biome.isEmpty() ? tr("(none)") : entry->biome)
-                    .arg(entry->ore.isEmpty() ? tr("(none)") : entry->ore)
-                    .arg(entry->enabledByDefault
-                         ? QString()
-                         : tr(" Map override required."));
-        }
+        config = tr(" Biome: %1. Ore selector: %2. Zone: %3.%4")
+                .arg(entry->biome.isEmpty() ? tr("(none)") : entry->biome)
+                .arg(entry->ore.isEmpty() ? tr("(none)") : entry->ore)
+                .arg(entry->zone)
+                .arg(entry->enabledByDefault
+                     ? QString()
+                     : tr(" Map override required."));
     }
-    if (mPaintChannel == ZoneChannel) {
-        setStatusInfo(tr("Left-drag paints the green Zone channel in complete "
-                         "8 x 8 chunks: %1. The red Biome channel is "
-                         "preserved.%2").arg(name, config));
-    } else {
-        setStatusInfo(tr("Left-drag paints only the red Biome channel: %1. "
-                         "The green Zone channel is preserved.%2")
-                      .arg(name, config));
-    }
+    setStatusInfo(tr("Left-drag paints only the red Biome channel: %1. "
+                     "The green Zone channel is preserved.%2")
+                  .arg(name, config));
 }
+
+/////
+
 PasteCellsTool *PasteCellsTool::mInstance = 0;
 
 PasteCellsTool *PasteCellsTool::instance()

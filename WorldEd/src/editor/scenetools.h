@@ -910,31 +910,44 @@ private:
 
 /////
 
+/**
+ * Paints the red-channel Zombie Heatmap directly in the WorldView.
+ * The source image always keeps raw 0..255 values; the optional B42 x40
+ * amplification only affects the preview.
+ */
 class ZombieHeatMapTool : public BaseWorldSceneTool
 {
 public:
     static ZombieHeatMapTool *instance();
     static void deleteInstance();
+
     explicit ZombieHeatMapTool();
     ~ZombieHeatMapTool();
+
     void activate() override;
     void deactivate() override;
+
     void mousePressEvent(QGraphicsSceneMouseEvent *event) override;
     void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override;
     void mouseReleaseEvent(QGraphicsSceneMouseEvent *event) override;
+
     void languageChanged() override;
     void updateEnabledState() override;
+
     int brushRadius() const { return mBrushRadius; }
     int intensity() const { return mIntensity; }
     bool previewB42x40() const { return mPreviewB42x40; }
+
     void setBrushRadius(int radius);
     void setIntensity(int intensity);
     void setPreviewB42x40(bool enabled);
     void expandImageToWorld();
+
 private:
     void updateCursor(const QPointF &scenePos);
     void paintTo(const QPointF &scenePos, int intensity);
     void finishStroke();
+
     bool mPainting;
     int mBrushRadius;
     int mIntensity;
@@ -943,55 +956,58 @@ private:
     QPoint mLastImagePoint;
     QImage mBeforeStroke;
     QGraphicsPolygonItem *mCursorItem;
+
     static ZombieHeatMapTool *mInstance;
 };
+
+/////
+
+/**
+ * Paints only the red Biome channel of the project's Biomemap.
+ */
 class BiomeMapTool : public BaseWorldSceneTool
 {
 public:
-    enum PaintChannel {
-        BiomeChannel = 0,
-        ZoneChannel = 1
-    };
     static BiomeMapTool *instance();
     static void deleteInstance();
+
     explicit BiomeMapTool();
     ~BiomeMapTool();
+
     void activate() override;
     void deactivate() override;
+
     void mousePressEvent(QGraphicsSceneMouseEvent *event) override;
     void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override;
     void mouseReleaseEvent(QGraphicsSceneMouseEvent *event) override;
+
     void languageChanged() override;
     void updateEnabledState() override;
-    PaintChannel paintChannel() const { return mPaintChannel; }
-    int brushRadius() const;
-    int biomeBrushRadius() const { return mBiomeBrushRadius; }
-    int zoneBrushRadius() const { return mZoneBrushRadius; }
+
+    int brushRadius() const { return mBrushRadius; }
     int biomeValue() const { return mBiomeValue; }
-    int zoneValue() const { return mZoneValue; }
-    int paintValue() const;
-    void setPaintChannel(PaintChannel channel);
+
     void setBrushRadius(int radius);
-    void setBiomeBrushRadius(int radius);
-    void setZoneBrushRadius(int radius);
     void setBiomeValue(int value);
-    void setZoneValue(int value);
+
 private:
     void updateCursor(const QPointF &scenePos);
     void paintTo(const QPointF &scenePos);
     void finishStroke();
     void updateStatusInfo();
+
     bool mPainting;
-    PaintChannel mPaintChannel;
-    int mBiomeBrushRadius;
-    int mZoneBrushRadius;
+    int mBrushRadius;
     int mBiomeValue;
-    int mZoneValue;
     QPoint mLastImagePoint;
     QImage mBeforeStroke;
     QGraphicsPolygonItem *mCursorItem;
+
     static BiomeMapTool *mInstance;
 };
+
+/////
+
 class PasteCellItem;
 
 /**

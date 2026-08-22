@@ -99,6 +99,7 @@ MapDocument::MapDocument(Map *map, const QString &fileName):
                 << QFileInfo(mFileName).fileName();
         previousSetupMs = elapsedMs;
     };
+
     for (int z = MIN_WORLD_LEVEL; z <= MAX_WORLD_LEVEL; z++) {
         if (mMap->mapLevelForZ(z)) {
             continue;
@@ -224,6 +225,7 @@ MapDocument::MapDocument(Map *map, const QString &fileName):
     TilesetManager *tilesetManager = TilesetManager::instance();
     tilesetManager->addReferences(mMap->tilesets(), false);
     logSetupStep("tileset references");
+
     QList<Tileset *> usedTilesets = mMap->usedTilesets().values();
     logSetupStep("used tileset query");
     usedTilesets.removeAll(tilesetManager->invisibleTileset());
@@ -479,6 +481,8 @@ void MapDocument::addLayer(Layer::Type layerType)
     if (mapLevel->layerCount(layerType) == 0) {
         if (layerType == Layer::ObjectGroupType
                 && !mapLevel->layers().isEmpty()) {
+            // Object tools expect their layer above the visual layers of the
+            // selected level so newly-created objects remain visible.
             index = mMap->layers().indexOf(mapLevel->layers().last()) + 1;
         } else {
             int count = 0;
@@ -809,22 +813,28 @@ void MapDocument::setBmpRulesAndAliases(
 {
     QElapsedTimer timer;
     timer.start();
+
     mMap->rbmpSettings()->setAliases(aliases);
     mMap->rbmpSettings()->setRulesFile(fileName);
     mMap->rbmpSettings()->setRules(rules);
+
     mapComposite()->bmpBlender()->fromMap();
     mapComposite()->bmpBlender()->recreate();
+
     qInfo() << "BMP Rules.txt update prepared in" << timer.elapsed()
             << "ms with" << aliases.size() << "aliases and"
             << rules.size() << "rules";
+
     emit bmpAliasesChanged();
     emit bmpRulesChanged();
 }
+
 void MapDocument::setBmpBlends(const QString &fileName,
                                const QList<BmpBlend *> &blends)
 {
     QElapsedTimer timer;
     timer.start();
+
     mMap->rbmpSettings()->setBlendsFile(fileName);
     mMap->rbmpSettings()->setBlends(blends);
 
@@ -833,6 +843,7 @@ void MapDocument::setBmpBlends(const QString &fileName,
 
     qInfo() << "BMP Blends.txt update prepared in" << timer.elapsed()
             << "ms with" << blends.size() << "blends";
+
     emit bmpBlendsChanged();
 }
 

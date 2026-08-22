@@ -1,25 +1,39 @@
-# PZTools feature reference
+# PZTools user-facing feature reference
 
-This page routes users to the major functions available in the current
-PZWorldEd, TileZed, and BuildingEd release.
+This page is a routing table for the maintained PZWorldEd, TileZed, and
+BuildingEd release. It covers major existing, restored, and newly added
+functions. Detailed interaction instructions remain in the linked manuals.
 
 ## Shared suite behavior
 
-| Function | Location | Effect |
-|---|---|---|
-| Initial setup | First startup | Selects shared Tiles and configuration paths |
-| Project Zomboid installation | Preferences | Supplies read-only game TileDefs, packs, WorldGen, and loot data |
-| Basement access resources | Portable `pzby_tbx` beside `bin` | Reads editable sources from `basement_access` and compiled PZBY files from `binmap` |
-| Window setup | Preferences | Applies 1920 x 1080 or custom dimensions once to the current application, or opens all three once at that centered size, without rewriting another application's INI |
-| Reset interface | Preferences | Restores the current application's default window and dock layout |
-| Complete tileset discovery | All applications | Resolves every valid PNG recursively with 2x priority and 1x or custom fallback |
-| New Folder | File browsers | Creates a directory from a compact button or the browser context menu |
-| Render diagnostics | View menu | Shows FPS, render time, RAM, zoom, renderer, viewport, and drawn content |
-| Portable logs | Every run | Writes support logs below `settings/logs` |
+| Function | Where | Reads | Writes / effect | Details |
+|---|---|---|---|---|
+| Initial setup | First editor startup | Extracted Tiles tree and packaged catalog directory | `settings/PZTools.ini` | Paths are shared by all three applications. |
+| Change Shared Paths | WorldEd/TileZed preferences | Tiles parent and `config` | Shared portable settings | Restart other open editors after changing a shared path. |
+| Audited configuration catalogues | Portable `config` | Build 42.20 data and configured Tiles tree | Shared definitions for all three applications | [File-by-file configuration reference](PZTools-Configuration-Files.md); project overrides stay outside the game and tool directories. |
+| External themes | Preferences | `themes/*.qss` | Per-application theme choice | Theme changes widgets, not map rendering. |
+| Complete tileset discovery | All three applications | Every valid PNG below 2x, then 1x/custom fallback | In-memory catalogue and startup log | 2x wins when both scales exist; 1x-only and 2x-only sheets remain valid. |
+| Portable logs | Every run | Runtime messages | `settings/logs/<Application>-<timestamp>-<pid>.log` | Newest 20 files per application are retained. |
+| Session/layout persistence | Every application | Portable application INI | Window, dock, splitter, recent-file, and selected-tool state | An unclean previous run skips automatic document restoration. |
 
-See [configuration files](PZTools-Configuration-Files.md),
-[logs and issue reports](Diagnostics-and-Logs.md), and the
-[complete user guide](TileZed/PZToolsGuide.html).
+See [Logs, diagnostics, and useful issue reports](Diagnostics-and-Logs.md) and
+the [complete user guide](TileZed/PZToolsGuide.html).
+
+### Common interaction model
+
+New guided tools are designed so that a mapper can use them without first
+learning the internal file formats:
+
+1. the editor identifies the current project and states what it will inspect;
+2. **Check** is read-only and produces a plain-language status;
+3. one recommended action is presented when a safe correction exists;
+4. changes are validated and backed up automatically;
+5. file paths, ordered IDs, parser detail, and logs stay in an optional
+   technical view for support.
+
+An error should explain what is wrong, which file is involved, what remains
+safe, and what the mapper can do next. Compatibility and file ownership are
+shown in the workflow instead of being assumed knowledge.
 
 ## PZWorldEd
 
@@ -72,18 +86,36 @@ Detailed references:
 | Procedural loot | Tools | Project loot manifest and generated post-merge Lua |
 | Lua mapping | Tools and console | Transactional map, object, and RoomDef changes |
 
-Detailed references:
+Feature references:
 
 - [Automapper](TileZed/Automapper.html)
 - [Procedural loot](PZ-B42.20-Procedural-Loot-Editor.md)
-- [Pack tools](PZ-Pack-Comparator-and-Extractor.md)
-- [TileDef tools](PZ-TileDef-Comparator-and-Snow-Editor.md)
+- [Pack comparator and extractor](TileZed/PZ-Pack-Comparator-and-Extractor.md)
+- [TileDef comparator and Snow/Replacement editor](TileZed/PZ-TileDef-Comparator-and-Snow-Editor.md)
 - [Lua scripting](TileZed/LuaScripting.html)
 - [BMP tools](TileZed/BMPTools.html)
 
 ## BuildingEd
 
-| Function | Location | Main result |
+| Function | Menu / location | Availability | Main input | Main output or effect |
+|---|---|---|---|---|
+| Building/room editing | Main canvas and room tools | Building open/new | `.tbx` or new dimensions/template | Rooms, floors, walls, objects, and building metadata |
+| Object tools | Main toolbar | Compatible editing mode | Walls, doors, windows, stairs, roofs, furniture | Semantic BuildingEd objects and generated tile layers |
+| Tile mode | Tile mode and tileset dock | Complete Tiles catalogue loaded | Selected tileset/tile | Direct user-tile layer editing |
+| Ortho/Iso category palettes | Object modes | Building catalogs loaded | `BuildingTiles.txt`, `BuildingFurniture.txt` | Category-driven object/furniture selection |
+| Templates and furniture catalogs | Building dialogs | Catalog directory valid | `BuildingTemplates.txt`, `BuildingFurniture.txt` | Reusable building defaults and furniture groups |
+| Basements/negative floors | Floor/building controls | Format supports levels | Building floor structure | Below-ground floors retained in TBX/TMX export |
+| Autosave | Automatic every 2.5 minutes | Unsaved changes | Current building | `.autosave` beside TBX or under portable settings |
+| Lua building automation | Building > Run Lua Script... / Lua Console | Building document open | Lua 5.2 editor script | One transactional Undo command or no change on failure |
+| Procedural loot | Building > Procedural Loot Viewer / Editor... | Game Items path selected | Current RoomDef plus game/project loot data | Project JSON and generated post-merge Lua |
+| Category validator | Command line | Deployed build and Tiles configured | Full catalog | Template, Tile, Furniture, Ortho/Iso, Lua and Undo PASS/FAIL log |
+
+The installed [BuildingEd manual](BuildingEd/index.html) documents tile mode,
+the Tiles dialog, drawing/object tools, and Lua scripting.
+
+## File and directory ownership
+
+| Data | Owner/source | Editor policy |
 |---|---|---|
 | Building and room editing | Main editor | TBX rooms, floors, walls, roofs, objects, and metadata |
 | Tile mode | Tile mode | Direct user-tile layer editing |
@@ -113,8 +145,14 @@ modes and tools.
 
 ## Current limits
 
+- WorldGen roads are not exposed by the current preview/editor.
+- Erosion is planned as a separate possible module.
 - WorldGen preview output is representative rather than save-identical.
-- Static WorldGen prefabs use the supported level-zero schematic format.
-- Loot editing does not define items, icons, sandbox settings, or vehicles.
-- Pack tools do not merge or patch source packs.
-- TileDef merge does not invent missing tilesets or resize source sheets.
+- Static prefabs are z=0 four-slot schematics, not multi-floor buildings.
+- Loot editing does not define items, icons, sandbox settings, vehicles, or
+  complete mod packaging.
+- Pack comparison/extraction does not merge or patch source packs.
+- TileDef property merge does not invent missing tilesets or silently resize
+  changed sheets.
+- The internal DAY/NIGHT prototype is hidden because it does not yet match the
+  current game lighting renderer closely enough for authoring claims.

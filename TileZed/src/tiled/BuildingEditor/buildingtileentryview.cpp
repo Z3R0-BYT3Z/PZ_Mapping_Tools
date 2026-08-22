@@ -55,9 +55,15 @@ void BuildingTileEntryView::clear()
 
 void BuildingTileEntryView::setEntries(const QList<BuildingTileEntry*> &entries, bool categoryLabels)
 {
+    // Loading a previously-unused tileset emits tilesetChanged() while this
+    // function is still resolving the category. Re-entering setEntries() for
+    // every loaded image recursively restarts the complete category and can
+    // overflow the stack for categories spanning many tilesets (Roof Caps is
+    // a common example). The active pass already picks up each loaded image.
     if (mSettingEntries)
         return;
     mSettingEntries = true;
+
     QList<Tiled::Tile*> tiles;
     QList<void*> userData;
     QStringList headers;
@@ -66,6 +72,9 @@ void BuildingTileEntryView::setEntries(const QList<BuildingTileEntry*> &entries,
     mEntries = entries;
     mEntries.detach(); // userData points to individual elements of this list
 
+    // Resolve and decode the category as one batch. Apart from avoiding one
+    // wait cycle per entry, this guarantees that a category is not displayed
+    // half-loaded when its entries span many tilesets.
     QList<Tileset*> requiredTilesets;
     for (BuildingTileEntry *entry : std::as_const(mEntries)) {
         BuildingTile *displayTile = entry->displayTile();
@@ -82,6 +91,7 @@ void BuildingTileEntryView::setEntries(const QList<BuildingTileEntry*> &entries,
         TileMetaInfoMgr::instance()->loadTilesets(requiredTilesets, true);
         TilesetManager::instance()->waitForTilesets(requiredTilesets);
     }
+
     for (BuildingTileEntry* entry : std::as_const(mEntries)) {
         if (Tiled::Tile *tile = BuildingTilesMgr::instance()->tileFor(entry->displayTile())) {
             if (tile == TilesetManager::instance()->missingTile())

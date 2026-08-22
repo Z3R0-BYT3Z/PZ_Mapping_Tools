@@ -48,6 +48,7 @@ using namespace Tiled::Internal;
 
 #ifdef ZOMBOID
 namespace {
+
 struct PZTilesetSources
 {
     QString source1x;
@@ -55,12 +56,14 @@ struct PZTilesetSources
     QSize size1x;
     QSize size2x;
 };
+
 PZTilesetSources pzTilesetSources(const QString &selectedPath)
 {
     PZTilesetSources sources;
     const QFileInfo selected(selectedPath);
     if (!selected.exists())
         return sources;
+
     if (selected.dir().dirName().compare(QLatin1String("2x"), Qt::CaseInsensitive) == 0) {
         sources.source2x = selected.absoluteFilePath();
         QDir parent = selected.dir();
@@ -71,6 +74,7 @@ PZTilesetSources pzTilesetSources(const QString &selectedPath)
         sources.source2x = selected.dir().filePath(
                     QLatin1String("2x/") + selected.fileName());
     }
+
     sources.size1x = QImageReader(sources.source1x).size();
     sources.size2x = QImageReader(sources.source2x).size();
     if (!sources.size1x.isValid())
@@ -79,6 +83,7 @@ PZTilesetSources pzTilesetSources(const QString &selectedPath)
         sources.source2x.clear();
     return sources;
 }
+
 bool validatePZTileset(const QString &name, const QString &selectedPath,
                        QString *description, QString *error)
 {
@@ -89,6 +94,7 @@ bool validatePZTileset(const QString &name, const QString &selectedPath,
             *error = QCoreApplication::translate("NewTilesetDialog", "The PNG image could not be read.");
         return false;
     }
+
     if (!sources.source1x.isEmpty() &&
             ((sources.size1x.width() % tileSize.width()) != 0 ||
              (sources.size1x.height() % tileSize.height()) != 0)) {
@@ -99,6 +105,7 @@ bool validatePZTileset(const QString &name, const QString &selectedPath,
                     .arg(tileSize.width()).arg(tileSize.height());
         return false;
     }
+
     if (!sources.source2x.isEmpty() &&
             ((sources.size2x.width() % (tileSize.width() * 2)) != 0 ||
              (sources.size2x.height() % (tileSize.height() * 2)) != 0)) {
@@ -109,6 +116,7 @@ bool validatePZTileset(const QString &name, const QString &selectedPath,
                     .arg(tileSize.width() * 2).arg(tileSize.height() * 2);
         return false;
     }
+
     if (!sources.source1x.isEmpty() && !sources.source2x.isEmpty() &&
             sources.size2x != sources.size1x * 2) {
         if (error)
@@ -116,6 +124,7 @@ bool validatePZTileset(const QString &name, const QString &selectedPath,
                     "The 2x companion must be exactly twice the width and height of the 1x image.");
         return false;
     }
+
     const QSize logicalImageSize = !sources.source1x.isEmpty()
             ? sources.size1x : sources.size2x / 2;
     const int columns = logicalImageSize.width() / tileSize.width();
@@ -130,8 +139,10 @@ bool validatePZTileset(const QString &name, const QString &selectedPath,
     }
     return true;
 }
-}
+
+} // namespace
 #endif
+
 NewTilesetDialog::NewTilesetDialog(const QString &path, QWidget *parent) :
     QDialog(parent),
     mPath(path),
@@ -220,6 +231,7 @@ void NewTilesetDialog::tryAccept()
     int spacing = mUi->spacing->value();
     int margin = mUi->margin->value();
     QPoint offset(mUi->offsetX->value(), mUi->offsetY->value());
+
 #ifdef ZOMBOID
     PZTilesetSources pzSources;
     if (projectZomboidMode) {
@@ -248,6 +260,7 @@ void NewTilesetDialog::tryAccept()
     if (projectZomboidMode)
         Tiled::setZomboidTileOffset(tileset.get());
 #endif
+
     if (useTransparentColor)
         tileset->setTransparentColor(transparentColor);
 
@@ -261,6 +274,7 @@ void NewTilesetDialog::tryAccept()
                       QLatin1String("../") + QFileInfo(pzSources.source2x).fileName());
         if (!pzSources.source2x.isEmpty())
             tileset->setImageSource2x(pzSources.source2x);
+
         TilesetImageCache *imageCache = TilesetManager::instance()->imageCache();
         Tileset *cached = imageCache
                 ? imageCache->findMatch(tileset.get(), logicalSource, pzSources.source2x)
@@ -353,6 +367,7 @@ void NewTilesetDialog::projectZomboidModeChanged(bool enabled)
     Q_UNUSED(enabled)
 #endif
 }
+
 void NewTilesetDialog::updateProjectZomboidInfo()
 {
 #ifdef ZOMBOID
@@ -362,6 +377,7 @@ void NewTilesetDialog::updateProjectZomboidInfo()
         mUi->projectZomboidInfo->setStyleSheet(QString());
         return;
     }
+
     QString description;
     QString error;
     const bool valid = validatePZTileset(mUi->name->text().trimmed(),
@@ -372,6 +388,7 @@ void NewTilesetDialog::updateProjectZomboidInfo()
             ? QString() : QLatin1String("QLabel { color: #c00000; }"));
 #endif
 }
+
 void NewTilesetDialog::updateOkButton()
 {
     QPushButton *okButton = mUi->buttonBox->button(QDialogButtonBox::Ok);

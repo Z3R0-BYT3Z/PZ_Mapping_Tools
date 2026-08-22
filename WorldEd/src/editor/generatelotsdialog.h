@@ -14,7 +14,7 @@ class WorldDocument;
 class GenerateLotsDialog : public QDialog
 {
     Q_OBJECT
-    
+
 public:
     explicit GenerateLotsDialog(WorldDocument *worldDoc, QWidget *parent = 0);
     ~GenerateLotsDialog();
@@ -23,9 +23,6 @@ public:
     void setExportAsMod(bool enabled);
     bool finalizeModExport(QString *error) const;
     void setModExportAvailable(bool available);
-    bool fillHolesDuringExport() const;
-    bool fillHolesWithNearestTile() const;
-    QString holeFillTileName() const;
 
 private slots:
     void exportBrowse();

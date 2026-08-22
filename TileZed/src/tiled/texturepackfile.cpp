@@ -86,20 +86,18 @@ static bool validImageSize(const QSize &size)
 static bool validTextureGeometry(const PackPage &page,
                                  const PackSubTexInfo &texture)
 {
-    const QSize pageSize = page.imageSize.isValid()
-            ? page.imageSize : page.image.size();
     return texture.x >= 0 && texture.y >= 0 &&
             texture.w > 0 && texture.h > 0 &&
             texture.ox >= 0 && texture.oy >= 0 &&
             texture.fx > 0 && texture.fy > 0 &&
             validImageSize(QSize(texture.fx, texture.fy)) &&
-            qint64(texture.x) + texture.w <= pageSize.width() &&
-            qint64(texture.y) + texture.h <= pageSize.height() &&
+            qint64(texture.x) + texture.w <= page.image.width() &&
+            qint64(texture.y) + texture.h <= page.image.height() &&
             qint64(texture.ox) + texture.w <= texture.fx &&
             qint64(texture.oy) + texture.h <= texture.fy;
 }
 
-bool PackFile::read(const QString &fileName, bool decodeImages)
+bool PackFile::read(const QString &fileName)
 {
     mPages.clear();
     mError.clear();
@@ -233,24 +231,19 @@ bool PackFile::read(const QString &fileName, bool decodeImages)
             return false;
         }
         QImageReader imageReader(&pngBuffer, "PNG");
-        page.imageSize = imageReader.size();
-        if (!imageReader.canRead() || !validImageSize(page.imageSize)) {
+        if (!validImageSize(imageReader.size())) {
             mError = tr("PNG dimensions on page %1 exceed safe limits.\n%2")
                     .arg(page.name).arg(fileName);
             return false;
         }
-        page.encodedImage = pngData;
-        if (decodeImages) {
-            page.image = imageReader.read();
-            if (page.image.isNull()) {
-                mError = tr("Invalid PNG on page %1: %2\n%3")
-                        .arg(page.name, imageReader.errorString(), fileName);
-                return false;
-            }
+        page.image = imageReader.read();
+        if (page.image.isNull()) {
+            mError = tr("Invalid PNG on page %1: %2\n%3")
+                    .arg(page.name, imageReader.errorString(), fileName);
+            return false;
         }
-        qDebug() << "PackFile: indexed" << page.name
-                 << page.imageSize << "bytes=" << pngData.size()
-                 << "decoded=" << !page.image.isNull();
+        qDebug() << "PackFile: decoded" << page.name
+                 << page.image.size() << "bytes=" << pngData.size();
 
         for (const PackSubTexInfo &texture : std::as_const(page.mInfo)) {
             if (!validTextureGeometry(page, texture)) {
@@ -283,10 +276,7 @@ bool PackFile::write(const QString &fileName)
     stream << qint32(mPages.size());
 
     for (const PackPage &page : std::as_const(mPages)) {
-        const QSize pageSize = page.imageSize.isValid()
-                ? page.imageSize : page.image.size();
-        if (!validImageSize(pageSize)
-                || (page.image.isNull() && page.encodedImage.isEmpty())) {
+        if (page.image.isNull() || !validImageSize(page.image.size())) {
             mError = tr("Page %1 has no image or exceeds safe limits.\n%2")
                     .arg(page.name).arg(fileName);
             return false;
@@ -310,15 +300,13 @@ bool PackFile::write(const QString &fileName)
                    << qint32(texture.fx) << qint32(texture.fy);
         }
 
-        QByteArray pngData = page.encodedImage;
-        if (pngData.isEmpty()) {
-            QBuffer buffer(&pngData);
-            if (!buffer.open(QIODevice::WriteOnly) ||
-                    !page.image.save(&buffer, "PNG", -1)) {
-                mError = tr("Could not encode page %1 as PNG.\n%2")
-                        .arg(page.name).arg(fileName);
-                return false;
-            }
+        QByteArray pngData;
+        QBuffer buffer(&pngData);
+        if (!buffer.open(QIODevice::WriteOnly) ||
+                !page.image.save(&buffer, "PNG", -1)) {
+            mError = tr("Could not encode page %1 as PNG.\n%2")
+                    .arg(page.name).arg(fileName);
+            return false;
         }
         stream << qint32(pngData.size());
         if (stream.writeRawData(pngData.constData(), pngData.size()) !=
@@ -367,37 +355,14 @@ QByteArray PackFile::fileSha256() const
 QImage PackFile::extractTexture(const PackPage &page,
                                 const PackSubTexInfo &texture)
 {
-    const QImage atlas = pageImage(page);
-    if (texture.fx <= 0 || texture.fy <= 0 || atlas.isNull())
+    if (texture.fx <= 0 || texture.fy <= 0 || page.image.isNull())
         return QImage();
     QImage image(texture.fx, texture.fy, QImage::Format_ARGB32);
     image.fill(Qt::transparent);
     QPainter painter(&image);
-    painter.drawImage(texture.ox, texture.oy, atlas,
+    painter.drawImage(texture.ox, texture.oy, page.image,
                       texture.x, texture.y, texture.w, texture.h);
     return image;
-}
-
-QImage PackFile::pageImage(const PackPage &page)
-{
-    if (!page.image.isNull())
-        return page.image;
-    if (page.encodedImage.isEmpty())
-        return QImage();
-
-    QBuffer buffer;
-    buffer.setData(page.encodedImage);
-    if (!buffer.open(QIODevice::ReadOnly))
-        return QImage();
-    QImageReader reader(&buffer, "PNG");
-    page.image = reader.read();
-    return page.image;
-}
-
-void PackFile::releaseDecodedImage(const PackPage &page)
-{
-    if (!page.encodedImage.isEmpty())
-        page.image = QImage();
 }
 
 QByteArray PackFile::textureSha256(const PackPage &page,

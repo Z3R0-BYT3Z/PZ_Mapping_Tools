@@ -25,6 +25,7 @@
 #include "worlddocument.h"
 
 #include "map.h"
+
 #include <QColor>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -36,6 +37,7 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QSet>
+
 using namespace Tiled;
 using namespace Tiled::Internal;
 
@@ -189,6 +191,7 @@ void BMPToTMXDialog::populateFallbackColors(
 {
     ui->groundFallback->clear();
     ui->vegetationFallback->clear();
+
     const auto addColor = [](QComboBox *combo, QRgb color,
                              const QString &description) {
         QPixmap swatch(18, 18);
@@ -203,9 +206,11 @@ void BMPToTMXDialog::populateFallbackColors(
                     : QStringLiteral("%1 - %2").arg(hex, description),
                     QVariant::fromValue<quint32>(color));
     };
+
     const QRgb black = qRgb(0, 0, 0);
     addColor(ui->groundFallback, black, tr("Black / empty"));
     addColor(ui->vegetationFallback, black, tr("Black / empty"));
+
     BmpRulesFile file;
     if (file.read(mRulesFile)) {
         QSet<QRgb> groundColors;
@@ -233,6 +238,7 @@ void BMPToTMXDialog::populateFallbackColors(
                      : rule->label);
         }
     }
+
     const auto restoreColor = [](QComboBox *combo, quint32 color) {
         for (int index = 0; index < combo->count(); ++index) {
             if (combo->itemData(index).toUInt() == color) {
@@ -245,6 +251,7 @@ void BMPToTMXDialog::populateFallbackColors(
     restoreColor(ui->groundFallback, groundColor);
     restoreColor(ui->vegetationFallback, vegetationColor);
 }
+
 quint32 BMPToTMXDialog::fallbackColor(int bitmapIndex) const
 {
     const QComboBox *combo = bitmapIndex == 0
@@ -253,6 +260,7 @@ quint32 BMPToTMXDialog::fallbackColor(int bitmapIndex) const
             ? combo->currentData().toUInt()
             : quint32(qRgb(0, 0, 0));
 }
+
 void BMPToTMXDialog::accept()
 {
     if (!validate())
@@ -275,6 +283,8 @@ void BMPToTMXDialog::apply()
 
 bool BMPToTMXDialog::validate()
 {
+    // Line edits are user-editable; do not rely solely on Browse button
+    // callbacks to update the backing values.
     mExportDir = QDir::fromNativeSeparators(
                 ui->exportEdit->text().trimmed());
     mRulesFile = QDir::fromNativeSeparators(
@@ -286,6 +296,7 @@ bool BMPToTMXDialog::validate()
     const bool metadataOnly = ui->metadataOnly->isChecked();
     if (!metadataOnly && !ensureExportDirectory())
         return false;
+    }
 
     QFileInfo info(mRulesFile);
     if (!info.exists()) {
@@ -311,137 +322,6 @@ bool BMPToTMXDialog::validate()
     return true;
 }
 
-bool BMPToTMXDialog::ensureExportDirectory()
-{
-    while (true) {
-        if (mExportDir.isEmpty()) {
-            if (!chooseExportDirectory())
-                return false;
-            continue;
-        }
-        const QFileInfo exportInfo(mExportDir);
-        if (exportInfo.exists()) {
-            if (exportInfo.isDir()) {
-                mExportDir = QDir::cleanPath(exportInfo.absoluteFilePath());
-                ui->exportEdit->setText(
-                            QDir::toNativeSeparators(mExportDir));
-                return true;
-            }
-            QMessageBox box(QMessageBox::Warning,
-                            tr("Export Location Is Not a Folder"),
-                            tr("The selected export location is a file, not a folder:\n%1")
-                            .arg(QDir::toNativeSeparators(
-                                     exportInfo.absoluteFilePath())),
-                            QMessageBox::NoButton, this);
-            QPushButton *chooseButton = box.addButton(
-                        tr("Choose Another Folder..."),
-                        QMessageBox::AcceptRole);
-            box.addButton(QMessageBox::Cancel);
-            box.setDefaultButton(chooseButton);
-            box.exec();
-            if (box.clickedButton() != chooseButton
-                    || !chooseExportDirectory())
-                return false;
-            continue;
-        }
-        QMessageBox box(QMessageBox::Question,
-                        tr("Create Export Directory?"),
-                        tr("The export directory does not exist:\n%1\n\n"
-                           "Would you like WorldEd to create it now?")
-                        .arg(QDir::toNativeSeparators(
-                                 exportInfo.absoluteFilePath())),
-                        QMessageBox::NoButton, this);
-        QPushButton *createButton = box.addButton(
-                    tr("Create Directory"), QMessageBox::AcceptRole);
-        QPushButton *chooseButton = box.addButton(
-                    tr("Choose Another Folder..."), QMessageBox::ActionRole);
-        box.addButton(QMessageBox::Cancel);
-        box.setDefaultButton(createButton);
-        box.exec();
-        if (box.clickedButton() == chooseButton) {
-            if (!chooseExportDirectory())
-                return false;
-            continue;
-        }
-        if (box.clickedButton() != createButton)
-            return false;
-        if (QDir().mkpath(mExportDir)) {
-            const QFileInfo createdInfo(mExportDir);
-            if (createdInfo.exists() && createdInfo.isDir()) {
-                mExportDir = QDir::cleanPath(createdInfo.absoluteFilePath());
-                ui->exportEdit->setText(
-                            QDir::toNativeSeparators(mExportDir));
-                return true;
-            }
-        }
-        QMessageBox failureBox(
-                    QMessageBox::Critical,
-                    tr("Could Not Create Export Directory"),
-                    tr("WorldEd could not create:\n%1\n\n%2")
-                    .arg(QDir::toNativeSeparators(
-                             exportInfo.absoluteFilePath()),
-                         exportDirectoryCreationFailure()),
-                    QMessageBox::NoButton, this);
-        chooseButton = failureBox.addButton(
-                    tr("Choose Another Folder..."),
-                    QMessageBox::AcceptRole);
-        failureBox.addButton(QMessageBox::Cancel);
-        failureBox.setDefaultButton(chooseButton);
-        failureBox.exec();
-        if (failureBox.clickedButton() != chooseButton
-                || !chooseExportDirectory())
-            return false;
-    }
-}
-bool BMPToTMXDialog::chooseExportDirectory()
-{
-    QString initialDirectory = mExportDir;
-    QFileInfo initialInfo(initialDirectory);
-    while (!initialDirectory.isEmpty() && !initialInfo.exists()) {
-        const QString parent = initialInfo.absolutePath();
-        if (parent == initialDirectory)
-            break;
-        initialDirectory = parent;
-        initialInfo.setFile(initialDirectory);
-    }
-    if (!initialInfo.exists() || !initialInfo.isDir())
-        initialDirectory = mWorldDoc && !mWorldDoc->fileName().isEmpty()
-                ? QFileInfo(mWorldDoc->fileName()).absolutePath()
-                : QDir::currentPath();
-    const QString selected = QFileDialog::getExistingDirectory(
-                this, tr("Choose the BMP to TMX Export Folder"),
-                initialDirectory);
-    if (selected.isEmpty())
-        return false;
-    mExportDir = QDir::cleanPath(QDir::fromNativeSeparators(selected));
-    ui->exportEdit->setText(QDir::toNativeSeparators(mExportDir));
-    return true;
-}
-QString BMPToTMXDialog::exportDirectoryCreationFailure() const
-{
-    QFileInfo currentInfo(mExportDir);
-    QString nearestExisting = currentInfo.absolutePath();
-    QFileInfo nearestInfo(nearestExisting);
-    while (!nearestExisting.isEmpty() && !nearestInfo.exists()) {
-        const QString parent = nearestInfo.absolutePath();
-        if (parent == nearestExisting)
-            break;
-        nearestExisting = parent;
-        nearestInfo.setFile(nearestExisting);
-    }
-    if (nearestInfo.exists() && !nearestInfo.isDir()) {
-        return tr("A parent location is a file instead of a folder:\n%1")
-                .arg(QDir::toNativeSeparators(
-                         nearestInfo.absoluteFilePath()));
-    }
-    if (nearestInfo.exists() && !nearestInfo.isWritable()) {
-        return tr("The nearest existing parent folder is not writable:\n%1")
-                .arg(QDir::toNativeSeparators(
-                         nearestInfo.absoluteFilePath()));
-    }
-    return tr("The operating system refused the folder creation request. "
-              "Check the folder name and your write permissions.");
-}
 void BMPToTMXDialog::toSettings()
 {
     if (QFileInfo(mRulesFile) == QFileInfo(BMPToTMX::instance()->defaultRulesFile()))

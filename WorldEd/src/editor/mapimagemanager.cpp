@@ -86,6 +86,7 @@ MapImageManager::MapImageManager() :
     qRegisterMetaType<MapImageData>("MapImageData");
     qRegisterMetaType<MapImage*>("MapImage*");
     qRegisterMetaType<MapComposite*>("MapComposite*");
+
     const int renderThreadCount =
             qBound(1, QThread::idealThreadCount() - 1, 4);
     mImageRenderThreads.resize(renderThreadCount);
@@ -243,6 +244,10 @@ bool MapImageManager::recreateMapImage(const QString &mapName, const QString &re
 
     MapImage *mapImage = mMapImages.value(mapFilePath, nullptr);
     if (!mapImage) {
+        // An explicit rebuild must not begin by loading the old cached PNG.
+        // Create the lightweight display placeholder and queue the requested
+        // render directly.  This also prevents a cache miss from rendering
+        // the same TMX twice (automatic render followed by forced render).
         ImageData data = generateMapImage(mapFilePath, true);
         MapInfo *mapInfo = MapManager::instance()->mapInfo(mapFilePath);
         if (!data.valid || !data.threadRender || !mapInfo) {
@@ -266,17 +271,21 @@ bool MapImageManager::recreateMapImage(const QString &mapName, const QString &re
                 << "for" << mapFilePath;
         return true;
     }
+
     if (!mapImage->mLoaded) {
         mForceRebuildAfterLoad.insert(mapImage);
         qInfo() << "Thumbnail recreation queued after current load for" << mapFilePath;
         return true;
     }
+
     return scheduleMapImageRebuild(mapImage);
 }
+
 bool MapImageManager::scheduleMapImageRebuild(MapImage *mapImage)
 {
     if (!mapImage || !mapImage->mapInfo())
         return false;
+
     ImageData data = generateMapImage(mapImage->mapInfo()->path(), true);
     if (!data.valid || !data.threadRender) {
         mError = tr("Unable to prepare the thumbnail renderer for %1")
@@ -285,6 +294,7 @@ bool MapImageManager::scheduleMapImageRebuild(MapImage *mapImage)
         emit mapImageFailedToLoad(mapImage);
         return false;
     }
+
     paintDummyImage(data, mapImage->mapInfo());
     mapImage->mapFileChanged(data.image, data.scale,
                              data.levelZeroBounds,
@@ -298,6 +308,7 @@ bool MapImageManager::scheduleMapImageRebuild(MapImage *mapImage)
             << "for" << mapImage->mapInfo()->path();
     return true;
 }
+
 void MapImageManager::queueRenderJob(MapImage *mapImage)
 {
     Q_ASSERT(!mImageRenderWorkers.isEmpty());
@@ -737,6 +748,7 @@ void MapImageManager::imageLoadedByThread(QImage *image, MapImage *mapImage)
         scheduleMapImageRebuild(mapImage);
         return;
     }
+
     if (mDeferralDepth > 0)
         mDeferredMapImages += mapImage;
     else
@@ -750,17 +762,20 @@ void MapImageManager::renderThreadNeedsMap(MapImage *mapImage)
     Q_ASSERT(worker);
     if (!worker)
         return;
+
     Q_ASSERT(!mRenderPreparations.contains(worker));
     if (mRenderPreparations.contains(worker))
         return;
     beginRenderMapPreparation(worker, mapImage);
 }
+
 void MapImageManager::beginRenderMapPreparation(
         MapImageRenderWorker *worker, MapImage *mapImage)
 {
     RenderPreparation preparation;
     preparation.mapImage = mapImage;
     mRenderPreparations.insert(worker, preparation);
+
     bool asynch = true;
     MapInfo *mapInfo = MapManager::instance()->loadMap(mapImage->mapInfo()->path(),
                                                        QString(), asynch,
@@ -769,6 +784,7 @@ void MapImageManager::beginRenderMapPreparation(
         failRenderMapPreparation(worker);
         return;
     }
+
     RenderPreparation &active = mRenderPreparations[worker];
     active.discoveredMaps.insert(mapInfo);
     active.pendingMaps.insert(mapInfo);
@@ -814,6 +830,7 @@ void MapImageManager::imageRenderedByThread(MapImageData imgData,
         writeImageData(imageDataInfo, data);
         qInfo() << "Thumbnail saved to" << imageInfo.absoluteFilePath();
     }
+
     if (mForceRebuildAfterLoad.remove(mapImage)) {
         scheduleMapImageRebuild(mapImage);
         return;
@@ -866,6 +883,7 @@ void MapImageManager::processLoadedMapForPreparation(
 {
     QList<MapInfo*> loadedMaps;
     loadedMaps += mapInfo;
+
     while (!loadedMaps.isEmpty()) {
         MapInfo *loadedMap = loadedMaps.takeFirst();
         auto it = mRenderPreparations.find(worker);
@@ -873,10 +891,12 @@ void MapImageManager::processLoadedMapForPreparation(
                 || !it->pendingMaps.remove(loadedMap)) {
             continue;
         }
+
 #ifdef WORLDED
         MapManager::instance()->addReferenceToMap(loadedMap);
         it->referencedMaps += loadedMap;
 #endif
+
         const QStringList subMapPaths = getSubMapFileNames(loadedMap);
         for (const QString &path : subMapPaths) {
             bool async = true;
@@ -884,11 +904,13 @@ void MapImageManager::processLoadedMapForPreparation(
                         path, QString(), async, MapManager::PriorityLow);
             if (!subMapInfo)
                 continue;
+
             it = mRenderPreparations.find(worker);
             if (it == mRenderPreparations.end())
                 return;
             if (it->discoveredMaps.contains(subMapInfo))
                 continue;
+
             it->discoveredMaps.insert(subMapInfo);
             it->pendingMaps.insert(subMapInfo);
             if (!subMapInfo->isLoading())
@@ -909,6 +931,7 @@ void MapImageManager::finishRenderMapPreparation(
             mRenderPreparations.take(renderWorker);
     MapImage *renderMapImage = preparation.mapImage;
     MapInfo *mapInfo = renderMapImage->mapInfo();
+
     MapComposite *renderComposite = new MapComposite(mapInfo);
     Q_ASSERT(renderComposite->waitingForMapsToLoad() == false);
 #ifdef WORLDED
@@ -916,6 +939,10 @@ void MapImageManager::finishRenderMapPreparation(
     for (MapInfo *referencedMap : preparation.referencedMaps)
         MapManager::instance()->removeReferenceToMap(referencedMap);
 #endif
+    // MapManager loads the tilesets actually used by each map before it emits
+    // mapLoaded().  Re-scanning every layer here and calling waitForTilesets()
+    // a second time only duplicated work on the GUI thread; it did not make
+    // the worker-side render safer.
 
     // BmpBlender sends a signal to the MapComposite when it has finished
     // blending.  That needs to happen in the render thread.
@@ -925,6 +952,7 @@ void MapImageManager::finishRenderMapPreparation(
                           ActiveRender{renderWorker, renderThread,
                                        renderMapImage});
     renderComposite->moveToThread(renderThread);
+
     QMetaObject::invokeMethod(renderWorker,
                               "mapLoaded", Qt::QueuedConnection,
                               Q_ARG(MapComposite*, renderComposite));
@@ -936,12 +964,14 @@ void MapImageManager::failRenderMapPreparation(
     const auto it = mRenderPreparations.find(renderWorker);
     if (it == mRenderPreparations.end())
         return;
+
     const RenderPreparation preparation = it.value();
     mRenderPreparations.erase(it);
 #ifdef WORLDED
     for (MapInfo *referencedMap : preparation.referencedMaps)
         MapManager::instance()->removeReferenceToMap(referencedMap);
 #endif
+
     MapImage *mapImage = preparation.mapImage;
     mForceRebuildAfterLoad.remove(mapImage);
     mapImage->mImage.fill(Qt::transparent);
@@ -950,6 +980,7 @@ void MapImageManager::failRenderMapPreparation(
                               "mapFailedToLoad", Qt::QueuedConnection);
     emit mapImageFailedToLoad(mapImage);
 }
+
 void MapImageManager::mapFailedToLoad(MapInfo *mapInfo)
 {
     const QList<MapImageRenderWorker*> workers = mRenderPreparations.keys();
@@ -959,10 +990,13 @@ void MapImageManager::mapFailedToLoad(MapInfo *mapInfo)
                 || !it->pendingMaps.contains(mapInfo)) {
             continue;
         }
+
         if (it->mapImage->mapInfo() == mapInfo) {
             failRenderMapPreparation(worker);
             continue;
         }
+
+        // A missing sub-map doesn't prevent the root map from being painted.
         it->pendingMaps.remove(mapInfo);
         if (it->pendingMaps.isEmpty())
             finishRenderMapPreparation(worker);
@@ -1227,6 +1261,7 @@ void MapImageRenderWorker::work()
         qInfo() << "Thumbnail render"
                 << (aborted() ? "aborted" : "finished")
                 << job.mapImage->mapInfo()->path();
+
         bool imageSaved = false;
         if (data.valid() && !job.imageFileName.isEmpty())
             imageSaved = data.image.save(job.imageFileName);

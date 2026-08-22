@@ -28,7 +28,6 @@
 #include "tmxmapwriter.h"
 #include "tile.h"
 #include "tilelayer.h"
-#include "tileselectionscope.h"
 
 #include <QApplication>
 #include <QClipboard>

@@ -433,10 +433,15 @@ void WorldDocument::trimWorldToBounds(const QRect &bounds)
     Q_ASSERT(!bounds.isEmpty());
     if (bounds == world()->bounds())
         return;
+
     const QPoint cellOffset = bounds.topLeft();
     const QPoint squareOffset = cellOffset * -world()->cellSize();
     QUndoStack *stack = undoStack();
     stack->beginMacro(tr("Remove Empty Border Cells"));
+
+    // Move retained cell contents towards 0,0 before chopping off the old
+    // right/bottom border. Ascending order guarantees each destination has
+    // already been vacated when the crop removes a left or top border.
     if (!cellOffset.isNull()) {
         for (int y = bounds.top(); y <= bounds.bottom(); ++y) {
             for (int x = bounds.left(); x <= bounds.right(); ++x) {
@@ -445,18 +450,23 @@ void WorldDocument::trimWorldToBounds(const QRect &bounds)
                     moveCell(cell, cell->pos() - cellOffset);
             }
         }
+
         for (Road *road : std::as_const(world()->roads()))
             changeRoadCoords(road, road->start() + squareOffset,
                              road->end() + squareOffset);
+
         for (WorldBMP *bmp : world()->bmps())
             moveBMP(bmp, bmp->pos() - cellOffset);
+
         GenerateLotsSettings settings = world()->getGenerateLotsSettings();
         settings.worldOrigin += cellOffset;
         changeGenerateLotsSettings(settings);
     }
+
     resizeWorld(bounds.size());
     stack->endMacro();
 }
+
 void WorldDocument::setCellMapName(WorldCell *cell, const QString &mapName)
 {
     Q_ASSERT(cell && cell->world() == world());
@@ -1428,6 +1438,11 @@ int WorldDocumentUndoRedo::setLotLevel(WorldCellLot *lot, int level)
 {
     int oldLevel = lot->level();
     lot->setLevel(level);
+
+    // Update the lot's position so it stays in the same visual location
+    QPoint offset(3, 3);
+    int delta = level - oldLevel;
+    lot->setPos(lot->pos() + offset * delta);
 
     emit lotLevelChanged(lot);
     return oldLevel;

@@ -672,9 +672,9 @@ void CellLoader::LoadCellBinaryChunkForLater(IsoCell *cell, int wx, int wy, IsoC
     int WY = wy / isoConstants.CHUNKS_PER_CELL;
 
     IsoLot *lot = new IsoLot(cell->World->Directory, WX, WY, wx, wy, chunk);
-    if (lot->info != nullptr) {
-        cell->PlaceLot(lot, 0, 0, lot->info->minLevel, chunk, wx, wy, true);
-    }
+
+    cell->PlaceLot(lot, 0, 0, lot->info->minLevel, chunk, wx, wy, true);
+
     delete lot;
 }
 

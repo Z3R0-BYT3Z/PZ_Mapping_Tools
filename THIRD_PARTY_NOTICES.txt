@@ -32,17 +32,6 @@ License text: licenses/Qt-5-LGPL-3.0-GPL-3.0.txt
 Corresponding upstream source:
   https://download.qt.io/archive/qt/5.14/5.14.2/single/
 
-OpenSSL 1.1.1 runtime
----------------------
-Copyright (c) 1998-2019 The OpenSSL Project.
-Copyright (C) 1995-1998 Eric Young.
-The Windows release bundles OpenSSL 1.1.1 runtime libraries so Qt Network can
-connect to HTTPS services used by the OpenStreetMap terrain importer.
-License: OpenSSL License and original SSLeay License.
-License text: licenses/OpenSSL-1.1.1.txt
-Upstream:
-  https://www.openssl.org/source/old/1.1.1/
-
 Qt Solutions: QtSingleApplication / QtLockedFile
 ------------------------------------------------
 Copyright Digia Plc and/or its subsidiaries.

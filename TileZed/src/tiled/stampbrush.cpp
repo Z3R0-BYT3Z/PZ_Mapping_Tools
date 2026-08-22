@@ -204,6 +204,10 @@ void StampBrush::tilePositionChanged(const QPoint &)
     case Paint:
 #ifdef ZOMBOID
         foreach (const QPoint &p, calculateLine(x, y, mStampX, mStampY)) {
+            // beginPaint() already painted the previous brush position. The
+            // Bresenham line includes both endpoints, so painting it again
+            // would create a redundant undo command and two redraw signals
+            // for every mouse-move event.
             if (p == QPoint(x, y))
                 continue;
             // Must updatePosition() at each point along the line,

@@ -34,6 +34,7 @@ class BaseWorldSceneTool;
 class MapImage;
 class MapInfo;
 class LoadThumbnailsDialog;
+class NightPreviewItem;
 class PasteCellsTool;
 class Road;
 class World;
@@ -506,7 +507,7 @@ class WorldScene : public BaseGraphicsScene
 public:
     explicit WorldScene(WorldDocument *worldDoc, QObject *parent = 0);
     ~WorldScene();
-    
+
     static const int ZVALUE_CELLITEM;
     static const int ZVALUE_ROADITEM_UNSELECTED;
     static const int ZVALUE_ROADITEM_SELECTED;
@@ -569,6 +570,7 @@ public:
     { return mOtherWorlds; }
 
     void cancelLoadingThumbnails();
+    void setNightPreviewEnabled(bool enabled);
 
     bool loadWorldMapOverlay(const QString &fileName, bool forest,
                              QString *error);
@@ -579,7 +581,7 @@ public:
     void clearWorldMapOverlays();
 
 signals:
-    
+
 public slots:
     void worldAboutToResize(const QSize &newSize);
     void worldResized(const QSize &oldSize);
@@ -665,6 +667,7 @@ private:
     WorldMapOverlayItem *mWorldMapForestOverlayItem = nullptr;
     bool mBMPToolActive;
     bool mDoubleClick;
+    NightPreviewItem *mNightPreviewItem;
 
     int pendingThumbnailCount() const;
     void startThumbnailProgress();

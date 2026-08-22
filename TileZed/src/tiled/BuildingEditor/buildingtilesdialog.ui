@@ -46,16 +46,6 @@
       <widget class="QWidget" name="layoutWidget">
        <layout class="QVBoxLayout" name="verticalLayout_6">
         <item>
-         <widget class="QLineEdit" name="categoryFilter">
-          <property name="placeholderText">
-           <string>Filter categories</string>
-          </property>
-          <property name="clearButtonEnabled">
-           <bool>true</bool>
-          </property>
-         </widget>
-        </item>
-        <item>
          <widget class="QListWidget" name="categoryList"/>
         </item>
         <item>

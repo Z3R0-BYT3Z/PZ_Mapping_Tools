@@ -214,7 +214,6 @@ public:
 
     void writeSettings(QSettings& settings);
     void readSettings(QSettings& settings);
-    static bool validateResolutionTags(QString *error = nullptr);
 
 
 public slots:

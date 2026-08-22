@@ -21,7 +21,6 @@
 #include "buildingpreferences.h"
 #include "preferences.h"
 #include "../../portablesettings.h"
-#include "../../sharedmainwindowgeometrywidget.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -29,7 +28,6 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
-#include <QPushButton>
 #include <QSettings>
 
 using namespace BuildingEditor;
@@ -39,15 +37,9 @@ BuildingPreferencesDialog::BuildingPreferencesDialog(QWidget *parent) :
     ui(new Ui::BuildingPreferencesDialog),
     mThemeCombo(new QComboBox(this)),
     mSyncThemeCheckBox(new QCheckBox(
-          tr("Apply to TileZed, BuildingEd and WorldEd"), this)),
-    mProjectZomboidDirectory(new QLineEdit(this)),
-    mAutoSaveCombo(new QComboBox(this))
+          tr("Apply to TileZed, BuildingEd and WorldEd"), this))
 {
     ui->setupUi(this);
-
-    ui->tabWidget->addTab(
-                new SharedMainWindowGeometryWidget(parent, ui->tabWidget),
-                tr("Window Setup"));
 
     QString configPath = prefs()->configPath();
     ui->configDirEdit->setText(QDir::toNativeSeparators(configPath));
@@ -71,56 +63,6 @@ BuildingPreferencesDialog::BuildingPreferencesDialog(QWidget *parent) :
     themeLayout->addWidget(mSyncThemeCheckBox);
     themeLayout->addStretch();
     ui->gridLayout->addLayout(themeLayout, 1, 0);
-
-    QHBoxLayout *gamePathLayout = new QHBoxLayout;
-    gamePathLayout->addWidget(new QLabel(
-                tr("Project Zomboid installation:"), this));
-    mProjectZomboidDirectory->setReadOnly(true);
-    mProjectZomboidDirectory->setText(QDir::toNativeSeparators(
-        Tiled::Internal::Preferences::instance()
-        ->projectZomboidDirectory()));
-    mProjectZomboidDirectory->setToolTip(tr(
-        "Shared read-only source for TileDefs, packs, WorldGen, procedural "
-        "loot, and other installed-game data. Basement sources and PZBY "
-        "files use the portable pzby_tbx directory beside bin."));
-    gamePathLayout->addWidget(mProjectZomboidDirectory, 1);
-    QPushButton *browseGamePath = new QPushButton(tr("Browse..."), this);
-    QPushButton *clearGamePath = new QPushButton(tr("Clear"), this);
-    gamePathLayout->addWidget(browseGamePath);
-    gamePathLayout->addWidget(clearGamePath);
-    ui->gridLayout->addLayout(gamePathLayout, 2, 0);
-    QHBoxLayout *autoSaveLayout = new QHBoxLayout;
-    autoSaveLayout->addWidget(new QLabel(tr("Autosave recovery copy:"), this));
-    mAutoSaveCombo->addItem(tr("Disabled"), 0);
-    for (int minutes : {1, 5, 10, 20, 60})
-        mAutoSaveCombo->addItem(tr("Every %1 minute(s)").arg(minutes),
-                                minutes);
-    const int autoSaveIndex = mAutoSaveCombo->findData(
-                prefs()->autoSaveIntervalMinutes());
-    mAutoSaveCombo->setCurrentIndex(autoSaveIndex >= 0 ? autoSaveIndex : 0);
-    autoSaveLayout->addWidget(mAutoSaveCombo);
-    autoSaveLayout->addStretch();
-    ui->gridLayout->addLayout(autoSaveLayout, 3, 0);
-    connect(browseGamePath, &QAbstractButton::clicked, this, [this]() {
-        const QString directory = QFileDialog::getExistingDirectory(
-                    this, tr("Project Zomboid Installation"),
-                    mProjectZomboidDirectory->text());
-        if (directory.isEmpty())
-            return;
-        const QString normalized =
-                PortableSettings::normalizedGamePath(directory);
-        if (normalized.isEmpty()) {
-            QMessageBox::warning(
-                        this, tr("Invalid Project Zomboid Installation"),
-                        tr("Choose the Project Zomboid installation root or "
-                           "its media directory."));
-            return;
-        }
-        mProjectZomboidDirectory->setText(
-                    QDir::toNativeSeparators(normalized));
-    });
-    connect(clearGamePath, &QAbstractButton::clicked,
-            mProjectZomboidDirectory, &QLineEdit::clear);
     connect(mThemeCombo, qOverload<int>(&QComboBox::currentIndexChanged),
             this, [this](int) {
         Tiled::Internal::Preferences::instance()->setTheme(
@@ -160,10 +102,5 @@ void BuildingPreferencesDialog::accept()
     prefs()->setGridColor(ui->gridColor->color());
     prefs()->setUseOpenGL(mUseOpenGL);
     prefs()->setLevelIsometric(ui->levelIsometric->isChecked());
-    prefs()->setAutoSaveIntervalMinutes(
-                mAutoSaveCombo->currentData().toInt());
-    Tiled::Internal::Preferences::instance()
-            ->setProjectZomboidDirectory(
-                mProjectZomboidDirectory->text().trimmed());
     QDialog::accept();
 }

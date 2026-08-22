@@ -99,13 +99,16 @@ CreateObjectTool::~CreateObjectTool()
 void CreateObjectTool::activate(MapScene *scene)
 {
     AbstractObjectTool::activate(scene);
+
     if (mMode != CreateArea)
         return;
+
     QSettings settings;
     mObjectName = settings.value(
                 QLatin1String("ObjectCreation/Name")).toString();
     mObjectType = settings.value(
                 QLatin1String("ObjectCreation/Type")).toString();
+
     const QList<MapObject*> selected = mapDocument()->selectedObjects();
     if (selected.size() == 1) {
         if (!selected.first()->name().isEmpty())
@@ -114,11 +117,13 @@ void CreateObjectTool::activate(MapScene *scene)
             mObjectType = selected.first()->type();
     }
 }
+
 void CreateObjectTool::selectedByUser()
 {
     if (mMode == CreateArea && mapDocument())
         editObjectPreset();
 }
+
 void CreateObjectTool::deactivate(MapScene *scene)
 {
     if (mNewMapObjectItem)
@@ -129,16 +134,21 @@ void CreateObjectTool::deactivate(MapScene *scene)
 
 void CreateObjectTool::updateEnabledState()
 {
+    // Keep Insert Object available on tile layers so it can offer to create
+    // the missing object layer in the selected level.
     setEnabled(mapDocument() != nullptr);
 }
+
 void CreateObjectTool::editObjectPreset()
 {
     QDialog dialog(QApplication::activeWindow());
     dialog.setWindowTitle(tr("New Object Defaults"));
+
     QFormLayout layout(&dialog);
     QLineEdit nameEdit(mObjectName, &dialog);
     QComboBox typeEdit(&dialog);
     typeEdit.setEditable(true);
+
     QStringList types;
     for (ObjectGroup *group : mapDocument()->map()->objectGroups()) {
         for (MapObject *object : group->objects()) {
@@ -151,6 +161,7 @@ void CreateObjectTool::editObjectPreset()
     types.sort(Qt::CaseInsensitive);
     typeEdit.addItems(types);
     typeEdit.setEditText(mObjectType);
+
     layout.addRow(tr("Name:"), &nameEdit);
     layout.addRow(tr("Type:"), &typeEdit);
     QDialogButtonBox buttons(QDialogButtonBox::Ok
@@ -161,14 +172,17 @@ void CreateObjectTool::editObjectPreset()
             &dialog, &QDialog::accept);
     connect(&buttons, &QDialogButtonBox::rejected,
             &dialog, &QDialog::reject);
+
     if (dialog.exec() != QDialog::Accepted)
         return;
+
     mObjectName = nameEdit.text().trimmed();
     mObjectType = typeEdit.currentText().trimmed();
     QSettings settings;
     settings.setValue(QLatin1String("ObjectCreation/Name"), mObjectName);
     settings.setValue(QLatin1String("ObjectCreation/Type"), mObjectType);
 }
+
 void CreateObjectTool::mouseEntered()
 {
 }

@@ -77,9 +77,6 @@ public:
     bool levelIsometric() const
     { return mLevelIsometric; }
 
-    int autoSaveIntervalMinutes() const
-    { return mAutoSaveIntervalMinutes; }
-
 signals:
     void mapsDirectoryChanged();
     void showGridChanged(bool show);
@@ -94,7 +91,6 @@ signals:
     void tileScaleChanged(qreal scale);
     void useOpenGLChanged(bool useOpenGL);
     void levelIsometricChanged(bool levels);
-    void autoSaveIntervalChanged(int minutes);
 
 public slots:
     void setMapsDirectory(const QString &path);
@@ -110,7 +106,6 @@ public slots:
     void setTileScale(qreal scale);
     void setUseOpenGL(bool useOpenGL);
     void setLevelIsometric(bool levels);
-    void setAutoSaveIntervalMinutes(int minutes);
 
 private:
     static BuildingPreferences *mInstance;
@@ -128,7 +123,6 @@ private:
     qreal mTileScale;
     bool mUseOpenGL;
     bool mLevelIsometric;
-    int mAutoSaveIntervalMinutes;
 };
 
 } // namespace BuildingEditor

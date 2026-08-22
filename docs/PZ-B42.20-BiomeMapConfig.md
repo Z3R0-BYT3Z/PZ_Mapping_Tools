@@ -114,30 +114,15 @@ WorldEd now uses this complete metadata table in three places:
 
 1. **Generate Biome Map > Show Build 42.20 BiomeMapConfig Reference...**
    displays every field and marks override-only values.
-2. The Biomemap brush has two explicit modes. **Biome (red channel)** paints
-   map-square values and preserves green. **Zone (green channel)** paints
-   complete 8 x 8 chunks on the absolute world grid and preserves red. The
-   displayed overlay switches to the active channel so Zone strokes remain
-   visible while they are edited. Each mode retains its own value and radius.
+2. The Biomemap brush palette shows the exact `biome`, `ore`, and `zone`
+   fields in each item tooltip. Painting changes only red and preserves green.
 3. Generation validates both channels. Unknown green IDs stop generation,
    unknown red IDs and red values without an effect are reported, mixed green
    IDs inside an 8 x 8 chunk are reported, and ID 171 produces an explicit
    override warning.
 
-When zones are rasterized from the current PZW project, unpainted terrain has
-three fallback choices:
-
-- **Automatic** uses green 171 only when an active `pixel = 171` entry is
-  detected in the map's `WorldGenOverride.lua`. Otherwise it uses the
-  Vanilla-safe green 64 `ForagingNav` value.
-- **ForagingNav 64** always uses the Vanilla-safe neutral navigation value.
-- **Vegitation 171** always writes green 171 and warns when its map override
-  cannot be detected.
-
-Selecting an external Zone PNG bypasses this fallback because that image
-supplies every green value. The embedded table is a verified Build 42.20
-reference. WorldEd never executes the Lua override. Automatic mode only reads
-the relevant file and detects an uncommented `pixel = 171` entry.
+The embedded table is a verified Build 42.20 reference. WorldEd does not
+execute arbitrary Lua configuration files.
 
 ## Enabling ID 171 for a map
 

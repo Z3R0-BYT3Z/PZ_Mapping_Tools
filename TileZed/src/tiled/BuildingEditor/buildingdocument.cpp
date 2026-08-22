@@ -253,8 +253,6 @@ void BuildingDocument::setClipboardTileLayers(
     mClipboardTiles = mClipboardTileLayers.isEmpty()
             ? nullptr : mClipboardTileLayers.first().tiles;
     mClipboardTilesRgn = rgn;
-    mClipboardAnchorLevel = anchorLevel;
-    mClipboardPreservesPlanes = true;
     emit clipboardTilesChanged();
 }
 

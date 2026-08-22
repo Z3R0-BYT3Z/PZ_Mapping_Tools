@@ -6,8 +6,11 @@
  * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  */
+
 #include "lootdistributiondialog.h"
+
 #include "preferences.h"
+
 #include <QAbstractItemView>
 #include <QApplication>
 #include <QCheckBox>
@@ -48,36 +51,45 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QUrl>
+
 #include <algorithm>
 #include <cmath>
+
 extern "C" {
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
 }
+
 namespace Tiled {
 namespace Internal {
+
 namespace {
+
 const char kManifestRelativePath[] =
         "media/lua/server/Items/PZToolsLootEditor.json";
 const char kLuaRelativePath[] =
         "media/lua/server/Items/PZToolsLootDefinitions.lua";
+
 QString luaString(lua_State *state, int index)
 {
     size_t length = 0;
     const char *value = lua_tolstring(state, index, &length);
     return value ? QString::fromUtf8(value, int(length)) : QString();
 }
+
 void lootInstructionLimit(lua_State *state, lua_Debug *)
 {
     luaL_error(state, "loot definition exceeded the editor instruction limit");
 }
+
 QString normalizedItemsRoot(const QString &requestedPath)
 {
     const QString path =
             QDir::cleanPath(QDir::fromNativeSeparators(requestedPath.trimmed()));
     if (path.isEmpty())
         return QString();
+
     const QStringList candidates = {
         path,
         QDir(path).filePath(QStringLiteral("media/lua/server/Items")),
@@ -96,11 +108,13 @@ QString normalizedItemsRoot(const QString &requestedPath)
     }
     return QString();
 }
+
 void removeLuaGlobal(lua_State *state, const char *name)
 {
     lua_pushnil(state);
     lua_setglobal(state, name);
 }
+
 bool executeLuaFile(lua_State *state, const QString &fileName, QString *error)
 {
     const QByteArray encoded = QFile::encodeName(fileName);
@@ -109,6 +123,7 @@ bool executeLuaFile(lua_State *state, const QString &fileName, QString *error)
         status = lua_pcall(state, 0, 0, 0);
     if (status == LUA_OK)
         return true;
+
     if (error) {
         *error = QObject::tr("%1\n\n%2")
                 .arg(QDir::toNativeSeparators(fileName),
@@ -117,6 +132,7 @@ bool executeLuaFile(lua_State *state, const QString &fileName, QString *error)
     lua_pop(state, 1);
     return false;
 }
+
 bool tableIsArray(lua_State *state, int index, const QString &hint)
 {
     index = lua_absindex(state, index);
@@ -126,6 +142,7 @@ bool tableIsArray(lua_State *state, int index, const QString &hint)
                 || hint == QLatin1String("procList")
                 || hint == QLatin1String("bags");
     }
+
     int count = 0;
     lua_pushnil(state);
     while (lua_next(state, index) != 0) {
@@ -145,6 +162,7 @@ bool tableIsArray(lua_State *state, int index, const QString &hint)
     }
     return count == length;
 }
+
 QJsonValue luaToJson(lua_State *state, int index, int depth,
                      const QString &hint = QString())
 {
@@ -169,6 +187,7 @@ QJsonValue luaToJson(lua_State *state, int index, int depth,
             }
             return array;
         }
+
         QJsonObject object;
         lua_pushnil(state);
         while (lua_next(state, index) != 0) {
@@ -187,6 +206,7 @@ QJsonValue luaToJson(lua_State *state, int index, int depth,
         return QJsonValue();
     }
 }
+
 QJsonObject readLuaGlobalObject(lua_State *state, const char *name)
 {
     QJsonObject result;
@@ -196,6 +216,7 @@ QJsonObject readLuaGlobalObject(lua_State *state, const char *name)
     lua_pop(state, 1);
     return result;
 }
+
 struct LootData
 {
     QString itemsRoot;
@@ -204,6 +225,7 @@ struct LootData
     QJsonObject gameProcedures;
     QJsonObject projectRooms;
     QJsonObject projectProcedures;
+
     QJsonObject rooms() const
     {
         QJsonObject result = gameRooms;
@@ -219,6 +241,7 @@ struct LootData
         }
         return result;
     }
+
     QJsonObject procedures() const
     {
         QJsonObject result = gameProcedures;
@@ -228,12 +251,14 @@ struct LootData
         }
         return result;
     }
+
     bool isProjectContainer(const QString &room,
                             const QString &container) const
     {
         return projectRooms.value(room).toObject().contains(container);
     }
 };
+
 bool loadGameDefinitions(const QString &requestedPath, LootData *data,
                          QString *error)
 {
@@ -246,6 +271,7 @@ bool loadGameDefinitions(const QString &requestedPath, LootData *data,
         }
         return false;
     }
+
     lua_State *state = luaL_newstate();
     if (!state) {
         if (error)
@@ -254,6 +280,9 @@ bool loadGameDefinitions(const QString &requestedPath, LootData *data,
     }
     luaL_openlibs(state);
     lua_sethook(state, lootInstructionLimit, LUA_MASKCOUNT, 1000000);
+
+    // These files are trusted game definitions, but the editor still removes
+    // filesystem/process/network entry points before executing them.
     removeLuaGlobal(state, "dofile");
     removeLuaGlobal(state, "loadfile");
     removeLuaGlobal(state, "load");
@@ -262,6 +291,7 @@ bool loadGameDefinitions(const QString &requestedPath, LootData *data,
     removeLuaGlobal(state, "os");
     removeLuaGlobal(state, "package");
     removeLuaGlobal(state, "debug");
+
     if (luaL_dostring(state,
                       "Distributions = {}\n"
                       "ClutterTables = {}\n"
@@ -272,6 +302,7 @@ bool loadGameDefinitions(const QString &requestedPath, LootData *data,
         lua_close(state);
         return false;
     }
+
     QStringList supportFiles;
     QDirIterator iterator(root,
                           QStringList() << QStringLiteral("Distribution_*.lua"),
@@ -288,6 +319,7 @@ bool loadGameDefinitions(const QString &requestedPath, LootData *data,
             return false;
         }
     }
+
     if (!executeLuaFile(
                 state,
                 QDir(root).filePath(QStringLiteral("Distributions.lua")),
@@ -300,6 +332,7 @@ bool loadGameDefinitions(const QString &requestedPath, LootData *data,
         lua_close(state);
         return false;
     }
+
     QJsonObject rooms = readLuaGlobalObject(state, "SuburbsDistributions");
     if (rooms.isEmpty()) {
         lua_getglobal(state, "Distributions");
@@ -311,6 +344,7 @@ bool loadGameDefinitions(const QString &requestedPath, LootData *data,
         }
         lua_pop(state, 1);
     }
+
     lua_getglobal(state, "ProceduralDistributions");
     lua_getfield(state, -1, "list");
     QJsonObject procedures;
@@ -318,6 +352,7 @@ bool loadGameDefinitions(const QString &requestedPath, LootData *data,
         procedures = luaToJson(state, -1, 0).toObject();
     lua_pop(state, 2);
     lua_close(state);
+
     if (rooms.isEmpty() || procedures.isEmpty()) {
         if (error) {
             *error = QObject::tr(
@@ -326,20 +361,24 @@ bool loadGameDefinitions(const QString &requestedPath, LootData *data,
         }
         return false;
     }
+
     data->itemsRoot = root;
     data->gameRooms = rooms;
     data->gameProcedures = procedures;
     return true;
 }
+
 QString manifestFileName(const QString &projectRoot)
 {
     return QDir(projectRoot).filePath(
                 QString::fromLatin1(kManifestRelativePath));
 }
+
 QString luaFileName(const QString &projectRoot)
 {
     return QDir(projectRoot).filePath(QString::fromLatin1(kLuaRelativePath));
 }
+
 QString gameOwnerRoot(const QString &itemsRoot)
 {
     QDir directory(itemsRoot);
@@ -354,6 +393,7 @@ QString gameOwnerRoot(const QString &itemsRoot)
     }
     return QDir::cleanPath(directory.absolutePath());
 }
+
 bool sameOrInside(const QString &candidate, const QString &parent)
 {
     QString child = QDir::cleanPath(QFileInfo(candidate).absoluteFilePath());
@@ -365,12 +405,14 @@ bool sameOrInside(const QString &candidate, const QString &parent)
     return child == root
             || child.startsWith(root + QDir::separator());
 }
+
 QString inferredProjectRoot(const QString &suggestedPath)
 {
     QDir directory(QDir::cleanPath(
                        QDir::fromNativeSeparators(suggestedPath)));
     if (!directory.exists())
         return suggestedPath;
+
     const QString original = directory.absolutePath();
     while (true) {
         if (directory.dirName().compare(
@@ -391,6 +433,7 @@ QString inferredProjectRoot(const QString &suggestedPath)
     }
     return original;
 }
+
 bool loadProjectDefinitions(const QString &projectRoot, LootData *data,
                             QString *error)
 {
@@ -400,9 +443,11 @@ bool loadProjectDefinitions(const QString &projectRoot, LootData *data,
     data->projectProcedures = QJsonObject();
     if (data->projectRoot.isEmpty())
         return true;
+
     const QString fileName = manifestFileName(data->projectRoot);
     if (!QFileInfo(fileName).exists())
         return true;
+
     QFile file(fileName);
     if (!file.open(QIODevice::ReadOnly)) {
         if (error) {
@@ -424,6 +469,7 @@ bool loadProjectDefinitions(const QString &projectRoot, LootData *data,
         }
         return false;
     }
+
     const QJsonObject root = document.object();
     if (root.value(QStringLiteral("schema")).toInt() != 1) {
         if (error) {
@@ -438,6 +484,7 @@ bool loadProjectDefinitions(const QString &projectRoot, LootData *data,
             root.value(QStringLiteral("procedural")).toObject();
     return true;
 }
+
 int unresolvedReferenceCount(const LootData &data)
 {
     int count = 0;
@@ -465,6 +512,7 @@ int unresolvedReferenceCount(const LootData &data)
     }
     return count;
 }
+
 QString luaQuoted(const QString &value)
 {
     QString result = value;
@@ -475,6 +523,7 @@ QString luaQuoted(const QString &value)
     result.replace(QLatin1Char('\t'), QStringLiteral("\\t"));
     return QStringLiteral("\"%1\"").arg(result);
 }
+
 QString jsonToLua(const QJsonValue &value, int indent = 0)
 {
     const QString prefix(indent, QLatin1Char(' '));
@@ -517,6 +566,7 @@ QString jsonToLua(const QJsonValue &value, int indent = 0)
     }
     return QStringLiteral("nil");
 }
+
 QString generatedLua(const LootData &data)
 {
     QString output = QStringLiteral(
@@ -528,6 +578,7 @@ QString generatedLua(const LootData &data)
                 "    ProceduralDistributions.list = "
                 "ProceduralDistributions.list or {}\n"
                 "    SuburbsDistributions = SuburbsDistributions or {}\n\n");
+
     QStringList procedureNames = data.projectProcedures.keys();
     std::sort(procedureNames.begin(), procedureNames.end(),
               [](const QString &left, const QString &right) {
@@ -539,6 +590,7 @@ QString generatedLua(const LootData &data)
                 .arg(luaQuoted(name),
                      jsonToLua(data.projectProcedures.value(name), 4));
     }
+
     QStringList roomNames = data.projectRooms.keys();
     std::sort(roomNames.begin(), roomNames.end(),
               [](const QString &left, const QString &right) {
@@ -563,6 +615,7 @@ QString generatedLua(const LootData &data)
         }
         output += QLatin1Char('\n');
     }
+
     output += QStringLiteral(
                 "end\n\n"
                 "-- ItemPickerJava parses the registries after this event.\n"
@@ -570,6 +623,7 @@ QString generatedLua(const LootData &data)
                 "PZTools_ApplyLootDefinitions)\n");
     return output;
 }
+
 bool validateGeneratedLua(const QString &lua, QString *error)
 {
     lua_State *state = luaL_newstate();
@@ -589,6 +643,7 @@ bool validateGeneratedLua(const QString &lua, QString *error)
     lua_close(state);
     return status == LUA_OK;
 }
+
 bool saveProjectDefinitions(const LootData &data, QString *error)
 {
     if (data.projectRoot.isEmpty()) {
@@ -607,6 +662,7 @@ bool saveProjectDefinitions(const LootData &data, QString *error)
         }
         return false;
     }
+
     const QString manifest = manifestFileName(data.projectRoot);
     const QString lua = luaFileName(data.projectRoot);
     if (!QDir().mkpath(QFileInfo(manifest).absolutePath())) {
@@ -617,12 +673,14 @@ bool saveProjectDefinitions(const LootData &data, QString *error)
         }
         return false;
     }
+
     QJsonObject root;
     root.insert(QStringLiteral("schema"), 1);
     root.insert(QStringLiteral("generator"),
                 QStringLiteral("PZTools Procedural Loot Editor"));
     root.insert(QStringLiteral("rooms"), data.projectRooms);
     root.insert(QStringLiteral("procedural"), data.projectProcedures);
+
     QSaveFile manifestFile(manifest);
     if (!manifestFile.open(QIODevice::WriteOnly)
             || manifestFile.write(
@@ -635,6 +693,7 @@ bool saveProjectDefinitions(const LootData &data, QString *error)
         }
         return false;
     }
+
     const QByteArray luaBytes = generatedLua(data).toUtf8();
     QString syntaxError;
     if (!validateGeneratedLua(QString::fromUtf8(luaBytes), &syntaxError)) {
@@ -655,14 +714,17 @@ bool saveProjectDefinitions(const LootData &data, QString *error)
     }
     return true;
 }
+
 double rawChance(const QJsonValue &value)
 {
     return value.isDouble() ? value.toDouble() : 0.0;
 }
+
 QString formattedNumber(double number)
 {
     return QString::number(number, 'g', 6);
 }
+
 QString cumulativeChance(double chance, double rolls)
 {
     const double p = qBound(0.0, chance / 100.0, 1.0);
@@ -671,6 +733,7 @@ QString cumulativeChance(double chance, double rolls)
     return QStringLiteral("%1%").arg(QString::number(result, 'f',
                                                      result < 1.0 ? 3 : 1));
 }
+
 QJsonArray itemArrayFromTable(QTableWidget *table)
 {
     QJsonArray result;
@@ -687,6 +750,7 @@ QJsonArray itemArrayFromTable(QTableWidget *table)
     }
     return result;
 }
+
 bool validateItemEditor(QTableWidget *table, QString *error)
 {
     for (int row = 0; row < table->rowCount(); ++row) {
@@ -718,6 +782,7 @@ bool validateItemEditor(QTableWidget *table, QString *error)
     }
     return true;
 }
+
 void populateItemEditor(QTableWidget *table, const QJsonArray &items)
 {
     table->setRowCount(0);
@@ -731,6 +796,7 @@ void populateItemEditor(QTableWidget *table, const QJsonArray &items)
                            formattedNumber(items.at(i + 1).toDouble())));
     }
 }
+
 void appendEditableRow(QTableWidget *table, int columns)
 {
     const int row = table->rowCount();
@@ -740,6 +806,7 @@ void appendEditableRow(QTableWidget *table, int columns)
     table->setCurrentCell(row, 0);
     table->editItem(table->item(row, 0));
 }
+
 void removeSelectedRows(QTableWidget *table)
 {
     QSet<int> rows;
@@ -752,6 +819,7 @@ void removeSelectedRows(QTableWidget *table)
     for (int row : sorted)
         table->removeRow(row);
 }
+
 QWidget *tableButtons(QTableWidget *table, int columnCount, QWidget *parent)
 {
     QWidget *widget = new QWidget(parent);
@@ -776,6 +844,7 @@ QWidget *tableButtons(QTableWidget *table, int columnCount, QWidget *parent)
     });
     return widget;
 }
+
 QTableWidget *newItemEditor(QWidget *parent)
 {
     QTableWidget *table = new QTableWidget(parent);
@@ -791,6 +860,7 @@ QTableWidget *newItemEditor(QWidget *parent)
     table->setMinimumHeight(145);
     return table;
 }
+
 class ProcedureEditorDialog : public QDialog
 {
 public:
@@ -817,6 +887,7 @@ public:
         form->addRow(tr("Name"), mName);
         form->addRow(tr("Rolls"), mRolls);
         layout->addLayout(form);
+
         QGroupBox *itemsGroup = new QGroupBox(
                     tr("Items - each chance is tested on every roll"), this);
         QVBoxLayout *itemsLayout = new QVBoxLayout(itemsGroup);
@@ -827,6 +898,7 @@ public:
         itemsLayout->addWidget(mItems);
         itemsLayout->addWidget(tableButtons(mItems, 2, itemsGroup));
         layout->addWidget(itemsGroup, 1);
+
         QGroupBox *junkGroup = new QGroupBox(
                     tr("Junk - sandbox loot rarity does not reduce it"), this);
         QVBoxLayout *junkLayout = new QVBoxLayout(junkGroup);
@@ -846,6 +918,7 @@ public:
         junkLayout->addWidget(mJunk);
         junkLayout->addWidget(tableButtons(mJunk, 2, junkGroup));
         layout->addWidget(junkGroup, 1);
+
         QDialogButtonBox *buttons = new QDialogButtonBox(
                     QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttons, &QDialogButtonBox::accepted, this,
@@ -869,10 +942,12 @@ public:
                 this, &QDialog::reject);
         layout->addWidget(buttons);
     }
+
     QString name() const
     {
         return mName->text().trimmed();
     }
+
     QJsonObject definition() const
     {
         QJsonObject result = mOriginal;
@@ -887,6 +962,7 @@ public:
             result.remove(QStringLiteral("junk"));
         return result;
     }
+
 private:
     QJsonObject mOriginal;
     QLineEdit *mName;
@@ -895,6 +971,7 @@ private:
     QDoubleSpinBox *mJunkRolls;
     QTableWidget *mJunk;
 };
+
 class ContainerEditorDialog : public QDialog
 {
 public:
@@ -925,8 +1002,10 @@ public:
         form->addRow(tr("Container type"), mContainer);
         form->addRow(tr("Mode"), mMode);
         layout->addLayout(form);
+
         mStack = new QStackedWidget(this);
         layout->addWidget(mStack, 1);
+
         QWidget *proceduralPage = new QWidget(mStack);
         QVBoxLayout *procLayout = new QVBoxLayout(proceduralPage);
         QLabel *procHelp = new QLabel(
@@ -982,6 +1061,7 @@ public:
                 [this]() { removeSelectedRows(mProcList); });
         procLayout->addWidget(procButtons);
         mStack->addWidget(proceduralPage);
+
         QWidget *directPage = new QWidget(mStack);
         QVBoxLayout *directLayout = new QVBoxLayout(directPage);
         QFormLayout *directForm = new QFormLayout;
@@ -1008,6 +1088,7 @@ public:
         directForm->addRow(QString(), mIgnoreDensity);
         directForm->addRow(QString(), mTrash);
         directLayout->addLayout(directForm);
+
         QGroupBox *itemsGroup = new QGroupBox(tr("Items"), directPage);
         QVBoxLayout *itemsLayout = new QVBoxLayout(itemsGroup);
         mItems = newItemEditor(itemsGroup);
@@ -1017,6 +1098,7 @@ public:
         itemsLayout->addWidget(mItems);
         itemsLayout->addWidget(tableButtons(mItems, 2, itemsGroup));
         directLayout->addWidget(itemsGroup, 1);
+
         QGroupBox *junkGroup = new QGroupBox(tr("Junk"), directPage);
         QVBoxLayout *junkLayout = new QVBoxLayout(junkGroup);
         mJunkRolls = new QDoubleSpinBox(junkGroup);
@@ -1036,6 +1118,7 @@ public:
         junkLayout->addWidget(tableButtons(mJunk, 2, junkGroup));
         directLayout->addWidget(junkGroup, 1);
         mStack->addWidget(directPage);
+
         const bool procedural =
                 definition.value(QStringLiteral("procedural")).toBool()
                 || definition.contains(QStringLiteral("procList"));
@@ -1045,6 +1128,7 @@ public:
                 mStack, &QStackedWidget::setCurrentIndex);
         populateRules(
                     definition.value(QStringLiteral("procList")).toArray());
+
         QDialogButtonBox *buttons = new QDialogButtonBox(
                     QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttons, &QDialogButtonBox::accepted, this,
@@ -1113,8 +1197,10 @@ public:
                 this, &QDialog::reject);
         layout->addWidget(buttons);
     }
+
     QString room() const { return mRoom->text().trimmed(); }
     QString container() const { return mContainer->text().trimmed(); }
+
     QJsonObject definition() const
     {
         QJsonObject result = mOriginal;
@@ -1200,12 +1286,14 @@ public:
         }
         return result;
     }
+
 private:
     QString cellText(int row, int column) const
     {
         QTableWidgetItem *item = mProcList->item(row, column);
         return item ? item->text().trimmed() : QString();
     }
+
     void populateRules(const QJsonArray &rules)
     {
         for (const QJsonValue &value : rules) {
@@ -1238,6 +1326,7 @@ private:
             mProcList->item(row, 0)->setData(Qt::UserRole, rule);
         }
     }
+
     QJsonObject mOriginal;
     QStringList mProcedures;
     QLineEdit *mRoom;
@@ -1253,12 +1342,15 @@ private:
     QDoubleSpinBox *mJunkRolls;
     QTableWidget *mJunk;
 };
+
 enum TreeRoles {
     RoleRoom = Qt::UserRole,
     RoleContainer,
     RoleProject
 };
-}
+
+} // namespace
+
 class LootDistributionDialogPrivate
 {
 public:
@@ -1271,12 +1363,11 @@ public:
         , requestedContainer(initialContainer)
     {
         buildUi();
+
         QSettings *settings = Preferences::instance()->settings();
         QString gamePath = settings->value(
                     QStringLiteral("LootDistributionEditor/GamePath"))
                 .toString();
-        if (gamePath.isEmpty())
-            gamePath = Preferences::instance()->projectZomboidDirectory();
         QString projectPath = settings->value(
                     QStringLiteral("LootDistributionEditor/ProjectRoot"))
                 .toString();
@@ -1289,11 +1380,13 @@ public:
         else
             setStatus(q->tr("Select the read-only game definitions."));
     }
+
     void buildUi()
     {
         q->setWindowTitle(q->tr("Procedural Loot Viewer / Editor"));
         q->resize(1180, 780);
         QVBoxLayout *layout = new QVBoxLayout(q);
+
         QGroupBox *paths = new QGroupBox(q->tr("Definition sources"), q);
         QFormLayout *pathLayout = new QFormLayout(paths);
         QWidget *gameRow = new QWidget(paths);
@@ -1306,6 +1399,7 @@ public:
         gameRowLayout->addWidget(gameEdit, 1);
         gameRowLayout->addWidget(gameBrowse);
         pathLayout->addRow(q->tr("Game definitions (read-only)"), gameRow);
+
         QWidget *projectRow = new QWidget(paths);
         QHBoxLayout *projectRowLayout = new QHBoxLayout(projectRow);
         projectRowLayout->setContentsMargins(0, 0, 0, 0);
@@ -1317,6 +1411,7 @@ public:
         projectRowLayout->addWidget(projectEdit, 1);
         projectRowLayout->addWidget(projectBrowse);
         pathLayout->addRow(q->tr("Project / mod root (editable)"), projectRow);
+
         QWidget *pathButtons = new QWidget(paths);
         QHBoxLayout *pathButtonsLayout = new QHBoxLayout(pathButtons);
         pathButtonsLayout->setContentsMargins(0, 0, 0, 0);
@@ -1328,10 +1423,12 @@ public:
         pathButtonsLayout->addStretch();
         pathLayout->addRow(QString(), pathButtons);
         layout->addWidget(paths);
+
         tabs = new QTabWidget(q);
         layout->addWidget(tabs, 1);
         buildRoomTab();
         buildProcedureTab();
+
         status = new QLabel(q);
         status->setWordWrap(true);
         layout->addWidget(status);
@@ -1340,6 +1437,7 @@ public:
         QObject::connect(buttons, &QDialogButtonBox::rejected,
                          q, &QDialog::reject);
         layout->addWidget(buttons);
+
         QObject::connect(gameBrowse, &QAbstractButton::clicked, q,
                          [this]() { chooseGame(); });
         QObject::connect(projectBrowse, &QAbstractButton::clicked, q,
@@ -1355,6 +1453,7 @@ public:
                 QDesktopServices::openUrl(QUrl::fromLocalFile(path));
         });
     }
+
     void buildRoomTab()
     {
         QWidget *page = new QWidget(tabs);
@@ -1371,6 +1470,7 @@ public:
         roomTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
         roomTree->setMinimumWidth(330);
         splitter->addWidget(roomTree);
+
         QWidget *details = new QWidget(splitter);
         QVBoxLayout *detailsLayout = new QVBoxLayout(details);
         roomTitle = new QLabel(details);
@@ -1389,6 +1489,7 @@ public:
         splitter->addWidget(details);
         splitter->setStretchFactor(1, 1);
         layout->addWidget(splitter, 1);
+
         QWidget *buttons = new QWidget(page);
         QHBoxLayout *buttonLayout = new QHBoxLayout(buttons);
         buttonLayout->setContentsMargins(0, 0, 0, 0);
@@ -1404,6 +1505,7 @@ public:
         buttonLayout->addStretch();
         layout->addWidget(buttons);
         tabs->addTab(page, q->tr("Rooms && containers"));
+
         QObject::connect(roomTree, &QTreeWidget::currentItemChanged, q,
                          [this]() { showCurrentContainer(); });
         QObject::connect(filter, &QLineEdit::textChanged, q,
@@ -1433,6 +1535,7 @@ public:
         QObject::connect(deleteContainerButton, &QAbstractButton::clicked, q,
                          [this]() { deleteContainer(); });
     }
+
     void buildProcedureTab()
     {
         QWidget *page = new QWidget(tabs);
@@ -1450,6 +1553,7 @@ public:
                     0, QHeaderView::Stretch);
         procedureTree->setMinimumWidth(330);
         splitter->addWidget(procedureTree);
+
         QWidget *details = new QWidget(splitter);
         QVBoxLayout *detailsLayout = new QVBoxLayout(details);
         procedureTitle = new QLabel(details);
@@ -1468,6 +1572,7 @@ public:
         splitter->addWidget(details);
         splitter->setStretchFactor(1, 1);
         layout->addWidget(splitter, 1);
+
         QWidget *buttons = new QWidget(page);
         QHBoxLayout *buttonLayout = new QHBoxLayout(buttons);
         buttonLayout->setContentsMargins(0, 0, 0, 0);
@@ -1483,6 +1588,7 @@ public:
         buttonLayout->addStretch();
         layout->addWidget(buttons);
         tabs->addTab(page, q->tr("Procedural distributions"));
+
         QObject::connect(procedureTree,
                          &QTreeWidget::currentItemChanged, q,
                          [this]() { showCurrentProcedure(); });
@@ -1527,6 +1633,7 @@ public:
         QObject::connect(deleteProcedureButton, &QAbstractButton::clicked, q,
                          [this]() { deleteProcedure(); });
     }
+
     void chooseGame()
     {
         const QString path = QFileDialog::getExistingDirectory(
@@ -1535,9 +1642,9 @@ public:
         if (path.isEmpty())
             return;
         gameEdit->setText(QDir::toNativeSeparators(path));
-        Preferences::instance()->setProjectZomboidDirectory(path);
         reload(true);
     }
+
     void chooseProject()
     {
         const QString path = QFileDialog::getExistingDirectory(
@@ -1548,6 +1655,7 @@ public:
         projectEdit->setText(QDir::toNativeSeparators(path));
         reload(true);
     }
+
     bool ensureProjectRoot()
     {
         QString root = projectEdit->text().trimmed();
@@ -1573,6 +1681,7 @@ public:
         }
         return true;
     }
+
     void reload(bool reportErrors)
     {
         LootData loaded;
@@ -1616,6 +1725,7 @@ public:
                   .arg(data.projectProcedures.size())
                   .arg(unresolvedReferenceCount(data)));
     }
+
     int projectContainerCount() const
     {
         int count = 0;
@@ -1623,6 +1733,7 @@ public:
             count += value.toObject().size();
         return count;
     }
+
     void clearViews()
     {
         roomTree->clear();
@@ -1634,11 +1745,13 @@ public:
         procedureTable->clear();
         procedureTable->setRowCount(0);
     }
+
     void populateViews()
     {
         const QString selectedRoom = currentRoom();
         const QString selectedContainer = currentContainer();
         const QString selectedProcedure = currentProcedure();
+
         roomTree->clear();
         const QJsonObject rooms = data.rooms();
         QStringList roomNames = rooms.keys();
@@ -1715,6 +1828,7 @@ public:
         }
         requestedRoom.clear();
         requestedContainer.clear();
+
         procedureTree->clear();
         const QJsonObject procedures = data.procedures();
         QStringList names = procedures.keys();
@@ -1741,21 +1855,25 @@ public:
             procedureTree->setCurrentItem(
                         procedureTree->topLevelItem(0));
     }
+
     QString currentRoom() const
     {
         QTreeWidgetItem *item = roomTree->currentItem();
         return item ? item->data(0, RoleRoom).toString() : QString();
     }
+
     QString currentContainer() const
     {
         QTreeWidgetItem *item = roomTree->currentItem();
         return item ? item->data(0, RoleContainer).toString() : QString();
     }
+
     QString currentProcedure() const
     {
         QTreeWidgetItem *item = procedureTree->currentItem();
         return item ? item->text(0) : QString();
     }
+
     void showCurrentContainer()
     {
         const QString roomName = currentRoom();
@@ -1772,6 +1890,7 @@ public:
             roomTable->setRowCount(0);
             return;
         }
+
         const QJsonObject definition = data.rooms()
                 .value(roomName).toObject()
                 .value(containerName).toObject();
@@ -1800,6 +1919,7 @@ public:
             showContainerItems(definition);
         }
     }
+
     void showRules(const QJsonArray &rules)
     {
         roomTable->clear();
@@ -1815,6 +1935,7 @@ public:
         roomTable->horizontalHeader()->setSectionResizeMode(
                     5, QHeaderView::Stretch);
         roomTable->setRowCount(rules.size());
+
         double total = 0.0;
         for (const QJsonValue &value : rules) {
             const QJsonObject rule = value.toObject();
@@ -1891,6 +2012,7 @@ public:
         roomTable->horizontalHeader()->setSectionResizeMode(
                     5, QHeaderView::Stretch);
     }
+
     void showContainerItems(const QJsonObject &definition)
     {
         const double rolls =
@@ -1940,6 +2062,7 @@ public:
         append(q->tr("Junk"), junkItems, junkRolls,
                q->tr("Junk modifier rules"));
     }
+
     void showCurrentProcedure()
     {
         const QString name = currentProcedure();
@@ -1971,6 +2094,7 @@ public:
                                         junk.value(
                                             QStringLiteral("rolls"))
                                         .toDouble())));
+
         procedureTable->clear();
         procedureTable->setColumnCount(5);
         procedureTable->setHorizontalHeaderLabels(
@@ -2022,6 +2146,7 @@ public:
         procedureTable->horizontalHeader()->setSectionResizeMode(
                     1, QHeaderView::Stretch);
     }
+
     void editProcedure(bool create)
     {
         if (!ensureProjectRoot())
@@ -2050,6 +2175,7 @@ public:
             return;
         selectProcedure(name);
     }
+
     void deleteProcedure()
     {
         const QString name = currentProcedure();
@@ -2066,6 +2192,7 @@ public:
         data.projectProcedures.remove(name);
         saveAndRefresh();
     }
+
     void editContainer(bool create)
     {
         if (!ensureProjectRoot())
@@ -2106,6 +2233,7 @@ public:
             return;
         selectContainer(roomName, containerName);
     }
+
     void deleteContainer()
     {
         const QString roomName = currentRoom();
@@ -2129,6 +2257,7 @@ public:
             data.projectRooms.insert(roomName, room);
         saveAndRefresh();
     }
+
     bool saveAndRefresh()
     {
         QString error;
@@ -2147,6 +2276,7 @@ public:
                            luaFileName(data.projectRoot))));
         return true;
     }
+
     void selectProcedure(const QString &name)
     {
         for (int i = 0; i < procedureTree->topLevelItemCount(); ++i) {
@@ -2158,6 +2288,7 @@ public:
             }
         }
     }
+
     void selectContainer(const QString &roomName,
                          const QString &containerName)
     {
@@ -2175,6 +2306,7 @@ public:
             }
         }
     }
+
     void setStatus(const QString &text, bool error = false)
     {
         status->setText(text);
@@ -2184,6 +2316,7 @@ public:
                                : q->palette().color(QPalette::WindowText));
         status->setPalette(palette);
     }
+
     LootDistributionDialog *q;
     LootData data;
     QString requestedRoom;
@@ -2208,6 +2341,7 @@ public:
     QPushButton *deleteProcedureButton;
     QLabel *status;
 };
+
 LootDistributionDialog::LootDistributionDialog(
         QWidget *parent,
         const QString &initialRoom,
@@ -2218,7 +2352,9 @@ LootDistributionDialog::LootDistributionDialog(
             this, initialRoom, initialContainer, suggestedProjectRoot))
 {
 }
+
 LootDistributionDialog::~LootDistributionDialog() = default;
+
 bool LootDistributionDialog::validateDefinitions(
         const QString &gamePath, const QString &projectRoot,
         QString *summary, QString *error)
@@ -2241,6 +2377,7 @@ bool LootDistributionDialog::validateDefinitions(
     }
     if (!validateGeneratedLua(generatedLua(data), error))
         return false;
+
     QStringList gameProblems;
     QStringList projectProblems;
     const QJsonObject procedures = data.procedures();
@@ -2309,6 +2446,7 @@ bool LootDistributionDialog::validateDefinitions(
     }
     return true;
 }
+
 bool LootDistributionDialog::renderValidation(
         const QString &gamePath, const QString &projectRoot,
         const QString &outputFile, QString *error)
@@ -2329,6 +2467,7 @@ bool LootDistributionDialog::renderValidation(
                                 projectKey, oldProjectSetting)
                           : settings->remove(projectKey);
     };
+
     LootDistributionDialog dialog;
     dialog.d->gameEdit->setText(QDir::toNativeSeparators(gamePath));
     dialog.d->projectEdit->setText(
@@ -2340,6 +2479,7 @@ bool LootDistributionDialog::renderValidation(
         restoreSettings();
         return false;
     }
+
     const QFileInfo outputInfo(outputFile);
     if (!QDir().mkpath(outputInfo.absolutePath())) {
         if (error) {
@@ -2365,5 +2505,6 @@ bool LootDistributionDialog::renderValidation(
     restoreSettings();
     return true;
 }
-}
-}
+
+} // namespace Internal
+} // namespace Tiled

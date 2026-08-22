@@ -5,7 +5,7 @@ include(../lua/lua.pri)
 include(../quazip-1.1/quazip/quazip.pri)
 include(../zlib/zlib.pri)
 
-QT       += core gui xml network concurrent
+QT       += core gui xml
 contains(QT_CONFIG, opengl): QT += opengl
 
 greaterThan(QT_MAJOR_VERSION, 5) {
@@ -72,9 +72,6 @@ SOURCES += main.cpp\
     biomemapgeneratordialog.cpp \
     biomemapitem.cpp \
     biomemapimageprocessor.cpp \
-    osmterrainimportdialog.cpp \
-    osmprojectdata.cpp \
-    osmterrainimporter.cpp \
     terrainimageeditordialog.cpp \
     worldgenpreviewdialog.cpp \
     tilesetcleanupdialog.cpp \
@@ -206,7 +203,7 @@ SOURCES += main.cpp\
     tmxtobmpdialog.cpp \
     searchdock.cpp \
     streetnamesdock.cpp \
-    regionsdock.cpp \
+    nightpreviewitem.cpp \
     defaultsfile.cpp \
     BuildingEditor/roofhiding.cpp \
     waterflow.cpp
@@ -214,13 +211,9 @@ SOURCES += main.cpp\
 HEADERS  += mainwindow.h \
     ../firstlaunchdialog.h \
     ../portablesettings.h \
-    ../sharedmainwindowgeometrywidget.h \
     biomemapgeneratordialog.h \
     biomemapitem.h \
     biomemapimageprocessor.h \
-    osmterrainimportdialog.h \
-    osmprojectdata.h \
-    osmterrainimporter.h \
     terrainimageeditordialog.h \
     worldgenpreviewdialog.h \
     tilesetcleanupdialog.h \
@@ -352,7 +345,7 @@ HEADERS  += mainwindow.h \
     tmxtobmpdialog.h \
     searchdock.h \
     streetnamesdock.h \
-    regionsdock.h \
+    nightpreviewitem.h \
     defaultsfile.h \
     BuildingEditor/roofhiding.h \
     waterflow.h
