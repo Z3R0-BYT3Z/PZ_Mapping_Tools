@@ -17,6 +17,7 @@
 
 #include "furnituregroups.h"
 
+#include "building.h"
 #include "buildingfurniturefile.h"
 #include "buildingpreferences.h"
 #include "buildingtiles.h"
@@ -361,6 +362,10 @@ bool FurnitureTile::equals(FurnitureTile *other) const
 
 void FurnitureTile::setTile(int x, int y, BuildingTile *btile)
 {
+    if (x < 0 || x >= MAX_BUILDING_DIMENSION ||
+            y < 0 || y >= MAX_BUILDING_DIMENSION)
+        return;
+
     // Get larger if needed
     if ((btile != 0) && (x >= mSize.width() || y >= mSize.height())) {
         resize(qMax(mSize.width(), x + 1), qMax(mSize.height(), y + 1));
@@ -443,6 +448,8 @@ FloorTileGrid *FurnitureTile::toFloorTileGrid(QRegion &rgn)
 
 void FurnitureTile::resize(int width, int height)
 {
+    width = qBound(1, width, MAX_BUILDING_DIMENSION);
+    height = qBound(1, height, MAX_BUILDING_DIMENSION);
     QVector<BuildingTile*> newTiles(width * height);
     for (int x = 0; x < qMin(width, mSize.width()); x++)
         for (int y = 0; y < qMin(height, mSize.height()); y++)

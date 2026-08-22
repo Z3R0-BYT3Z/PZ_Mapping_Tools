@@ -174,6 +174,10 @@ public:
                       Tiled::TileLayer *layer)
     {
         int index = mLayers.indexOf(layer);
+        if (index < 0 && !mLayers.isEmpty())
+            index = mLayers.size() - 1;
+        if (index < 0 || index >= mToolLayers.size())
+            return;
         mToolLayers[index].mLayer = stamp;
         mToolLayers[index].mPos = pos;
         mToolLayers[index].mRegion = rgn;
@@ -187,6 +191,10 @@ public:
                         Tiled::TileLayer *layer)
     {
         int index = mLayers.indexOf(layer);
+        if (index < 0 && !mLayers.isEmpty())
+            index = mLayers.size() - 1;
+        if (index < 0 || index >= mToolNoBlends.size())
+            return;
         mToolNoBlends[index].mNoBlend = noBlend;
         mToolNoBlends[index].mPos = pos;
         mToolNoBlends[index].mRegion = rgn;

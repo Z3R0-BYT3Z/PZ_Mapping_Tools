@@ -28,8 +28,8 @@
 using namespace BuildingEditor;
 
 Building::Building(int width, int height, BuildingTemplate *btemplate) :
-    mWidth(width),
-    mHeight(height),
+    mWidth(qBound(1, width, MAX_BUILDING_DIMENSION)),
+    mHeight(qBound(1, height, MAX_BUILDING_DIMENSION)),
     mTiles(TileCount)
 {
     Q_ASSERT(TileCount == BuildingTemplate::TileCount);
@@ -122,8 +122,8 @@ int Building::categoryEnum(int n)
 
 void Building::resize(const QSize &newSize)
 {
-    mWidth = newSize.width();
-    mHeight = newSize.height();
+    mWidth = qBound(1, newSize.width(), MAX_BUILDING_DIMENSION);
+    mHeight = qBound(1, newSize.height(), MAX_BUILDING_DIMENSION);
 }
 
 void Building::rotate(bool right)

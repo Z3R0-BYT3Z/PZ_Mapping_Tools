@@ -82,6 +82,7 @@ private:
         CellTemplates,
         Lots,
         Objects,
+        InGameMapFeatures,
         Map,
         MaxCellCat
     };
@@ -90,6 +91,7 @@ private:
     void showCellTemplates();
     void showCellLots();
     void showCellObjects();
+    void showCellInGameMapFeatures();
     void showCellMap();
 
 private slots:

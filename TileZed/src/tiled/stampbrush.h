@@ -28,6 +28,7 @@
 namespace Tiled {
 
 class Tile;
+class Tileset;
 
 namespace Internal {
 
@@ -68,6 +69,10 @@ public:
      * state.
      */
     TileLayer *stamp() const { return mStamp; }
+
+#ifdef ZOMBOID
+    void setLayerStamps(const QList<TileLayer *> &stamps, int anchorLevel);
+#endif
 
 public slots:
     void setRandom(bool value);
@@ -116,6 +121,13 @@ private:
      * either by rightclicking (Capture) or at the tilesetdock
      */
     TileLayer *mStamp;
+    QList<Tileset *> mTilesetReferences;
+
+#ifdef ZOMBOID
+    void clearLayerStamps();
+    QList<TileLayer *> mLayerStamps;
+    int mLayerStampAnchorLevel;
+#endif
 
     QPoint mCaptureStart;
     int mStampX, mStampY;

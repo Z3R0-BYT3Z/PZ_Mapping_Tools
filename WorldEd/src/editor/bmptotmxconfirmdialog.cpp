@@ -47,6 +47,15 @@ void BMPToTMXConfirmDialog::updateExisting()
     ui->label->setText(tr("The files in the list below already exist.\nThe pixels in the maps will be replaced by pixels from the BMP images."));
 }
 
+void BMPToTMXConfirmDialog::metadataOnly(int unchangedCount, int skippedCount)
+{
+    setWindowTitle(tr("Update Rules/Blends Metadata"));
+    ui->label->setText(
+                tr("Only the embedded Rules.txt and Blends.txt paths, aliases, rules, and blends will be replaced in the files below. Bitmap pixels, layers, objects, tilesets, no-blend masks, and edge settings will remain unchanged.\n\nA dated backup will be created before any file is changed. Close open TMX tabs before continuing.\n\n%1 file(s) are already current. %2 selected or project cell(s) do not have an existing assigned TMX file.")
+                .arg(unchangedCount)
+                .arg(skippedCount));
+}
+
 // C:/
 //   Foo/
 //     Bar/

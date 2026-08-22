@@ -89,4 +89,3 @@ main tree; do not place those companion sprites manually.
 Without this protection, explicit placement is not a guarantee on an active
 Biomemap square. Outside map-WorldGen replacement, the explicitly placed tile
 already remains exact.
-

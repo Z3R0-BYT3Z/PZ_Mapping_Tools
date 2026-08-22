@@ -353,6 +353,8 @@ BuildingIsoScene::BuildingIsoScene(QObject *parent) :
     mCurrentTool(0),
     mLayerGroupWithToolTiles(0),
     mToolTiles(QString(), 0, 0, 1, 1),
+    mToolTileSource(nullptr),
+    mToolTileSourceLevel(-1),
     mNonEmptyLayerGroupItem(0),
     mShowBuildingTiles(true),
     mShowUserTiles(true),
@@ -462,6 +464,9 @@ void BuildingIsoScene::setDocument(BuildingDocument *doc)
         dynamic_cast<IsoBuildingRenderer*>(mRenderer)->mMapRenderer = 0;
 
         mLayerGroupWithToolTiles = 0;
+        mToolTileSource = nullptr;
+        mToolTileSourceLayer.clear();
+        mToolTileSourceLevel = -1;
         mNonEmptyLayerGroupItem = 0;
         mNonEmptyLayer.clear();
     }
@@ -490,7 +495,8 @@ void BuildingIsoScene::setDocument(BuildingDocument *doc)
     connect(mDocument, &BuildingDocument::currentLayerChanged,
             this, &BuildingIsoScene::currentLayerChanged);
 
-    connect(mDocument, &BuildingDocument::roomChanged, this, &BuildingIsoScene::roomChanged);
+    connect(mDocument, &BuildingDocument::roomTilesChanged,
+            this, &BuildingIsoScene::roomChanged);
     connect(mDocument, &BuildingDocument::roomAtPositionChanged,
             this, &BuildingIsoScene::roomAtPositionChanged);
 
@@ -535,8 +541,6 @@ void BuildingIsoScene::setDocument(BuildingDocument *doc)
 
     connect(mDocument, &BuildingDocument::roomAdded, this, &BuildingIsoScene::roomAdded);
     connect(mDocument, &BuildingDocument::roomRemoved, this, &BuildingIsoScene::roomRemoved);
-    connect(mDocument, &BuildingDocument::roomChanged, this, &BuildingIsoScene::roomChanged);
-
     connect(mDocument, &BuildingDocument::basementAccessChanged, this, &BuildingIsoScene::basementAccessChanged);
 
     emit documentChanged();
@@ -661,12 +665,20 @@ bool BuildingIsoScene::currentFloorContains(const QPoint &tilePos, int dw, int d
 
 void BuildingIsoScene::setToolTiles(const FloorTileGrid *tiles,
                                     const QPoint &pos,
-                                    const QString &layerName)
+                                    const QString &layerName,
+                                    bool reusableSource)
 {
-    clearToolTiles();
+    if (mLayerGroupWithToolTiles) {
+        mLayerGroupWithToolTiles->clearToolTiles();
+        mLayerGroupWithToolTiles = nullptr;
+    }
 
     CompositeLayerGroupItem *item = itemForFloor(currentFloor());
+    if (!item)
+        return;
     CompositeLayerGroup *layerGroup = item->layerGroup();
+    if (!layerGroup)
+        return;
 
     TileLayer *layer = 0;
     foreach (TileLayer *tl, layerGroup->layers()) {
@@ -676,28 +688,38 @@ void BuildingIsoScene::setToolTiles(const FloorTileGrid *tiles,
         }
     }
 
-    QMap<QString,Tileset*> tilesetByName;
-    foreach (Tileset *ts, mBuildingMap->map()->tilesets())
-        tilesetByName[ts->name()] = ts;
-
     QSize tilesSize(tiles->width(), tiles->height());
-    mToolTiles.resize(tilesSize, QPoint());
+    const bool reuseConvertedTiles = reusableSource
+            && mToolTileSource == tiles
+            && mToolTileSourceLayer == layerName
+            && mToolTileSourceLevel == currentLevel()
+            && QSize(mToolTiles.width(), mToolTiles.height()) == tilesSize;
+    if (!reuseConvertedTiles) {
+        QMap<QString,Tileset*> tilesetByName;
+        foreach (Tileset *ts, mBuildingMap->map()->tilesets())
+            tilesetByName[ts->name()] = ts;
 
-    for (int x = 0; x < tiles->width(); x++) {
-        for (int y = 0; y < tiles->height(); y++) {
-            QString tileName = tiles->at(x, y);
-            Tile *tile = 0;
-            if (!tileName.isEmpty()) {
-                tile = TilesetManager::instance()->missingTile();
-                QString tilesetName;
-                int index;
-                if (BuildingTilesMgr::parseTileName(tileName, tilesetName, index)) {
-                    if (tilesetByName.contains(tilesetName))
+        mToolTiles.resize(tilesSize, QPoint());
+        for (int x = 0; x < tiles->width(); x++) {
+            for (int y = 0; y < tiles->height(); y++) {
+                QString tileName = tiles->at(x, y);
+                Tile *tile = 0;
+                if (!tileName.isEmpty()) {
+                    tile = TilesetManager::instance()->missingTile();
+                    QString tilesetName;
+                    int index;
+                    if (BuildingTilesMgr::parseTileName(
+                                tileName, tilesetName, index)
+                            && tilesetByName.contains(tilesetName)) {
                         tile = tilesetByName[tilesetName]->tileAt(index);
+                    }
                 }
+                mToolTiles.setCell(x, y, Cell(tile));
             }
-            mToolTiles.setCell(x, y, Cell(tile));
         }
+        mToolTileSource = reusableSource ? tiles : nullptr;
+        mToolTileSourceLayer = reusableSource ? layerName : QString();
+        mToolTileSourceLevel = reusableSource ? currentLevel() : -1;
     }
 
     layerGroup->setToolTiles(&mToolTiles, pos, QRect(pos, tilesSize), layer);
@@ -720,6 +742,9 @@ void BuildingIsoScene::clearToolTiles()
         mLayerGroupWithToolTiles->clearToolTiles();
         mLayerGroupWithToolTiles = 0;
     }
+    mToolTileSource = nullptr;
+    mToolTileSourceLayer.clear();
+    mToolTileSourceLevel = -1;
 }
 
 QString BuildingIsoScene::buildingTileAt(int x, int y)
@@ -1435,23 +1460,11 @@ void BuildingIsoScene::roomDefinitionChanged()
 
 void BuildingIsoScene::roomAdded(Room *room)
 {
-    Q_UNUSED(room)
-    foreach (BuildingFloor *floor, mDocument->building()->floors()) {
-        mBuildingMap->floorEdited(floor);
-        BuildingBaseScene::floorEdited(floor);
-    }
-
     mBuildingMap->roomAdded(room);
 }
 
 void BuildingIsoScene::roomRemoved(Room *room)
 {
-    Q_UNUSED(room)
-    foreach (BuildingFloor *floor, mDocument->building()->floors()) {
-        mBuildingMap->floorEdited(floor);
-        BuildingBaseScene::floorEdited(floor);
-    }
-
     mBuildingMap->roomRemoved(room);
 }
 

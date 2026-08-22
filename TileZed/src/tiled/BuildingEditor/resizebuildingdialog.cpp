@@ -28,6 +28,9 @@ ResizeBuildingDialog::ResizeBuildingDialog(Building *building, QWidget *parent) 
 {
     ui->setupUi(this);
 
+    ui->newWidth->setMaximum(MAX_BUILDING_DIMENSION);
+    ui->newHeight->setMaximum(MAX_BUILDING_DIMENSION);
+
     ui->oldWidth->setText(QString::number(building->width()));
     ui->oldHeight->setText(QString::number(building->height()));
 

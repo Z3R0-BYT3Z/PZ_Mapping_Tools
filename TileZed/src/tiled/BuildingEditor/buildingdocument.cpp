@@ -108,7 +108,9 @@ BuildingDocument::BuildingDocument(Building *building, const QString &fileName) 
 
 BuildingDocument::~BuildingDocument()
 {
-    delete mClipboardTiles;
+    for (const ClipboardTileLayer &layer : qAsConst(mClipboardTileLayers))
+        delete layer.tiles;
+    qDeleteAll(mClipboardRooms);
 }
 
 QString BuildingDocument::displayName() const
@@ -226,8 +228,30 @@ void BuildingDocument::setSelectedObjects(const QSet<BuildingObject *> &selectio
 void BuildingDocument::setClipboardTiles(FloorTileGrid *tiles, const QRegion &rgn)
 {
     Q_ASSERT(tiles->bounds().contains(rgn.boundingRect()));
-    delete mClipboardTiles;
-    mClipboardTiles = tiles;
+    ClipboardTileLayer layer;
+    layer.level = currentLevel();
+    layer.layerName = currentLayer();
+    layer.tiles = tiles;
+    setClipboardTileLayers(QList<ClipboardTileLayer>() << layer,
+                           rgn, currentLevel());
+    mClipboardPreservesPlanes = false;
+}
+
+void BuildingDocument::setClipboardTileLayers(
+        const QList<ClipboardTileLayer> &layers,
+        const QRegion &rgn,
+        int anchorLevel,
+        const QList<Room *> &rooms,
+        const QList<ClipboardRoomLayer> &roomLayers)
+{
+    for (const ClipboardTileLayer &old : qAsConst(mClipboardTileLayers))
+        delete old.tiles;
+    qDeleteAll(mClipboardRooms);
+    mClipboardTileLayers = layers;
+    mClipboardRooms = rooms;
+    mClipboardRoomLayers = roomLayers;
+    mClipboardTiles = mClipboardTileLayers.isEmpty()
+            ? nullptr : mClipboardTileLayers.first().tiles;
     mClipboardTilesRgn = rgn;
     emit clipboardTilesChanged();
 }
@@ -389,9 +413,15 @@ int BuildingDocument::reorderRoom(int index, Room *room)
 
 Room *BuildingDocument::changeRoom(Room *room, const Room *data)
 {
+    const bool colorChanged = room->Color != data->Color;
+    const bool tilesChanged = room->tiles() != data->tiles();
     Room *old = new Room(room);
     room->copy(data);
     emit roomChanged(room);
+    if (colorChanged)
+        emit roomColorChanged(room);
+    if (tilesChanged)
+        emit roomTilesChanged(room);
     delete data;
 
     foreach (BuildingTileEntry *entry, room->tiles())

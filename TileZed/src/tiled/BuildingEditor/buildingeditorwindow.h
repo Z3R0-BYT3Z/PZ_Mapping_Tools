@@ -140,6 +140,10 @@ public:
 
     void setInitialPosition();
 
+    void checkpointAutoSave();
+    void beginAtomicEdit();
+    void endAtomicEdit();
+
 public slots:
     void autoSaveCheck();
     void autoSaveTimeout();
@@ -167,12 +171,13 @@ private:
 
     QTimer mAutoSaveTimer;
     QString mAutoSaveFileName;
+    int mAtomicEditDepth = 0;
 };
 
 class BuildingEditorWindow : public QMainWindow
 {
     Q_OBJECT
-    
+
 public:
     static BuildingEditorWindow *instance()
     { return mInstance; }
@@ -232,6 +237,9 @@ public:
 
     Ui::BuildingEditorWindow *actionIface() { return ui; }
     QToolBar *createCommonToolBar();
+    bool pasteClipboardAt(const QPoint &targetPos);
+    void setTileSelectionScope(Tiled::Internal::TileSelectionScope *scope)
+    { mTileSelectionScope = scope; }
 
     void documentTabCloseRequested(int index);
 
@@ -245,6 +253,8 @@ private:
     void addRecentFile(const QString &fileName);
 
     void deleteObjects();
+
+    void captureTileClipboard(bool cut);
 
     void cropBuilding(const QRect &bounds);
 

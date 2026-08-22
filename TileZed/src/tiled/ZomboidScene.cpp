@@ -507,7 +507,7 @@ public:
         // Since we don't do any painting, we can spare us the call to paint()
         setFlag(QGraphicsItem::ItemHasNoContents);
     }
-        
+
     // QGraphicsItem
     QRectF boundingRect() const
     {

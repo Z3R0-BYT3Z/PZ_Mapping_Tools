@@ -58,6 +58,32 @@ void CellView::paintEvent(QPaintEvent *event)
 void CellView::drawForeground(QPainter *painter, const QRectF &rect)
 {
     QGraphicsView::drawForeground(painter, rect);
+    if (scene() && scene()->partialChunksEnabled()) {
+        painter->save();
+        QColor chunkColor = Preferences::instance()->gridColor();
+        chunkColor.setAlpha(210);
+        QPen pen(chunkColor);
+        pen.setCosmetic(true);
+        painter->setPen(pen);
+        for (int y = 0; y < PZTools::PartialChunkSelection::ChunksPerCell; ++y) {
+            for (int x = 0; x < PZTools::PartialChunkSelection::ChunksPerCell; ++x) {
+                const QRect chunkRect(
+                            x * PZTools::PartialChunkSelection::ChunkSize,
+                            y * PZTools::PartialChunkSelection::ChunkSize,
+                            PZTools::PartialChunkSelection::ChunkSize,
+                            PZTools::PartialChunkSelection::ChunkSize);
+                QColor selectedColor = chunkColor;
+                selectedColor.setAlpha(22);
+                painter->setBrush(scene()->partialChunkPreviewSelected(x, y)
+                                  ? selectedColor
+                                  : QColor(10, 10, 10, 165));
+                painter->drawPolygon(scene()->renderer()->tileToPixelCoords(
+                                         chunkRect,
+                                         scene()->document()->currentLevel()));
+            }
+        }
+        painter->restore();
+    }
     if (scene() && scene()->document() && scene()->document()->world())
         drawProjectGridBadge(painter, scene()->document()->world()->cellSize());
 }

@@ -25,6 +25,8 @@
 #include "preferences.h"
 #include "roofhiding.h"
 
+#include <QDebug>
+
 #if defined(Q_OS_WIN) && (_MSC_VER >= 1600)
 // Hmmmm.  libtiled.dll defines the MapRands class as so:
 // class TILEDSHARED_EXPORT MapRands : public QVector<QVector<quint32> >
@@ -96,7 +98,6 @@ void FloorTileGrid::replace(int index, const QString &tile)
         mCount++;
     } else if (!tile.isEmpty()) {
         (*it) = tile;
-        mCount++;
     } else {
         mCells.erase(it);
         mCount--;
@@ -1074,6 +1075,11 @@ FurnitureObject *BuildingFloor::GetFurnitureAt(int x, int y)
 
 void BuildingFloor::SetRoomAt(int x, int y, Room *room)
 {
+    if (room && !mBuilding->rooms().contains(room)) {
+        qWarning() << "Rejected invalid room reference at" << x << y
+                   << "on building level" << mLevel;
+        room = nullptr;
+    }
     mRoomAtPos[x][y] = room;
 }
 

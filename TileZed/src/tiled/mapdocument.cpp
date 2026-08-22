@@ -63,6 +63,8 @@
 #include <QFileInfo>
 #include <QRect>
 #include <QUndoStack>
+
+#include <cstring>
 #ifdef ZOMBOID
 #include <QDebug>
 #include <QDir>
@@ -374,13 +376,16 @@ void MapDocument::setCurrentLevel(int z)
 
 void MapDocument::resizeMap(const QSize &size, const QPoint &offset)
 {
+    const QSize boundedSize(
+                qBound(1, size.width(), MAX_MAP_DIMENSION),
+                qBound(1, size.height(), MAX_MAP_DIMENSION));
     const QRegion movedSelection = mTileSelection.translated(offset);
-    const QRectF newArea = QRectF(-offset, size);
+    const QRectF newArea = QRectF(-offset, boundedSize);
 
     // Resize the map and each layer
     mUndoStack->beginMacro(tr("Resize Map"));
 #ifdef ZOMBOID
-    mUndoStack->push(new ResizeMap(this, size, true));
+    mUndoStack->push(new ResizeMap(this, boundedSize, true));
 #endif
     for (int i = 0; i < mMap->layerCount(); ++i) {
         if (ObjectGroup *objectGroup = mMap->layerAt(i)->asObjectGroup()) {
@@ -393,18 +398,18 @@ void MapDocument::resizeMap(const QSize &size, const QPoint &offset)
             }
         }
 
-        mUndoStack->push(new ResizeLayer(this, i, size, offset));
+        mUndoStack->push(new ResizeLayer(this, i, boundedSize, offset));
     }
 #ifdef ZOMBOID
-    mUndoStack->push(new ResizeBmpImage(this, 0, size, offset));
-    mUndoStack->push(new ResizeBmpImage(this, 1, size, offset));
-    mUndoStack->push(new ResizeBmpRands(this, 0, size));
-    mUndoStack->push(new ResizeBmpRands(this, 1, size));
+    mUndoStack->push(new ResizeBmpImage(this, 0, boundedSize, offset));
+    mUndoStack->push(new ResizeBmpImage(this, 1, boundedSize, offset));
+    mUndoStack->push(new ResizeBmpRands(this, 0, boundedSize));
+    mUndoStack->push(new ResizeBmpRands(this, 1, boundedSize));
     foreach (MapNoBlend *noBlend, mMap->noBlends())
-        mUndoStack->push(new ResizeNoBlend(this, noBlend, size, offset));
-    mUndoStack->push(new ResizeMap(this, size, false));
+        mUndoStack->push(new ResizeNoBlend(this, noBlend, boundedSize, offset));
+    mUndoStack->push(new ResizeMap(this, boundedSize, false));
 #else
-    mUndoStack->push(new ResizeMap(this, size));
+    mUndoStack->push(new ResizeMap(this, boundedSize));
 #endif
     mUndoStack->push(new ChangeTileSelection(this, movedSelection));
 #ifdef ZOMBOID
@@ -676,7 +681,12 @@ void MapDocument::insertTileset(int index, Tileset *tileset)
  */
 void MapDocument::removeTilesetAt(int index)
 {
+    if (index < 0 || index >= mMap->tilesets().size()) {
+        qWarning() << "Cannot remove tileset at invalid index" << index;
+        return;
+    }
     Tileset *tileset = mMap->tilesets().at(index);
+    emit tilesetAboutToBeRemoved(tileset);
     mMap->removeTilesetAt(index);
 #ifdef ZOMBOID
     mMapComposite->bmpBlender()->tilesetRemoved(tileset->name());
@@ -734,11 +744,23 @@ void MapDocument::paintBmp(int bmpIndex, int px, int py, const QImage &source,
 {
     MapBmp &bmp = mMap->rbmp(bmpIndex);
     QRegion region = paintRgn & QRect(0, 0, bmp.width(), bmp.height());
+    QImage &destination = bmp.rimage();
+    const QRect sourceBounds(px, py, source.width(), source.height());
 
     for (QRect r : region) {
-        for (int y = r.top(); y <= r.bottom(); y++) {
-            for (int x = r.left(); x <= r.right(); x++) {
-                bmp.setPixel(x, y, source.pixel(x - px, y - py));
+        if (destination.depth() == 32
+                && destination.format() == source.format()
+                && sourceBounds.contains(r)) {
+            for (int y = r.top(); y <= r.bottom(); ++y) {
+                std::memcpy(destination.scanLine(y) + r.left() * 4,
+                            source.constScanLine(y - py)
+                            + (r.left() - px) * 4,
+                            size_t(r.width()) * 4);
+            }
+        } else {
+            for (int y = r.top(); y <= r.bottom(); y++) {
+                for (int x = r.left(); x <= r.right(); x++)
+                    bmp.setPixel(x, y, source.pixel(x - px, y - py));
             }
         }
     }

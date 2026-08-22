@@ -138,14 +138,13 @@ QString BuildingMap::buildingTileAt(int x, int y, const QList<bool> visibleLevel
                         test = tlBlend->cellAt(tx, ty).tile; // building tile
                     if (test) {
                         Tile *realTile = test;
-                        if (test->properties().contains(QLatin1String("invisible"))) {
+                        if (test->properties().contains(QLatin1String("invisible"))
+                                || (test->image().isNull()
+                                    && test->hasResolvedSource())) {
                             test = TilesetManager::instance()->invisibleTile();
                         }
-                        if (test->image().isNull()) {
-                            if (BuildingTilesMgr::isUnavailableTile(test))
-                                test = TilesetManager::instance()->missingTile();
-                            else
-                                continue;
+                        if (test->image().isNull() && !test->hasResolvedSource()) {
+                            test = TilesetManager::instance()->missingTile();
                         }
                         QRect imageBox(test->offset(), test->image().size());
                         QPoint p = QPoint(x, y) - (tileBox.bottomLeft().toPoint() - QPoint(0, test->height()));
@@ -1520,12 +1519,18 @@ void ShadowBuilding::objectTileChanged(BuildingObject *object)
 
 void ShadowBuilding::roomAdded(Room *room)
 {
-    mShadowBuilding->insertRoom(mBuilding->indexOf(room), room);
+    if (mShadowBuilding->indexOf(room) >= 0)
+        return;
+    const int index = qBound(0, mBuilding->indexOf(room),
+                             mShadowBuilding->roomCount());
+    mShadowBuilding->insertRoom(index, room);
 }
 
 void ShadowBuilding::roomRemoved(Room *room)
 {
-    mShadowBuilding->removeRoom(mShadowBuilding->indexOf(room));
+    const int index = mShadowBuilding->indexOf(room);
+    if (index >= 0)
+        mShadowBuilding->removeRoom(index);
 }
 
 BuildingFloor *ShadowBuilding::cloneFloor(BuildingFloor *floor)

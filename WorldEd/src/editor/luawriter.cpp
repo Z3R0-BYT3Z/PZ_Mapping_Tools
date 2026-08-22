@@ -26,6 +26,7 @@
 #include "objectgroup.h"
 #include "world.h"
 #include "worldcell.h"
+#include "worldobjectvalidation.h"
 
 #include "BuildingEditor/roofhiding.h"
 
@@ -35,6 +36,7 @@
 #include <QFileInfo>
 #include <QMap>
 #include <QSet>
+#include <QtMath>
 
 using namespace Lua;
 
@@ -232,12 +234,9 @@ public:
             w->writeKeyAndValue("name", obj->name());
         w->writeKeyAndValue("type", obj->type()->name());
         if (obj->geometryType() == ObjectGeometryType::INVALID) {
-            w->writeKeyAndValue(
-                        "x", (obj->cell()->x() + origin.x())
-                        * mWorld->cellSize() + obj->x());
-            w->writeKeyAndValue(
-                        "y", (obj->cell()->y() + origin.y())
-                        * mWorld->cellSize() + obj->y());
+            const QPointF absolute = obj->absoluteWorldPosition();
+            w->writeKeyAndValue("x", absolute.x());
+            w->writeKeyAndValue("y", absolute.y());
             w->writeKeyAndValue("level", obj->level());
             w->writeKeyAndValue("width", obj->width());
             w->writeKeyAndValue("height", obj->height());
@@ -304,34 +303,39 @@ public:
                 WorldCell *cell = mWorld->cellAt(x, y);
                 foreach (WorldCellObject *obj, cell->objects()) {
                     if (obj->isSpawnPoint()) {
+                        QString reason;
+                        if (!WorldObjectValidation::validateSpawnPoint(
+                                    obj, &reason)) {
+                            mWarnings += QString::fromLatin1("%1: %2")
+                                    .arg(WorldObjectValidation::describe(obj))
+                                    .arg(reason);
+                            continue;
+                        }
                         PropertyList properties;
                         resolveProperties(obj, properties);
                         if (Property *p = properties.find(pd)) {
                             QStringList professions = p->mValue.split(QLatin1String(","), Qt::SkipEmptyParts);
-                            if (professions.contains(QLatin1String("all"))) {
-                                if (pd->mEnum)
-                                    professions = pd->mEnum->values();
-                                professions.removeAll(QLatin1String("all"));
+                            foreach (QString profession, professions) {
+                                profession = profession.trimmed();
+                                if (!profession.isEmpty()
+                                        && !spawnByProfession[profession].contains(obj)) {
+                                    spawnByProfession[profession] += obj;
+                                }
                             }
-                            foreach (QString profession, professions)
-                                spawnByProfession[profession] += obj;
                         }
                     }
                 }
             }
         }
 
-        QPoint origin = mWorld->getGenerateLotsSettings().worldOrigin;
-
         foreach (QString profession, spawnByProfession.keys()) {
             w.writeStartTable(profession.toUtf8());
             foreach (WorldCellObject *obj, spawnByProfession[profession]) {
                 w.writeStartTable();
                 w.setSuppressNewlines(true);
-                w.writeKeyAndValue("worldX", obj->cell()->x() + origin.x());
-                w.writeKeyAndValue("worldY", obj->cell()->y() + origin.y());
-                w.writeKeyAndValue("posX", obj->x());
-                w.writeKeyAndValue("posY", obj->y());
+                const QPointF absolute = obj->absoluteWorldPosition();
+                w.writeKeyAndValue("posX", int(qRound64(absolute.x())));
+                w.writeKeyAndValue("posY", int(qRound64(absolute.y())));
                 w.writeKeyAndValue("posZ", obj->level());
 
                 PropertyList properties;
@@ -369,17 +373,22 @@ public:
             for (int x = 0; x < mWorld->width(); x++) {
                 WorldCell *cell = mWorld->cellAt(x, y);
                 foreach (WorldCellObject *obj, cell->objects()) {
+                    QString reason;
+                    if (!WorldObjectValidation::validateExportObject(
+                                obj, &reason)) {
+                        mWarnings += QString::fromLatin1("%1: %2")
+                                .arg(WorldObjectValidation::describe(obj))
+                                .arg(reason);
+                        continue;
+                    }
                     w.writeStartTable();
                     w.setSuppressNewlines(true);
                     w.writeKeyAndValue("name", obj->name());
                     w.writeKeyAndValue("type", obj->type()->name());
                     if (obj->geometryType() == ObjectGeometryType::INVALID) {
-                        w.writeKeyAndValue(
-                                    "x", (obj->cell()->x() + origin.x())
-                                    * mWorld->cellSize() + obj->x());
-                        w.writeKeyAndValue(
-                                    "y", (obj->cell()->y() + origin.y())
-                                    * mWorld->cellSize() + obj->y());
+                        const QPointF absolute = obj->absoluteWorldPosition();
+                        w.writeKeyAndValue("x", absolute.x());
+                        w.writeKeyAndValue("y", absolute.y());
                         w.writeKeyAndValue("z", obj->level());
                         w.writeKeyAndValue("width", obj->width());
                         w.writeKeyAndValue("height", obj->height());
@@ -561,6 +570,7 @@ public:
     }
 
     QString mError;
+    QStringList mWarnings;
     World *mWorld;
     LuaTableWriter *w;
 };
@@ -600,6 +610,8 @@ void LuaWriter::writeWorld(World *world, QIODevice *device, const QString &absDi
 
 bool LuaWriter::writeSpawnPoints(World *world, const QString &filePath)
 {
+    d->mError.clear();
+    d->mWarnings.clear();
     QFile file(filePath);
     if (!d->openFile(&file))
         return false;
@@ -616,6 +628,8 @@ bool LuaWriter::writeSpawnPoints(World *world, const QString &filePath)
 
 bool LuaWriter::writeWorldObjects(World *world, const QString &filePath)
 {
+    d->mError.clear();
+    d->mWarnings.clear();
     QFile file(filePath);
     if (!d->openFile(&file))
         return false;
@@ -649,4 +663,288 @@ bool LuaWriter::writeRoomTones(World *world, const QString &filePath)
 QString LuaWriter::errorString() const
 {
     return d->mError;
+}
+
+QStringList LuaWriter::warnings() const
+{
+    return d->mWarnings;
+}
+
+namespace {
+
+struct ExportValidationDefinitions
+{
+    ObjectType *addType(World &world, const QString &name)
+    {
+        ObjectType *type = new ObjectType(name);
+        world.insertObjectType(world.objectTypes().size(), type);
+        WorldObjectGroup *group = new WorldObjectGroup(
+                    type, name, QColor(Qt::blue));
+        world.insertObjectGroup(world.objectGroups().size(), group);
+        return type;
+    }
+
+    PropertyDef *addProperty(World &world, const QString &name,
+                             const QString &defaultValue,
+                             PropertyEnum *propertyEnum = nullptr)
+    {
+        PropertyDef *definition = new PropertyDef(
+                    name, defaultValue, QString(), propertyEnum);
+        world.addPropertyDefinition(
+                    world.propertyDefinitions().size(), definition);
+        return definition;
+    }
+
+    void addProperty(WorldCellObject *object, const QString &name,
+                     const QString &value)
+    {
+        PropertyDef *definition =
+                object->cell()->world()->propertyDefinition(name);
+        object->addProperty(object->properties().size(),
+                            new Property(definition, value));
+    }
+
+    WorldCellObject *addObject(World &world, const QString &typeName,
+                               int cellX, int cellY, qreal localX,
+                               qreal localY, qreal width = 1,
+                               qreal height = 1)
+    {
+        WorldCell *cell = world.cellAt(cellX, cellY);
+        ObjectType *type = world.objectType(typeName);
+        WorldObjectGroup *group = world.objectGroups().find(typeName);
+        WorldCellObject *object = new WorldCellObject(
+                    cell, QString(), type, group, localX, localY, 0,
+                    width, height);
+        cell->insertObject(cell->objects().size(), object);
+        return object;
+    }
+
+    void configure(World &world)
+    {
+        PropertyEnum *professions = new PropertyEnum(
+                    QLatin1String("Professions"),
+                    QStringList() << QLatin1String("unemployed")
+                                  << QLatin1String("carpenter"), true);
+        world.insertPropertyEnum(world.propertyEnums().size(), professions);
+        addProperty(world, QLatin1String("Professions"),
+                    QLatin1String("unemployed"), professions);
+        addProperty(world, QLatin1String("WaterDirection"),
+                    QLatin1String("0"));
+        addProperty(world, QLatin1String("WaterSpeed"),
+                    QLatin1String("0.0"));
+        addProperty(world, QLatin1String("WaterGround"),
+                    QLatin1String("false"));
+        addProperty(world, QLatin1String("WaterShore"),
+                    QLatin1String("true"));
+        addProperty(world, QLatin1String("RoomTone"),
+                    QLatin1String("Generic"));
+        addProperty(world, QLatin1String("EntireBuilding"),
+                    QLatin1String("false"));
+        addType(world, QLatin1String("SpawnPoint"));
+        addType(world, QLatin1String("WaterFlow"));
+        addType(world, QLatin1String("WaterZone"));
+        addType(world, QLatin1String("RoomTone"));
+    }
+};
+
+bool requireOutput(const QByteArray &output, const QByteArray &expected,
+                   QString *error)
+{
+    if (output.contains(expected))
+        return true;
+    if (error) {
+        *error = QString::fromLatin1("Missing generated Lua fragment: %1")
+                .arg(QString::fromUtf8(expected));
+    }
+    return false;
+}
+
+}
+
+bool LuaWriter::validateSpawnPointExport(QString *summary, QString *error)
+{
+    World world(18, 55, WorldGridFormat::Native256);
+    ExportValidationDefinitions definitions;
+    definitions.configure(world);
+
+    struct CoordinateCase {
+        int cellX;
+        int cellY;
+        int localX;
+        int localY;
+        int absoluteX;
+        int absoluteY;
+    };
+    const QList<CoordinateCase> cases = {
+        { 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 0, 256, 0 },
+        { 0, 1, 0, 0, 0, 256 },
+        { 17, 54, 31, 123, 4383, 13947 },
+        { 17, 54, 18, 124, 4370, 13948 },
+        { 0, 0, 256, 256, 256, 256 },
+        { 1, 1, -1, -1, 255, 255 }
+    };
+
+    for (const CoordinateCase &coordinate : cases) {
+        WorldCellObject *object = definitions.addObject(
+                    world, QLatin1String("SpawnPoint"),
+                    coordinate.cellX, coordinate.cellY,
+                    coordinate.localX, coordinate.localY);
+        definitions.addProperty(object, QLatin1String("Professions"),
+                                QLatin1String("unemployed"));
+        const QPointF absolute = object->absoluteWorldPosition();
+        if (qRound64(absolute.x()) != coordinate.absoluteX
+                || qRound64(absolute.y()) != coordinate.absoluteY) {
+            if (error) {
+                *error = QString::fromLatin1(
+                            "Coordinate conversion failed for cell %1,%2 local %3,%4")
+                        .arg(coordinate.cellX).arg(coordinate.cellY)
+                        .arg(coordinate.localX).arg(coordinate.localY);
+            }
+            return false;
+        }
+    }
+
+    LuaWriter writer;
+    QBuffer buffer;
+    buffer.open(QIODevice::WriteOnly);
+    writer.d->mWarnings.clear();
+    writer.d->writeSpawnPoints(&world, &buffer);
+    const QByteArray output = buffer.data();
+    if (output.contains("worldX") || output.contains("worldY")) {
+        if (error)
+            *error = QLatin1String("Generated spawnpoints.lua still contains worldX or worldY");
+        return false;
+    }
+    for (const CoordinateCase &coordinate : cases) {
+        const QByteArray expected = QString::fromLatin1(
+                    "posX = %1, posY = %2, posZ = 0")
+                .arg(coordinate.absoluteX).arg(coordinate.absoluteY)
+                .toUtf8();
+        if (!requireOutput(output, expected, error))
+            return false;
+    }
+
+    World negativeWorld(1, 1, WorldGridFormat::Native256);
+    definitions.configure(negativeWorld);
+    GenerateLotsSettings settings =
+            negativeWorld.getGenerateLotsSettings();
+    settings.worldOrigin = QPoint(-2, -3);
+    negativeWorld.setGenerateLotsSettings(settings);
+    WorldCellObject *negative = definitions.addObject(
+                negativeWorld, QLatin1String("SpawnPoint"),
+                0, 0, -1, -1);
+    definitions.addProperty(negative, QLatin1String("Professions"),
+                            QLatin1String("unemployed"));
+    if (negative->absoluteWorldPosition() != QPointF(-513, -769)) {
+        if (error)
+            *error = QLatin1String("Negative world-origin conversion failed");
+        return false;
+    }
+
+    QBuffer negativeBuffer;
+    negativeBuffer.open(QIODevice::WriteOnly);
+    writer.d->mWarnings.clear();
+    writer.d->writeSpawnPoints(&negativeWorld, &negativeBuffer);
+    if (!requireOutput(negativeBuffer.data(),
+                       "posX = -513, posY = -769, posZ = 0", error)) {
+        return false;
+    }
+
+    if (summary) {
+        *summary = QLatin1String(
+                    "Native-256 absolute positions, cell boundaries, cross-cell locals, negative locals and negative world origins passed");
+    }
+    return true;
+}
+
+bool LuaWriter::validateZoneExport(QString *summary, QString *error)
+{
+    World world(1, 1, WorldGridFormat::Native256);
+    ExportValidationDefinitions definitions;
+    definitions.configure(world);
+
+    WorldCellObject *flow = definitions.addObject(
+                world, QLatin1String("WaterFlow"), 0, 0, 1, 1, 8, 6);
+    WorldObjectValidation::applyCreationDefaults(flow);
+    QString reason;
+    if (flow->size() != QSizeF(1, 1)
+            || !WorldObjectValidation::validateExportObject(flow, &reason)) {
+        if (error)
+            *error = QLatin1String("WaterFlow defaults failed: ") + reason;
+        return false;
+    }
+
+    WorldCellObject *invalidFlow = definitions.addObject(
+                world, QLatin1String("WaterFlow"), 0, 0, 2, 2);
+    invalidFlow->setName(QLatin1String("invalid-flow"));
+    if (WorldObjectValidation::validateExportObject(invalidFlow, &reason)) {
+        if (error)
+            *error = QLatin1String("WaterFlow without properties was accepted");
+        return false;
+    }
+
+    WorldCellObject *waterZone = definitions.addObject(
+                world, QLatin1String("WaterZone"), 0, 0, 4, 4, 8, 11);
+    WorldObjectValidation::applyCreationDefaults(waterZone);
+    if (!WorldObjectValidation::validateExportObject(waterZone, &reason)
+            || waterZone->size() != QSizeF(8, 11)) {
+        if (error)
+            *error = QLatin1String("WaterZone defaults or area preservation failed: ") + reason;
+        return false;
+    }
+
+    WorldCellObject *roomTone = definitions.addObject(
+                world, QLatin1String("RoomTone"), 0, 0, 8, 8, 3, 2);
+    WorldObjectValidation::applyCreationDefaults(roomTone);
+    if (!WorldObjectValidation::validateExportObject(roomTone, &reason)
+            || roomTone->size() != QSizeF(1, 1)) {
+        if (error)
+            *error = QLatin1String("RoomTone defaults failed: ") + reason;
+        return false;
+    }
+
+    WorldCellObject *spawnPoint = definitions.addObject(
+                world, QLatin1String("SpawnPoint"), 0, 0, 10, 10);
+    WorldObjectValidation::applyCreationDefaults(spawnPoint);
+    if (!WorldObjectValidation::validateSpawnPoint(spawnPoint, &reason)
+            || WorldObjectValidation::resolvedValue(
+                spawnPoint, QLatin1String("Professions"))
+            != QLatin1String("unemployed")) {
+        if (error)
+            *error = QLatin1String("SpawnPoint defaults failed: ") + reason;
+        return false;
+    }
+
+    WorldCellObject *invalidSpawn = definitions.addObject(
+                world, QLatin1String("SpawnPoint"), 0, 0, 11, 11);
+    invalidSpawn->setName(QLatin1String("invalid-spawn"));
+    definitions.addProperty(invalidSpawn, QLatin1String("Professions"),
+                            QLatin1String("all"));
+    if (WorldObjectValidation::validateSpawnPoint(invalidSpawn, &reason)) {
+        if (error)
+            *error = QLatin1String("SpawnPoint profession 'all' was accepted");
+        return false;
+    }
+
+    LuaWriter writer;
+    QBuffer objectBuffer;
+    objectBuffer.open(QIODevice::WriteOnly);
+    writer.d->mWarnings.clear();
+    writer.d->writeWorldObjects(&world, &objectBuffer);
+    if (writer.d->mWarnings.size() != 2
+            || objectBuffer.data().contains("invalid-flow")
+            || objectBuffer.data().contains("invalid-spawn")) {
+        if (error)
+            *error = QString::fromLatin1(
+                        "Invalid-zone filtering failed with %1 warning(s)")
+                    .arg(writer.d->mWarnings.size());
+        return false;
+    }
+
+    if (summary) {
+        *summary = QLatin1String(
+                    "creation defaults passed, WaterZone areas were preserved, and invalid WaterFlow and SpawnPoint records were skipped with warnings");
+    }
+    return true;
 }

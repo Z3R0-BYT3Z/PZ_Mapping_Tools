@@ -43,6 +43,8 @@
 
 namespace Tiled {
 
+const int MAX_MAP_DIMENSION = 300;
+
 class Tile;
 class Tileset;
 class ObjectGroup;

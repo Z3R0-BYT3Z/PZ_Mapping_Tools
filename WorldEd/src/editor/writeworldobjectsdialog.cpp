@@ -85,6 +85,15 @@ void WriteWorldObjectsDialog::writeObjectsLua()
                                  tr("An error occurred saving the LUA objects file.\n%1\n\n%2")
                                  .arg(writer.errorString())
                                  .arg(QDir::toNativeSeparators(luaFileName)));
+        } else if (!writer.warnings().isEmpty()) {
+            QMessageBox message(MainWindow::instance());
+            message.setIcon(QMessageBox::Warning);
+            message.setWindowTitle(tr("Saved with invalid zones skipped"));
+            message.setText(tr("Saved the LUA objects file, but %1 invalid zone or spawn record(s) were omitted.")
+                            .arg(writer.warnings().size()));
+            message.setInformativeText(tr("Correct their type, size or properties, then export again to include them."));
+            message.setDetailedText(writer.warnings().join(QLatin1Char('\n')));
+            message.exec();
         } else {
             QMessageBox::information(MainWindow::instance(), tr("Saved objects"),
                                  tr("Saved the LUA objects file.\n%1")

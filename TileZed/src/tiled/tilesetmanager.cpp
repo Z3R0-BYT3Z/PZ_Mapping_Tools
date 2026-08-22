@@ -60,7 +60,7 @@ TilesetManager::TilesetManager():
     mInvisibleTileset = new Tileset(QLatin1String("invisible"), TILE_WIDTH, TILE_HEIGHT);
     mInvisibleTileset->setTransparentColor(Qt::transparent);
     mInvisibleTileset->setMissing(true);
-    QString fileName = QLatin1String(":/images/invisible-tile.png");
+    QString fileName = QLatin1String(":/images/invisible-tile.svg");
     if (!mInvisibleTileset->loadFromImage(QImage(fileName), fileName)) {
         QImage image(TILE_WIDTH, TILE_HEIGHT, QImage::Format_ARGB32);
         image.fill(Qt::red);
@@ -72,8 +72,7 @@ TilesetManager::TilesetManager():
     mMissingTileset = new Tileset(QLatin1String("missing"), TILE_WIDTH, TILE_HEIGHT);
     mMissingTileset->setTransparentColor(Qt::white);
     mMissingTileset->setMissing(true);
-//    QString fileName = QLatin1String(":/BuildingEditor/icons/missing-tile.png");
-    fileName = QLatin1String(":/images/missing-tile.png");
+    fileName = QLatin1String(":/images/missing-tile.svg");
     if (!mMissingTileset->loadFromImage(QImage(fileName), fileName)) {
         QImage image(TILE_WIDTH, TILE_HEIGHT, QImage::Format_ARGB32);
         image.fill(Qt::red);

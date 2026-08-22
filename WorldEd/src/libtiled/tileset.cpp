@@ -43,7 +43,7 @@ Tileset::~Tileset()
 
 Tile *Tileset::tileAt(int id) const
 {
-    return (id < mTiles.size()) ? mTiles.at(id) : 0;
+    return (id >= 0 && id < mTiles.size()) ? mTiles.at(id) : 0;
 }
 
 static QMap<QString,QImage> TILESET_IMAGES;

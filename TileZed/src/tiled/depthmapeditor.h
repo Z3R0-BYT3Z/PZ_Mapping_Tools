@@ -257,6 +257,7 @@ private:
     QTableWidget *mTileTable = nullptr;
     DepthMapCanvas *mCanvas = nullptr;
     QSplitter *mMainSplitter = nullptr;
+    QSplitter *mGeometrySplitter = nullptr;
     QScrollArea *mCanvasScrollArea = nullptr;
     QSlider *mDepthSlider = nullptr;
     QSpinBox *mDepthSpin = nullptr;
@@ -274,6 +275,7 @@ private:
     QDoubleSpinBox *mHeightSpin = nullptr;
     QLabel *mPixelSizeLabels[3] = { nullptr, nullptr, nullptr };
     QDoubleSpinBox *mPixelSizeSpins[3] = { nullptr, nullptr, nullptr };
+    QLabel *mProjectedSizeLabel = nullptr;
     QComboBox *mPlaneCombo = nullptr;
     QPlainTextEdit *mPointsEdit = nullptr;
     QStackedWidget *mShapeStack = nullptr;

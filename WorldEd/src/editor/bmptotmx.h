@@ -59,6 +59,7 @@ public:
     bool generateWorld(WorldDocument *worldDoc, GenerateMode mode);
     bool generateCell(WorldCell *cell);
     bool validateGenerationInputs(WorldDocument *worldDoc);
+    static bool validateMetadataOnly(QString *summary, QString *error);
 
     QString errorString() const { return mError; }
 
@@ -90,6 +91,7 @@ private:
 
     bool WriteMap(WorldCell *cell, int bmpIndex);
     bool UpdateMap(WorldCell *cell, int bmpIndex);
+    bool updateMetadataOnly(GenerateMode mode);
 
     Tiled::Tile *getTileFromTileName(const QString &tileName);
 

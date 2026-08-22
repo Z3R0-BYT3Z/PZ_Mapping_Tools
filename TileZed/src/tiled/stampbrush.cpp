@@ -24,9 +24,12 @@
 #include "brushitem.h"
 #include "map.h"
 #include "mapdocument.h"
+#include "maplevel.h"
+#include "mainwindow.h"
 #include "mapscene.h"
 #include "painttilelayer.h"
 #include "tilelayer.h"
+#include "tilesetmanager.h"
 
 #include <math.h>
 #include <QVector>
@@ -49,12 +52,19 @@ StampBrush::StampBrush(QObject *parent)
     , mStampReferenceX(0)
     , mStampReferenceY(0)
     , mIsRandom(false)
+#ifdef ZOMBOID
+    , mLayerStampAnchorLevel(0)
+#endif
 {
 }
 
 StampBrush::~StampBrush()
 {
     delete mStamp;
+#ifdef ZOMBOID
+    clearLayerStamps();
+#endif
+    TilesetManager::instance()->removeReferences(mTilesetReferences);
 }
 
 #ifdef ZOMBOID
@@ -470,7 +480,17 @@ void StampBrush::setStamp(TileLayer *stamp)
     if (mStamp == stamp)
         return;
 
+    const QList<Tileset *> tilesets = stamp
+            ? stamp->usedTilesets().values()
+            : QList<Tileset *>();
+    TilesetManager::instance()->addReferences(tilesets);
     delete mStamp;
+    mStamp = nullptr;
+#ifdef ZOMBOID
+    clearLayerStamps();
+#endif
+    TilesetManager::instance()->removeReferences(mTilesetReferences);
+    mTilesetReferences = tilesets;
     mStamp = stamp;
 
     if (mIsRandom) {
@@ -482,6 +502,44 @@ void StampBrush::setStamp(TileLayer *stamp)
 
     updatePosition();
 }
+
+#ifdef ZOMBOID
+void StampBrush::clearLayerStamps()
+{
+    qDeleteAll(mLayerStamps);
+    mLayerStamps.clear();
+}
+
+void StampBrush::setLayerStamps(const QList<TileLayer *> &stamps,
+                                int anchorLevel)
+{
+    QSet<Tileset *> usedTilesets;
+    for (TileLayer *layer : stamps)
+        usedTilesets.unite(layer->usedTilesets());
+    const QList<Tileset *> tilesets = usedTilesets.values();
+    TilesetManager::instance()->addReferences(tilesets);
+    delete mStamp;
+    mStamp = nullptr;
+    clearLayerStamps();
+    TilesetManager::instance()->removeReferences(mTilesetReferences);
+    mTilesetReferences = tilesets;
+    mLayerStamps = stamps;
+    mLayerStampAnchorLevel = anchorLevel;
+    mIsRandom = false;
+
+    TileLayer *preview = nullptr;
+    for (TileLayer *layer : mLayerStamps) {
+        if (!preview) {
+            preview = new TileLayer(QString(), 0, 0,
+                                    layer->width(), layer->height());
+        }
+        preview->merge(QPoint(), layer);
+    }
+    mStamp = preview;
+    brushItem()->setTileLayer(mStamp);
+    updatePosition();
+}
+#endif
 
 void StampBrush::beginPaint()
 {
@@ -551,6 +609,55 @@ void StampBrush::doPaint(bool mergeable, int whereX, int whereY)
     TileLayer *tileLayer = currentTileLayer();
     Q_ASSERT(tileLayer);
 
+#ifdef ZOMBOID
+    if (!mLayerStamps.isEmpty()) {
+        MainWindow::instance()->beginDocumentTransaction();
+        QUndoStack *stack = mapDocument()->undoStack();
+        stack->beginMacro(tr("Paste Tile Selection"));
+        for (TileLayer *source : mLayerStamps) {
+            const int targetLevel = mapDocument()->currentLevel() +
+                    source->level() - mLayerStampAnchorLevel;
+            MapLevel *level = mapDocument()->map()->mapLevelForZ(targetLevel);
+            if (!level)
+                continue;
+            TileLayer *target = nullptr;
+            for (TileLayer *candidate : level->tileLayers()) {
+                if (candidate->name() == source->name()) {
+                    target = candidate;
+                    break;
+                }
+            }
+            if (!target)
+                continue;
+            const QRegion pasteRegion = QRegion(QRect(
+                        whereX, whereY,
+                        source->width(), source->height()))
+                    & target->bounds();
+            if (pasteRegion.isEmpty())
+                continue;
+            TileLayer *paintSource = source;
+            TileLayer *emptySource = nullptr;
+            if (mBrushBehavior == BrushBehavior::Erase) {
+                emptySource = new TileLayer(QString(), 0, 0,
+                                            source->width(),
+                                            source->height());
+                paintSource = emptySource;
+            }
+            PaintTileLayer *paint = new PaintTileLayer(
+                        mapDocument(), target, whereX, whereY,
+                        paintSource, pasteRegion,
+                        mBrushBehavior == BrushBehavior::Erase);
+            delete emptySource;
+            paint->setMergeable(mergeable);
+            stack->push(paint);
+            mapDocument()->emitRegionEdited(pasteRegion, target);
+        }
+        stack->endMacro();
+        MainWindow::instance()->endDocumentTransaction();
+        return;
+    }
+#endif
+
     if (!tileLayer->bounds().intersects(QRect(whereX, whereY,
                                               stamp->width(),
                                               stamp->height())))
@@ -558,9 +665,7 @@ void StampBrush::doPaint(bool mergeable, int whereX, int whereY)
 
 #ifdef ZOMBOID
     if (mBrushBehavior == BrushBehavior::Erase) {
-        // An erase operation only needs an empty source with the dimensions
-        // of the active stamp. Cloning and then clearing the complete target
-        // layer here made every erased tile copy a whole 300x300 layer.
+        MainWindow::instance()->beginDocumentTransaction();
         TileLayer *stampCopy = new TileLayer(QString(), 0, 0,
                                              stamp->width(),
                                              stamp->height());
@@ -572,6 +677,7 @@ void StampBrush::doPaint(bool mergeable, int whereX, int whereY)
         paint->setMergeable(mergeable);
         mapDocument()->undoStack()->push(paint);
         mapDocument()->emitRegionEdited(brushItem()->tileRegion(), tileLayer);
+        MainWindow::instance()->endDocumentTransaction();
         return;
     }
 #endif
@@ -585,8 +691,14 @@ void StampBrush::doPaint(bool mergeable, int whereX, int whereY)
                             whereX, whereY, stamp);
 #endif
     paint->setMergeable(mergeable);
+#ifdef ZOMBOID
+    MainWindow::instance()->beginDocumentTransaction();
+#endif
     mapDocument()->undoStack()->push(paint);
     mapDocument()->emitRegionEdited(brushItem()->tileRegion(), tileLayer);
+#ifdef ZOMBOID
+    MainWindow::instance()->endDocumentTransaction();
+#endif
 }
 
 /**

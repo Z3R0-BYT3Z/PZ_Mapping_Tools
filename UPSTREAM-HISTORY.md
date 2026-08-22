@@ -4,6 +4,10 @@ This document records where the PZTools Unofficial source trees came from,
 which upstream revisions formed the initial integration baseline, and how later
 upstream changes are tracked.
 
+Feature-level authorship, independent implementations, later upstream ports,
+and review decisions are recorded in
+[`FEATURE_PROVENANCE.md`](FEATURE_PROVENANCE.md).
+
 It exists because this repository combines two independent source histories
 into one source tree. The combined repository is therefore not represented by
 GitHub as a conventional fork of either upstream repository.
@@ -13,6 +17,30 @@ GitHub as a conventional fork of either upstream repository.
 The current `WorldEd/` and `TileZed/` trees were reconstructed on local
 `integration/qt5-basements` branches before being assembled into this combined
 repository.
+
+## Historical Unjammer continuation before the combined repository
+
+The current combined repository is not the beginning of the unofficial
+continuation. Public Unjammer WorldEd and TileZed forks preserve verifiable
+feature work from the Build 41 era, followed by dedicated Build 42 branches.
+
+| Historical tree | Earliest verified Unjammer commit | Date | Verified scope |
+|---|---|---|---|
+| `Unjammer/WorldEd` | [`fd4ed27dab993c4f8b85091f463fe6f8067eeccc`](https://github.com/Unjammer/WorldEd/commit/fd4ed27dab993c4f8b85091f463fe6f8067eeccc) | 2023-03-06 | Dark-theme corrections, InGameMap validation and road features, thumbnail workflow, preferences, and Qt maintenance |
+| `Unjammer/TileZed` | [`b5fb778e54c5a36c32b29b8df9489cbcd295a20a`](https://github.com/Unjammer/TileZed/commit/b5fb778e54c5a36c32b29b8df9489cbcd295a20a) | 2023-03-06 | Theme and grid controls, tile IDs and names, export and unpacking, Lua mapping corrections, and BuildingEd extensions |
+| `Unjammer/WorldEd`, branch `B42` | [`e1438f5599ec01461c63b40333e9820bcbffeae4`](https://github.com/Unjammer/WorldEd/commit/e1438f5599ec01461c63b40333e9820bcbffeae4) | 2025-01-18 | Native 256 generation, original Biomemap Generator, and Build 42 editor changes |
+| `Unjammer/TileZed`, branch `B42` | [`7e57847b5b8e4994b67d7c130ab12eb99e11e3d4`](https://github.com/Unjammer/TileZed/commit/7e57847b5b8e4994b67d7c130ab12eb99e11e3d4) | 2025-01-18 | Portable Build 42 TileZed behavior, TileDefs, Lua, preferences, extraction, and tileset handling |
+
+Preserved C# mapping utilities provide older evidence of Alree / Unjammer work
+on chunks, compiled maps, TileDefs, texture packs, TMX/PZW generation, map
+images, and building extraction beginning with verified Git commits in March
+2022. Those archives are historical precursors, not dependencies or copied
+source for the current C++ applications. Exact dates for archives without Git
+history are intentionally not inferred from file metadata alone.
+
+The historical forks, reconstruction histories, and current combined history
+remain distinct evidence layers. A later equivalent Tim Baker implementation
+does not retroactively replace an earlier independent Unjammer implementation.
 
 | Local tree | Upstream repository | Source branch | Exact initial baseline | Upstream date | Subject |
 |---|---|---|---|---|---|
@@ -135,6 +163,18 @@ Known post-baseline ports in the current PZTools tree are:
 | WorldEd | [`f492c5cde209e1ef907af5d84f93c89cea4b1927`](https://github.com/timbaker/pzworlded/commit/f492c5cde209e1ef907af5d84f93c89cea4b1927) - LotPackViewer z-coordinate fix | Integrated |
 | WorldEd | [`a7d5a77ccacddef3909decda2da3167a2c4f03e1`](https://github.com/timbaker/pzworlded/commit/a7d5a77ccacddef3909decda2da3167a2c4f03e1) - OpenGL 3.3 cell renderer | Integrated with Qt 5/core-profile corrections |
 | TileZed / BuildingEd | [`2e0d35d5bf4286de1ce55820a0ea2c954b7924ff`](https://github.com/timbaker/tiled/commit/2e0d35d5bf4286de1ce55820a0ea2c954b7924ff) - MixedTilesetView first-row display fix | Integrated |
+
+The post-baseline review was refreshed on 2026-08-15 through these heads:
+
+| Repository | Reviewed `basements` head | Post-baseline commits reviewed |
+|---|---|---|
+| `timbaker/pzworlded` | [`8d01befa83df1afc50f08e9faad00dde4e42925c`](https://github.com/timbaker/pzworlded/commit/8d01befa83df1afc50f08e9faad00dde4e42925c) | 29 |
+| `timbaker/tiled` | [`3c577009ba09512521977648d261da4d011c67f8`](https://github.com/timbaker/tiled/commit/3c577009ba09512521977648d261da4d011c67f8) | 29 |
+
+The complete feature and fix decisions, including ports, adaptations, changes
+already independently present, and platform-only work, are maintained in the
+`Tim Baker Upstream Review` table in
+[`FEATURE_PROVENANCE.md`](FEATURE_PROVENANCE.md).
 
 Platform-only Docker, Linux, macOS, or Qt 6 commits are not automatically
 imported into the Windows Qt 5 tree. They are reviewed for relevant portable

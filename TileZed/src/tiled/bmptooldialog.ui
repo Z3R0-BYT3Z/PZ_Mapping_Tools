@@ -209,7 +209,7 @@
            </property>
            <property name="icon">
             <iconset resource="tiled.qrc">
-             <normaloff>:/images/22x22/brush-square.png</normaloff>:/images/22x22/brush-square.png</iconset>
+             <normaloff>:/images/22x22/brush-square.svg</normaloff>:/images/22x22/brush-square.svg</iconset>
            </property>
           </widget>
          </item>
@@ -220,7 +220,7 @@
            </property>
            <property name="icon">
             <iconset resource="tiled.qrc">
-             <normaloff>:/images/22x22/brush-circle.png</normaloff>:/images/22x22/brush-circle.png</iconset>
+             <normaloff>:/images/22x22/brush-circle.svg</normaloff>:/images/22x22/brush-circle.svg</iconset>
            </property>
           </widget>
          </item>

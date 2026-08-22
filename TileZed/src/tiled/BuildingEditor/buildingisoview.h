@@ -203,7 +203,8 @@ public:
     bool currentFloorContains(const QPoint &tilePos, int dw = 0, int dh = 0);
 
     void setToolTiles(const FloorTileGrid *tiles,
-                      const QPoint &pos, const QString &layerName);
+                      const QPoint &pos, const QString &layerName,
+                      bool reusableSource = false);
     void clearToolTiles();
 
     QString buildingTileAt(int x, int y);
@@ -319,6 +320,9 @@ private:
     BaseTool *mCurrentTool;
     CompositeLayerGroup *mLayerGroupWithToolTiles;
     Tiled::TileLayer mToolTiles;
+    const FloorTileGrid *mToolTileSource;
+    QString mToolTileSourceLayer;
+    int mToolTileSourceLevel;
     QString mNonEmptyLayer;
     CompositeLayerGroupItem *mNonEmptyLayerGroupItem;
     bool mShowBuildingTiles;

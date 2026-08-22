@@ -1,185 +1,84 @@
-# PZTools Modernized v1.0.2
+# Changes since Build 20260818b
 
-## Transparent-tile rendering and validation
+The exact public release baseline used for this changelog is
+[`42.20B260818b`](https://github.com/Unjammer/PZ_Mapping_Tools/releases/tag/42.20B260818b),
+commit
+[`89617f75aa29ed824d6ee96d00fccc58a69aeed7`](https://github.com/Unjammer/PZ_Mapping_Tools/commit/89617f75aa29ed824d6ee96d00fccc58a69aeed7),
+published on 2026-08-19 at 01:12 UTC as **Build 20260818b**.
 
-- BuildingEd and WorldEd now distinguish a valid fully transparent tile cell
-  from a tileset image that is missing or failed to load.
-- Valid transparent cells no longer render as red missing-tile placeholders in
-  building, furniture, category, mixed-tileset, or WorldEd previews.
-- BuildingEd template and furniture validation now accepts valid transparent
-  cells while continuing to fail for unresolved tilesets.
-- BuildingEd validation logs report the number of transparent cells found in
-  each template.
+This changelog contains only user-visible work added after that tagged release.
 
-## New Building dialog
+## Shared / All applications
 
-- The Building Template, Width, and Height controls remain visible under the
-  Breeze Dark theme on Qt 5.14.2.
+- Malformed TMX and TBX references, dimensions, colors, coordinates, and
+  thumbnail metadata are rejected safely instead of reaching unchecked
+  container access or being accepted as valid cached data. TMX maps and tile
+  layers are limited to 300 x 300 tiles across creation, resizing, and loading.
+  Map resizing asks for confirmation before existing content is cropped.
 
-## Validation
+## PZWorldEd
 
-- The Windows x64 release was rebuilt with Qt 5.14.2 and Visual Studio 2026.
-- BuildingEd all-template and category validation passes with the tested
-  Project Zomboid Build 42.20 tile extraction.
-- WorldEd environment-preview overlay validation passes.
+- Confirming Preferences with an unchanged Tiles directory no longer reloads
+  the complete tileset catalogue or reconstructs every open map and lot.
+  Preference changes are applied coherently before the dialog closes.
+- Right-clicking a supported special object opens a guided property editor
+  limited to the fields expected for its type. WaterFlow, WaterZone, RoomTone,
+  SpawnPoint, ParkingStall, Vehicle, Mannequin, Animal, Basement, and WorldGen
+  use enum lists, profession checklists, booleans, text fields, or numeric
+  controls as appropriate. Missing expected properties are added on Save,
+  unrelated custom properties are retained, and the complete existing
+  Properties dock remains available. The same menu is available while Select
+  or Create Object is active and always targets the zone geometry directly
+  under the pointer. Choose Basement Access is offered only for a Basement
+  zone. Closing the menu, including with a second right-click, performs no
+  action.
+- Cell Move, Copy, and Paste retain the complete cell payload. This includes
+  the assigned map, lots, cell properties and notes, cell templates, zones and
+  objects with their properties, notes, templates, visibility, geometry points
+  and polyline widths, plus InGameMap features and properties.
+- Ctrl+V and **Edit > Paste** open the same translucent placement preview
+  anchored to the selected destination cell. Multi-cell layouts retain their
+  relative positions, remain inside the project bounds, and may be confirmed
+  by click or Enter. InGameMap features use the destination cell coordinates,
+  and existing destination features remain intact through Paste, Undo, and
+  Redo. The preview follows the pointer even when world thumbnails are hidden,
+  uses green for empty targets and orange for occupied targets, and
+  recalculates the destination from the confirming click. One confirmation
+  performs one paste and returns to normal cell selection. Non-empty targets
+  require explicit confirmation with No as the default.
+- World-map overlay placement converts source cells to absolute map-square
+  coordinates before projecting them over the World view. Build 42.20
+  256-square overlay data now aligns over both Native256 and Legacy300
+  projects.
+- World-map XML and binary output is normalized to the Build 42.20 256-square
+  cell grid. XML records `cellSize="256"`, while Legacy300 features are
+  re-bucketed and clipped across the required 256-square world-map cells.
 
-# Changes since the BuildingEd room-floor hotfix
+## BuildingEd
 
-This release note starts after the August 10, 2026 BuildingEd hotfix that
-preserved room floors across save, close, and reopen. That hotfix is the
-baseline and is not repeated below.
-
-## Shared Project Zomboid installation path
-
-- WorldEd, TileZed, and BuildingEd Preferences now expose one shared,
-  validated **Project Zomboid Installation** path.
-- The selector accepts either the game root or its `media` directory and can
-  detect standard Steam installations on first use.
-- Existing explicit tool and project paths remain authoritative. When they
-  are empty, the shared path supplies official TileDefs, texture packs,
-  WorldGen biome and prefab definitions, and procedural-loot definitions.
-- Clearing the field is remembered and does not trigger automatic detection
-  again on the next start.
-- The installed-game path remains separate from the mapping **Tiles** path.
-  Renderable PNG sheets must still be extracted or supplied separately.
-
-## Basement entrance placement preview
-
-- Selecting a WorldEd Basement zone now resolves its `Access` name to a
-  matching editable `ba_*.tbx` or `ba_*.tmx` source below the project, map,
-  or configured Maps directory.
-- WorldEd also searches the portable `pzby_tbx/basement_access` directory
-  beside `bin` for editable sources and `pzby_tbx/binmap` for compiled PZBY
-  files. Basement resources are not taken from the Project Zomboid
-  installation.
-- Both portable directories are searched recursively for TBX and TMX sources,
-  including files copied there after WorldEd has started.
-- TBX access sources are now loaded for the translucent preview instead of
-  being detected but left unopened.
-- Access sources do not require a staircase or an internal anchor. The complete
-  TBX or TMX is displayed as a translucent overlay aligned directly to the
-  Basement trace origin without centering or stair-coordinate offsets.
-- The preview is visible only for the selected Basement zone, follows object
-  movement, and never modifies the source access file.
-- **Choose Basement Access...** opens a filterable list of portable access
-  sources with dimensions and a large preview, then updates the selected
-  Basement object's `Access` property through Undo.
-- If only a compiled PZBY is available, WorldEd identifies it and
-  explains that the editable TBX or TMX source is required for the preview.
-
-## Integrated building basement placement
-
-- A placed building lot can be lowered or raised by complete world levels
-  from its WorldEd context menu. Its world X and Y remain fixed, so the lot
-  visibly moves down or up in the isometric renderer.
-- The placement level is stored in the PZW and is consumed by LOT generation.
-  The source TBX or TMX is not rewritten.
-- A lot remains selectable on every world level occupied by its source map.
-  Its selected occupied volume is outlined in blue, with the portion placed
-  below world level zero outlined in red.
-- **Open Ground at Basement Stairs** detects staircase tops leading from
-  level -1 to level 0 and removes the corresponding level-zero Floor tile
-  from the affected cell TMX files after confirmation.
-- Ground opening writes are atomic and create dated TMX backups beside the
-  project before any source map is changed.
-
-## Layer-aware and floor-aware tile selection
-
-- TileZed and BuildingEd now share the same Select Tiles scope controls.
-- Copy, cut, and delete can target the current layer, visible layers, all
-  layers, or explicitly selected layers on the current level or every level.
-- Clipboard data retains layer names and relative floor offsets.
-- Multi-plane paste restores every copied plane relative to the selected
-  destination anchor.
-
-## Native256 LOT generation
-
-- Generate Lots now waits for every assigned TMX and nested TBX source to
-  finish loading before transferring the complete map composite to a worker.
-  This prevents LOT headers from being written before building RoomDefs are
-  available.
-- Existing LOT output affected by missing RoomDefs must be regenerated from
-  the original PZW, TMX, and TBX sources.
-- RoomDef lookup bounds now follow the actual converted room rectangles,
-  including negative coordinates and rectangles extending outside the nominal
-  256-square source cell.
-- Generate Lots includes optional on-the-fly hole filling. It can use the
-  nearest available level-zero tile or an explicit tile name without changing
-  source TMX and TBX files.
-- Only holes that remain unresolved are included in the generation failure
-  report.
-
-## OpenStreetMap project generation
-
-- Generated ground zones now use an exclusive priority classification for
-  Water, TownZone, Farm, FarmLand, DeepForest, Forest, and remaining
-  Vegitation squares.
-- Specialized coverage is clipped per cell and merged into compact polygons
-  or rectangles instead of producing thousands of overlapping zones.
-- Major-road Nav uses width-aware polylines for motorway, trunk, primary, and
-  secondary roads. Connected compatible sections are merged and clipped at
-  cell boundaries.
-- Building footprints remain covered by TownZone. Roads, railways, water,
-  waterways, and bare sand are excluded from vegetation output.
-- Railways, farmland, farmyards, orchards, vineyards, nurseries, allotments,
-  forests, scrub, grass, tree rows, hedges, and individual trees receive
-  dedicated terrain, vegetation, or zone handling where supported by OSM.
-- A separate **Road markings** option creates editable WorldEd road objects
-  for conservative supported two-way paved roads. Manual roads and edited
-  generated roads are preserved during reimport.
-
-## Pack extraction and multi-tile objects
-
-- The Versatile Pack Extractor adds **All tiles**, **All tilesets**, and
-  **All objects** presets that do not require a prefix or manually entered
-  tileset name.
-- Complete individual-tile extraction can create one automatic output
-  subdirectory per tileset.
-- Multi-tile furniture definitions can be assembled into one image per
-  variant and orientation.
-- Individual export can exclude tiles already used by assembled objects.
-- Optional orphan-pixel correction removes very low alpha values and isolated
-  visible pixels from reconstructed output without modifying source packs.
-- Pack opening now indexes metadata without decoding every atlas page.
-  Extraction decodes pages only when required and releases them after use.
-
-## Compatibility corrections
-
-- WorldEd, TileZed, and BuildingEd Preferences now provide autosave intervals
-  of 1, 5, 10, 20, or 60 minutes plus Disabled. WorldEd and TileZed save only
-  existing modified project files. BuildingEd retains recoverable `.autosave`
-  copies and its restore workflow.
-- InGameMap export now applies the renderer-complexity budget to XML and binary
-  output. The conservative budget protects the game's signed 16-bit per-cell
-  geometry offsets and simplifies highway polygons further before refusing an
-  unsafe cell.
-- Window Setup now applies **Use 1920 x 1080** immediately to the current
-  application and provides **Apply to Current Application** for custom
-  dimensions. Before either temporary action, the current size and position
-  are preserved explicitly and return on the next normal start.
-- Integrated the upstream LotPack null-map guard.
-- Integrated applicable BuildingEd category filters while preserving the
-  maintained complete tileset catalogue, current RoomNames, and renderer
-  behavior.
-- Biomemap raster handling now recognizes Water as green value 0.
-- Project Doctor now counts raw TMX GIDs before deciding whether an unresolved
-  tileset declaration is unused. Referenced declarations are preserved even
-  when their PNG cannot currently be loaded, which prevents existing GIDs
-  from being reinterpreted as tiles from another sheet.
-- Project Doctor treats TBX files as read-only diagnostics. It reports their
-  optional source dependencies but does not canonicalize or rewrite building
-  data. Self-contained TMX maps do not require separate TBX files.
-- Project Doctor logs every backup source, destination, and dated backup
-  directory when fixes are applied.
+- Building dimensions are limited to 300 x 300 tiles during creation, TBX
+  loading, and resizing. Furniture layouts, roof dimensions, and wall lengths
+  use the same maximum. Destructive resize operations require confirmation.
+  Clipboard placement that would exceed the limit warns before continuing and
+  crops only clipboard content outside the bounded building grid.
+- The Layers visibility threshold is saved to and restored from the portable
+  application INI.
+- Moving a clipboard preview reuses its converted isometric tile grid instead
+  of resolving every copied tile again for each pointer position.
+- Room name and internal-name edits commit when editing finishes or a list
+  value is selected. Metadata-only room changes no longer rebuild every
+  isometric floor.
 
 ## Credits and special thanks
 
-- Tim Baker for the original WorldEd and TileZed work that remains the
-  upstream foundation of these tools.
+- Tim Baker for the original WorldEd and TileZed work that remains the upstream
+  foundation of these tools.
+- Alree / Unjammer for the unofficial Qt 5 continuation, current maintenance,
+  new features, fixes, integrations, and releases.
 - A very special thank you to Fred 'Military Surplus' Cooper.
-- Petro, Pabbiqo [pq], Dane, ! 𝕮𝖆ç𝖆𝖉𝖔𝖗, Kyber, шакалоблок, and the Project
+- Petro, Pabbiqo [pq], Dane, ! Cacador, Kyber, shakaloblok, and the Project
   Zomboid mapping and modding community for reproducible reports, project
   files, screenshots, logs, and practical workflow feedback.
 
-Legal authorship and third-party attribution remain documented in
-`AUTHORS.txt`, `UPSTREAM-HISTORY.md`, and the bundled license notices.
+Legal authorship and third-party attribution are documented in `AUTHORS.txt`,
+`FEATURE_PROVENANCE.md`, `UPSTREAM-HISTORY.md`, and the bundled license notices.

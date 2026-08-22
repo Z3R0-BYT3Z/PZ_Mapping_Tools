@@ -34,6 +34,7 @@
 #include <QDebug>
 #include <QFileInfo>
 #include <QMessageBox>
+#include <limits>
 
 using namespace BuildingEditor;
 using namespace Tiled;
@@ -169,6 +170,8 @@ BuildingTile *BuildingTilesMgr::get(const QString &tileName, int offset)
         return noneTile();
 
     QString adjustedName = adjustTileNameIndex(tileName, offset); // also normalized
+    if (adjustedName.isEmpty())
+        return noneTile();
 
     if (!mTileByName.contains(adjustedName))
         add(adjustedName);
@@ -233,8 +236,8 @@ bool BuildingTilesMgr::parseTileName(const QString &tileName, QString &tilesetNa
     indexString.remove( QRegExp(QLatin1String("^[0]*")) );
 #endif
     bool ok;
-    index = indexString.toUInt(&ok);
-    return !tilesetName.isEmpty() && ok;
+    index = indexString.toInt(&ok);
+    return !tilesetName.isEmpty() && ok && index >= 0;
 }
 
 bool BuildingTilesMgr::legalTileName(const QString &tileName)
@@ -290,7 +293,8 @@ QString BuildingTilesMgr::adjustTileNameIndex(const QString &tileName, int offse
 {
     QString tilesetName;
     int index = 0;
-    parseTileName(tileName, tilesetName, index);
+    if (!parseTileName(tileName, tilesetName, index))
+        return QString();
 
     // Currently, the only place this gets called with offset > 0 is by the
     // createEntryFromSingleTile() methods.  Those methods assume the tilesets
@@ -304,8 +308,11 @@ QString BuildingTilesMgr::adjustTileNameIndex(const QString &tileName, int offse
         }
     }
 
-    index += offset;
-    return nameForTile(tilesetName, index);
+    const qint64 adjustedIndex = qint64(index) + offset;
+    if (adjustedIndex < 0 ||
+            adjustedIndex > std::numeric_limits<int>::max())
+        return QString();
+    return nameForTile(tilesetName, int(adjustedIndex));
 }
 
 QString BuildingTilesMgr::normalizeTileName(const QString &tileName)
@@ -314,7 +321,8 @@ QString BuildingTilesMgr::normalizeTileName(const QString &tileName)
         return tileName;
     QString tilesetName;
     int index;
-    parseTileName(tileName, tilesetName, index);
+    if (!parseTileName(tileName, tilesetName, index))
+        return tileName;
     return nameForTile(tilesetName, index);
 }
 
@@ -497,7 +505,8 @@ Tiled::Tile *BuildingTilesMgr::tileFor(const QString &tileName)
 {
     QString tilesetName;
     int index;
-    parseTileName(tileName, tilesetName, index);
+    if (!parseTileName(tileName, tilesetName, index))
+        return mMissingTile;
     Tileset *tileset = TileMetaInfoMgr::instance()->tileset(tilesetName);
     if (!tileset)
         return mMissingTile;
@@ -507,7 +516,7 @@ Tiled::Tile *BuildingTilesMgr::tileFor(const QString &tileName)
         TileMetaInfoMgr::instance()->loadTilesets(required, true);
         TilesetManager::instance()->waitForTilesets(required);
     }
-    if (index >= tileset->tileCount())
+    if (index < 0 || index >= tileset->tileCount())
         return mMissingTile;
     return tileset->tileAt(index);
 }
@@ -525,9 +534,10 @@ Tile *BuildingTilesMgr::tileFor(BuildingTile *tile, int offset)
         TileMetaInfoMgr::instance()->loadTilesets(required, true);
         TilesetManager::instance()->waitForTilesets(required);
     }
-    if (tile->mIndex + offset >= tileset->tileCount())
+    const qint64 index = qint64(tile->mIndex) + offset;
+    if (index < 0 || index >= tileset->tileCount())
         return tileset->isMissing() ? tileset->tileAt(0) : mMissingTile;
-    return tileset->tileAt(tile->mIndex + offset);
+    return tileset->tileAt(int(index));
 }
 
 bool BuildingTilesMgr::isUnavailableTile(const Tiled::Tile *tile)

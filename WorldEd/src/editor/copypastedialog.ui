@@ -226,6 +226,14 @@
          </item>
          <item>
           <property name="text">
+           <string>In-Game Map Features</string>
+          </property>
+          <property name="checkState">
+           <enum>Checked</enum>
+          </property>
+         </item>
+         <item>
+          <property name="text">
            <string>Map</string>
           </property>
           <property name="checkState">

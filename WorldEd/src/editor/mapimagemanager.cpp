@@ -612,40 +612,56 @@ MapImageManager::ImageData MapImageManager::readImageData(const QFileInfo &image
 
     QDataStream in(&file);
 
-    quint32 magic;
+    quint32 magic = 0;
     in >> magic;
     if (magic != IMAGE_DATA_MAGIC)
         return data;
 
-    quint32 version;
+    quint32 version = 0;
     in >> version;
     if (version != IMAGE_DATA_VERSION)
         return data;
+    in.setVersion(QDataStream::Qt_4_0);
 
     in >> data.scale;
 
-    qreal x, y, w, h;
+    qreal x = 0;
+    qreal y = 0;
+    qreal w = 0;
+    qreal h = 0;
     in >> x >> y >> w >> h;
     data.levelZeroBounds.setCoords(x, y, x + w, y + h);
 
-    qint32 count;
+    qint32 count = 0;
     in >> count;
+    if (count < 0 || qint64(count) >
+            file.bytesAvailable() / qint64(sizeof(quint32)))
+        return data;
     for (int i = 0; i < count; i++) {
         QString source;
         in >> source;
+        if (in.status() != QDataStream::Ok)
+            return data;
         data.sources += source;
     }
 
     in >> data.missingTilesets;
 
-    qint32 wid, hgt;
+    qint32 wid = 0;
+    qint32 hgt = 0;
     in >> wid >> hgt;
     data.mapSize = QSize(wid, hgt);
 
     in >> wid >> hgt;
     data.tileSize = QSize(wid, hgt);
 
-    // TODO: sanity-check the values
+    if (in.status() != QDataStream::Ok ||
+            !qIsFinite(data.scale) || data.scale <= 0 ||
+            !qIsFinite(x) || !qIsFinite(y) ||
+            !qIsFinite(w) || !qIsFinite(h) || w <= 0 || h <= 0 ||
+            data.mapSize.width() <= 0 || data.mapSize.height() <= 0 ||
+            data.tileSize.width() <= 0 || data.tileSize.height() <= 0)
+        return data;
     data.valid = true;
 
     return data;

@@ -42,7 +42,7 @@ Tileset::~Tileset()
 
 Tile *Tileset::tileAt(int id) const
 {
-    return (id < mTiles.size()) ? mTiles.at(id) : 0;
+    return (id >= 0 && id < mTiles.size()) ? mTiles.at(id) : 0;
 }
 
 bool Tileset::loadFromImage(const QImage &image, const QString &fileName)

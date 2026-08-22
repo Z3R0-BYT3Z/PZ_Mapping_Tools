@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>523</width>
-    <height>473</height>
+    <height>520</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -283,6 +283,157 @@
              </spacer>
             </item>
            </layout>
+          </item>
+          <item>
+           <widget class="QGroupBox" name="vehiclePreviewGroup">
+            <property name="title">
+             <string>Vehicle Previews</string>
+            </property>
+            <layout class="QVBoxLayout" name="vehiclePreviewGroupLayout">
+             <item>
+              <layout class="QHBoxLayout" name="vehicleMeshPreviewScaleLayout">
+            <item>
+             <widget class="QLabel" name="vehicleMeshPreviewScaleLabel">
+              <property name="text">
+               <string>Vehicle preview size:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QDoubleSpinBox" name="vehicleMeshPreviewScale">
+              <property name="toolTip">
+               <string>Display correction for game-scale 3D vehicle previews in Cell View. 1x matches the vehicle script dimensions. This does not change zones or exported map data.</string>
+              </property>
+              <property name="suffix">
+               <string> x</string>
+              </property>
+              <property name="decimals">
+               <number>2</number>
+              </property>
+              <property name="minimum">
+               <double>0.250000000000000</double>
+              </property>
+              <property name="maximum">
+               <double>4.000000000000000</double>
+              </property>
+              <property name="singleStep">
+               <double>0.250000000000000</double>
+              </property>
+              <property name="value">
+               <double>1.000000000000000</double>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="vehicleMeshPreviewScaleSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+              </layout>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="vehicleMeshPreviewQualityLayout">
+            <item>
+             <widget class="QLabel" name="vehicleMeshPreviewQualityLabel">
+              <property name="text">
+               <string>Vehicle preview render quality:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QDoubleSpinBox" name="vehicleMeshPreviewQuality">
+              <property name="toolTip">
+               <string>Internal image resolution for 3D vehicle previews. Higher values improve detail but use more memory and take longer to calculate. WorldEd automatically raises it to the display correction when needed, so previews are never enlarged from a smaller atlas sprite.</string>
+              </property>
+              <property name="suffix">
+               <string> x</string>
+              </property>
+              <property name="decimals">
+               <number>2</number>
+              </property>
+              <property name="minimum">
+               <double>0.250000000000000</double>
+              </property>
+              <property name="maximum">
+               <double>4.000000000000000</double>
+              </property>
+              <property name="singleStep">
+               <double>0.250000000000000</double>
+              </property>
+              <property name="value">
+               <double>2.500000000000000</double>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="vehicleMeshPreviewQualitySpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+              </layout>
+             </item>
+             <item>
+              <widget class="QLabel" name="vehicleAtlasDescription">
+               <property name="text">
+                <string>Rendered vehicle bodies, textures and wheels are stored in the mapping-tools cache. Eight standard directions can be rebuilt in advance. Other directions are added when first displayed.</string>
+               </property>
+               <property name="wordWrap">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="vehicleAtlasLayout">
+               <item>
+                <widget class="QLabel" name="vehicleAtlasStatus">
+                 <property name="text">
+                  <string>Atlas not loaded</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <spacer name="vehicleAtlasSpacer">
+                 <property name="orientation">
+                  <enum>Qt::Horizontal</enum>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>40</width>
+                   <height>20</height>
+                  </size>
+                 </property>
+                </spacer>
+               </item>
+               <item>
+                <widget class="QPushButton" name="rebuildVehicleAtlas">
+                 <property name="text">
+                  <string>Rebuild Atlas...</string>
+                 </property>
+                 <property name="toolTip">
+                  <string>Discard the atlas for the selected render quality and regenerate every configured vehicle in sixteen directions.</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+            </layout>
+           </widget>
           </item>
           <item>
            <widget class="QCheckBox" name="restoreLastSession">

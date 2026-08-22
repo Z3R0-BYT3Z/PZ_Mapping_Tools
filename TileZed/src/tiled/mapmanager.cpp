@@ -93,7 +93,7 @@ MapManager::MapManager() :
     connect(&mChangedFilesTimer, &QTimer::timeout,
             this, &MapManager::fileChangedTimeout);
 
-    qRegisterMetaType<MapInfo*>("BuildingEditor::Building*");
+    qRegisterMetaType<BuildingEditor::Building*>("BuildingEditor::Building*");
     qRegisterMetaType<MapInfo*>("MapInfo*");
 
     mMapReaderThread.resize(4);
@@ -802,21 +802,12 @@ void MapManager::mapLoadedByThread(Map *map, MapInfo *mapInfo)
     if (!declaredTilesets.isEmpty())
         TilesetManager::instance()->waitForTilesets(declaredTilesets);
     for (Tileset *tileset : std::as_const(usedTilesets)) {
-        int nullImages = 0;
-        for (int tileIndex = 0; tileIndex < tileset->tileCount();
-             ++tileIndex) {
-            Tile *tile = tileset->tileAt(tileIndex);
-            if (!tile || tile->image().isNull())
-                ++nullImages;
-        }
-        if (!tileset->isLoaded() || tileset->isMissing()
-                || nullImages > 0) {
+        if (!tileset->isLoaded() || tileset->isMissing()) {
             qWarning() << "TMX used tileset image state:"
                        << tileset->name()
                        << "loaded" << tileset->isLoaded()
                        << "missing" << tileset->isMissing()
                        << "tiles" << tileset->tileCount()
-                       << "null-images" << nullImages
                        << "source" << tileset->imageSource()
                        << "source2x" << tileset->imageSource2x();
         }

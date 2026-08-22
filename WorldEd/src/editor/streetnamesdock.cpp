@@ -376,6 +376,7 @@ void StreetNamesDock::setDocument(Document *document)
             mWorldDocument->disconnect(this);
         mWorldDocument = worldDocument;
         mStreets.clear();
+        mSavedStreets.clear();
         mSelectedStreet = -1;
         mSelectedPoint = -1;
         mUndoStack->clear();
@@ -426,7 +427,7 @@ QString StreetNamesDock::defaultFileName() const
 
 bool StreetNamesDock::maybeSaveCurrentFile()
 {
-    if (!mWorldDocument || mUndoStack->isClean())
+    if (!mWorldDocument || !hasUnsavedChanges())
         return true;
 
     const QMessageBox::StandardButton answer = QMessageBox::question(
@@ -436,7 +437,7 @@ bool StreetNamesDock::maybeSaveCurrentFile()
                 QMessageBox::Save);
     if (answer == QMessageBox::Save) {
         saveFile();
-        return mUndoStack->isClean();
+        return !hasUnsavedChanges();
     }
     return true;
 }
@@ -465,8 +466,7 @@ void StreetNamesDock::loadFile()
         if (mFileNameEdit->text().trimmed().isEmpty())
             return;
     }
-
-    if (!mUndoStack->isClean()) {
+    if (hasUnsavedChanges()) {
         const QMessageBox::StandardButton answer = QMessageBox::question(
                     this, tr("Reload Street Names"),
                     tr("Discard unsaved street-name changes and reload the file?"),
@@ -483,6 +483,7 @@ void StreetNamesDock::loadFile()
     }
 
     mStreets = loaded;
+    mSavedStreets = loaded;
     mSelectedStreet = mStreets.isEmpty() ? -1 : 0;
     mSelectedPoint = -1;
     mUndoStack->clear();
@@ -507,12 +508,9 @@ bool StreetNamesDock::saveForProject()
         fileName = defaultFileName();
         mFileNameEdit->setText(QDir::toNativeSeparators(fileName));
     }
-
-    // Do not create an unrelated empty streets.xml for every project. Once
-    // street data exists, was edited, or the file already exists, Ctrl+S owns
-    // saving it together with the project.
-    if (mStreets.isEmpty() && mUndoStack->isClean() &&
+    if (mStreets.isEmpty() && !hasUnsavedChanges() &&
             !QFileInfo::exists(fileName)) {
+        mFileNameEdit->setText(QDir::toNativeSeparators(defaultFileName()));
         return true;
     }
 
@@ -551,11 +549,15 @@ bool StreetNamesDock::saveCurrentFile(bool chooseFileWhenMissing)
     }
 
     mFileNameEdit->setText(QDir::toNativeSeparators(info.absoluteFilePath()));
+    mSavedStreets = mStreets;
     mUndoStack->setClean();
     updateUi();
     return true;
 }
-
+bool StreetNamesDock::hasUnsavedChanges() const
+{
+    return !mUndoStack->isClean() || mStreets != mSavedStreets;
+}
 bool StreetNamesDock::readFile(const QString &fileName,
                                QVector<StreetNameRecord> *streets,
                                QString *error) const
@@ -1625,7 +1627,7 @@ void StreetNamesDock::updateUi()
                             "its points. Map clicks remain available to "
                             "WorldEd.")
                 .arg(mStreets.size());
-        if (!mUndoStack->isClean())
+        if (hasUnsavedChanges())
             status += tr(" Unsaved changes.");
         if (hasDocument && !hasScene)
             status += tr(" Open a World or Cell tab to edit graphically.");

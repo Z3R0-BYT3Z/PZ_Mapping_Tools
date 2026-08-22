@@ -129,13 +129,48 @@ public:
     { emit objectPicked(object); }
 
     // Clipboard
+    struct ClipboardTileLayer {
+        int level = 0;
+        QString layerName;
+        FloorTileGrid *tiles = nullptr;
+    };
+
+    struct ClipboardRoomLayer {
+        int level = 0;
+        QVector<QVector<int> > rooms;
+    };
+
     void setClipboardTiles(FloorTileGrid *tiles, const QRegion &rgn);
+    void setClipboardTileLayers(const QList<ClipboardTileLayer> &layers,
+                                const QRegion &rgn,
+                                int anchorLevel,
+                                const QList<Room *> &rooms = QList<Room *>(),
+                                const QList<ClipboardRoomLayer> &roomLayers =
+                                    QList<ClipboardRoomLayer>());
 
     FloorTileGrid *clipboardTiles() const
     { return mClipboardTiles; }
 
     QRegion clipboardTilesRgn() const
     { return mClipboardTilesRgn; }
+
+    const QList<ClipboardTileLayer> &clipboardTileLayers() const
+    { return mClipboardTileLayers; }
+
+    const QList<Room *> &clipboardRooms() const
+    { return mClipboardRooms; }
+
+    const QList<ClipboardRoomLayer> &clipboardRoomLayers() const
+    { return mClipboardRoomLayers; }
+
+    bool clipboardHasContent() const
+    { return !mClipboardTileLayers.isEmpty() || !mClipboardRoomLayers.isEmpty(); }
+
+    int clipboardAnchorLevel() const
+    { return mClipboardAnchorLevel; }
+
+    bool clipboardPreservesPlanes() const
+    { return mClipboardPreservesPlanes; }
 
     // +UNDO/REDO
     Room *changeRoomAtPosition(BuildingFloor *floor, const QPoint &pos, Room *room);
@@ -230,6 +265,8 @@ signals:
     void roomRemoved(BuildingEditor::Room *room);
     void roomsReordered();
     void roomChanged(BuildingEditor::Room *room);
+    void roomColorChanged(BuildingEditor::Room *room);
+    void roomTilesChanged(BuildingEditor::Room *room);
 
     void buildingResized();
     void buildingRotated();
@@ -273,6 +310,11 @@ private:
     QRegion mTileSelection;
     FloorTileGrid *mClipboardTiles;
     QRegion mClipboardTilesRgn;
+    QList<ClipboardTileLayer> mClipboardTileLayers;
+    QList<Room *> mClipboardRooms;
+    QList<ClipboardRoomLayer> mClipboardRoomLayers;
+    int mClipboardAnchorLevel = 0;
+    bool mClipboardPreservesPlanes = false;
 };
 
 } // namespace BuildingEditor

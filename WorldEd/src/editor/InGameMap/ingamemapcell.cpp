@@ -138,4 +138,3 @@ bool sanitizeInGameMapGeometryForExport(const InGameMapGeometry &source,
 
     return !result.mCoordinates.isEmpty();
 }
-

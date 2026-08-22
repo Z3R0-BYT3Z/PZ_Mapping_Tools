@@ -28,6 +28,7 @@
 #include "mapdocument.h"
 #include "maplevel.h"
 #include "maprenderer.h"
+#include "mapscene.h"
 #include "utils.h"
 #include "worldconstants.h"
 
@@ -188,6 +189,15 @@ void MapDocumentActionHandler::selectAll()
 {
     if (!mMapDocument)
         return;
+
+#ifdef ZOMBOID
+    if (MapScene *scene = DocumentManager::instance()->currentMapScene()) {
+        if (scene->partialChunksEnabled()) {
+            scene->selectAllPartialChunks();
+            return;
+        }
+    }
+#endif
 
     Map *map = mMapDocument->map();
     QRect all(0, 0, map->width(), map->height());

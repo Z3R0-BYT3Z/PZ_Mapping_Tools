@@ -29,7 +29,20 @@ QDockWidget
 {
     background-color: #101712;
 }
-
+QMenu
+{
+    color: #eef2ef;
+    border: 0.04em solid #354b3c;
+}
+QMenu::item
+{
+    color: #eef2ef;
+    background-color: transparent;
+}
+QMenu::item:disabled
+{
+    color: #657269;
+}
 QMenuBar
 {
     border-bottom: 0.04em solid #2f4537;
@@ -168,7 +181,14 @@ QAbstractItemView
     border-radius: 0.2em;
     outline: none;
 }
-
+QComboBox QAbstractItemView,
+QComboBoxPrivateContainer QAbstractItemView
+{
+    color: #eef2ef;
+    background-color: #101712;
+    selection-color: #eef2ef;
+    selection-background-color: #4e8f61;
+}
 QAbstractItemView::item:hover
 {
     background-color: #1d2b22;
@@ -179,7 +199,17 @@ QAbstractItemView::item:selected
     color: #eef2ef;
     background-color: #4e8f61;
 }
-
+QComboBox:editable QLineEdit
+{
+    color: #eef2ef;
+    background-color: #0f1611;
+    border: none;
+}
+QGraphicsView
+{
+    color: #eef2ef;
+    background-color: #101712;
+}
 QHeaderView::section
 {
     color: #aeb8b1;

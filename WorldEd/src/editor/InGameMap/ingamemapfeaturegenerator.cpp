@@ -39,9 +39,11 @@
 
 #include <qmath.h>
 #include <QDebug>
+#include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QMessageBox>
+#include <QSet>
 #include <QUndoStack>
 
 #include "clipper.hpp"
@@ -56,8 +58,260 @@ struct pzPolygon
     ClipperLib::Paths inner; // holes
 };
 
-int PIXELS_PER_CELL = 48;
+struct RoadMaskRules
+{
+    int minimumArea;
+    int minimumSpan;
+    int maximumHoleArea;
+};
 
+const RoadMaskRules highwayRoadMaskRules = {6, 6, 4};
+const RoadMaskRules trailRoadMaskRules = {12, 10, 4};
+const RoadMaskRules railwayRoadMaskRules = {4, 6, 2};
+
+QSet<QString> featureTileSet(const QStringList &tiles)
+{
+    QSet<QString> result;
+    for (const QString &tile : tiles)
+        result.insert(tile);
+    return result;
+}
+
+QString featureTileName(const Tiled::Tile *tile)
+{
+    if (!tile || !tile->tileset())
+        return QString();
+    return tile->tileset()->name() + QLatin1Char('_') +
+            QString::number(tile->id());
+}
+
+struct RoadMaskCleanup
+{
+    int bridgedTiles = 0;
+    int filledHoleTiles = 0;
+    int removedComponents = 0;
+    int removedTiles = 0;
+};
+
+class RoadMask
+{
+public:
+    explicit RoadMask(const QSize &size) :
+        mSize(size),
+        mTiles(qMax(0, size.width() * size.height()), 0)
+    {
+    }
+
+    QSize size() const
+    {
+        return mSize;
+    }
+
+    bool contains(int x, int y) const
+    {
+        return x >= 0 && y >= 0 &&
+                x < mSize.width() && y < mSize.height();
+    }
+
+    bool value(int x, int y) const
+    {
+        return contains(x, y) && mTiles.at(index(x, y)) != 0;
+    }
+
+    void setValue(int x, int y, bool value = true)
+    {
+        if (contains(x, y))
+            mTiles[index(x, y)] = value ? 1 : 0;
+    }
+
+    int index(int x, int y) const
+    {
+        return y * mSize.width() + x;
+    }
+
+    QPoint point(int index) const
+    {
+        return QPoint(index % mSize.width(), index / mSize.width());
+    }
+
+    int tileCount() const
+    {
+        int count = 0;
+        for (quint8 value : mTiles)
+            count += value != 0;
+        return count;
+    }
+
+private:
+    QSize mSize;
+    QVector<quint8> mTiles;
+};
+
+void bridgeSingleTileBreaks(RoadMask &mask, RoadMaskCleanup &cleanup)
+{
+    RoadMask source = mask;
+    for (int y = 0; y < source.size().height(); ++y) {
+        for (int x = 0; x < source.size().width(); ++x) {
+            if (source.value(x, y))
+                continue;
+            const bool horizontal = source.value(x - 1, y) &&
+                    source.value(x + 1, y);
+            const bool vertical = source.value(x, y - 1) &&
+                    source.value(x, y + 1);
+            if (horizontal || vertical) {
+                mask.setValue(x, y);
+                ++cleanup.bridgedTiles;
+            }
+        }
+    }
+}
+
+QVector<int> connectedMaskRegion(const RoadMask &mask, int start,
+                                 bool occupied, QVector<quint8> &visited,
+                                 bool *touchesBoundary)
+{
+    QVector<int> region;
+    QVector<int> pending;
+    pending += start;
+    visited[start] = 1;
+    *touchesBoundary = false;
+    const int width = mask.size().width();
+    const int height = mask.size().height();
+    const QPoint directions[] = {
+        QPoint(-1, 0), QPoint(1, 0), QPoint(0, -1), QPoint(0, 1)
+    };
+    while (!pending.isEmpty()) {
+        const int current = pending.takeLast();
+        region += current;
+        const QPoint point = mask.point(current);
+        if (point.x() == 0 || point.y() == 0 ||
+                point.x() == width - 1 || point.y() == height - 1)
+            *touchesBoundary = true;
+        for (const QPoint &direction : directions) {
+            const QPoint adjacent = point + direction;
+            if (!mask.contains(adjacent.x(), adjacent.y()))
+                continue;
+            const int adjacentIndex = mask.index(adjacent.x(), adjacent.y());
+            if (visited.at(adjacentIndex) ||
+                    mask.value(adjacent.x(), adjacent.y()) != occupied)
+                continue;
+            visited[adjacentIndex] = 1;
+            pending += adjacentIndex;
+        }
+    }
+    return region;
+}
+
+void removeSmallRoadComponents(RoadMask &mask, const RoadMaskRules &rules,
+                               RoadMaskCleanup &cleanup)
+{
+    QVector<quint8> visited(mask.size().width() * mask.size().height(), 0);
+    for (int y = 0; y < mask.size().height(); ++y) {
+        for (int x = 0; x < mask.size().width(); ++x) {
+            const int start = mask.index(x, y);
+            if (!mask.value(x, y) || visited.at(start))
+                continue;
+            bool touchesBoundary = false;
+            const QVector<int> region = connectedMaskRegion(
+                        mask, start, true, visited, &touchesBoundary);
+            int minimumX = x;
+            int maximumX = x;
+            int minimumY = y;
+            int maximumY = y;
+            for (int index : region) {
+                const QPoint point = mask.point(index);
+                minimumX = qMin(minimumX, point.x());
+                maximumX = qMax(maximumX, point.x());
+                minimumY = qMin(minimumY, point.y());
+                maximumY = qMax(maximumY, point.y());
+            }
+            const int span = qMax(maximumX - minimumX + 1,
+                                  maximumY - minimumY + 1);
+            const bool keep = region.size() >= rules.minimumArea ||
+                    span >= rules.minimumSpan ||
+                    (touchesBoundary && region.size() >= 2);
+            if (keep)
+                continue;
+            for (int index : region) {
+                const QPoint point = mask.point(index);
+                mask.setValue(point.x(), point.y(), false);
+            }
+            ++cleanup.removedComponents;
+            cleanup.removedTiles += region.size();
+        }
+    }
+}
+
+void fillSmallRoadHoles(RoadMask &mask, const RoadMaskRules &rules,
+                        RoadMaskCleanup &cleanup)
+{
+    QVector<quint8> visited(mask.size().width() * mask.size().height(), 0);
+    for (int y = 0; y < mask.size().height(); ++y) {
+        for (int x = 0; x < mask.size().width(); ++x) {
+            const int start = mask.index(x, y);
+            if (mask.value(x, y) || visited.at(start))
+                continue;
+            bool touchesBoundary = false;
+            const QVector<int> region = connectedMaskRegion(
+                        mask, start, false, visited, &touchesBoundary);
+            if (touchesBoundary || region.size() > rules.maximumHoleArea)
+                continue;
+            for (int index : region) {
+                const QPoint point = mask.point(index);
+                mask.setValue(point.x(), point.y());
+            }
+            cleanup.filledHoleTiles += region.size();
+        }
+    }
+}
+
+RoadMaskCleanup normalizeRoadMask(RoadMask &mask, const RoadMaskRules &rules)
+{
+    RoadMaskCleanup cleanup;
+    bridgeSingleTileBreaks(mask, cleanup);
+    removeSmallRoadComponents(mask, rules, cleanup);
+    fillSmallRoadHoles(mask, rules, cleanup);
+    return cleanup;
+}
+
+void addRoadMaskToClipper(const RoadMask &mask, ClipperLib::Clipper &clipper)
+{
+    for (int y = 0; y < mask.size().height(); ++y) {
+        int x = 0;
+        while (x < mask.size().width()) {
+            while (x < mask.size().width() && !mask.value(x, y))
+                ++x;
+            const int start = x;
+            while (x < mask.size().width() && mask.value(x, y))
+                ++x;
+            if (start == x)
+                continue;
+            ClipperLib::Path path;
+            path << ClipperLib::IntPoint(start, y)
+                 << ClipperLib::IntPoint(x, y)
+                 << ClipperLib::IntPoint(x, y + 1)
+                 << ClipperLib::IntPoint(start, y + 1);
+            clipper.AddPath(path, ClipperLib::ptSubject, true);
+        }
+    }
+}
+
+int PIXELS_PER_CELL = 48;
+bool tmxContainsRoomDefs(const QString &fileName)
+{
+    QFile file(fileName);
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    const QByteArray token("RoomDefs");
+    QByteArray overlap;
+    while (!file.atEnd()) {
+        const QByteArray bytes = overlap + file.read(64 * 1024);
+        if (bytes.contains(token))
+            return true;
+        overlap = bytes.right(token.size() - 1);
+    }
+    return false;
+}
 bool validateGeneratedPolygon(ClipperLib::Path &path, WorldCell *cell,
                               const QString &featureType, const QString &part,
                               int &cleanedCount, int &rejectedCount)
@@ -98,6 +352,101 @@ bool validateGeneratedPolygon(ClipperLib::Path &path, WorldCell *cell,
 InGameMapFeatureGenerator::InGameMapFeatureGenerator(QObject *parent) :
     QObject(parent)
 {
+}
+
+bool InGameMapFeatureGenerator::validateRoadMaskProcessing(QString *summary,
+                                                           QString *error)
+{
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+
+    RoadMask trail(QSize(24, 24));
+    for (int x = 2; x <= 16; ++x) {
+        if (x != 8)
+            trail.setValue(x, 4);
+    }
+    for (int y = 14; y <= 15; ++y) {
+        for (int x = 14; x <= 15; ++x)
+            trail.setValue(x, y);
+    }
+    const RoadMaskCleanup trailCleanup = normalizeRoadMask(
+                trail, trailRoadMaskRules);
+    if (!trail.value(8, 4) || trail.tileCount() != 15)
+        return fail(QStringLiteral("a one-tile trail break was not closed"));
+    if (trail.value(14, 14) || trailCleanup.removedComponents != 1 ||
+            trailCleanup.removedTiles != 4)
+        return fail(QStringLiteral("a short isolated trail was retained"));
+
+    RoadMask road(QSize(12, 12));
+    for (int y = 3; y <= 6; ++y) {
+        for (int x = 3; x <= 6; ++x) {
+            if (x == 3 || x == 6 || y == 3 || y == 6)
+                road.setValue(x, y);
+        }
+    }
+    const RoadMaskCleanup roadCleanup = normalizeRoadMask(
+                road, highwayRoadMaskRules);
+    if (roadCleanup.filledHoleTiles != 4 || road.tileCount() != 16)
+        return fail(QStringLiteral("a four-tile enclosed road hole was not filled"));
+
+    ClipperLib::Clipper clipper;
+    addRoadMaskToClipper(trail, clipper);
+    ClipperLib::PolyTree tree;
+    if (!clipper.Execute(ClipperLib::ctUnion, tree,
+                         ClipperLib::pftNonZero, ClipperLib::pftNonZero))
+        return fail(QStringLiteral("the normalized trail mask could not be unioned"));
+    int outerPolygons = 0;
+    int holes = 0;
+    for (ClipperLib::PolyNode *node = tree.GetFirst(); node;
+         node = node->GetNext()) {
+        if (node->IsHole())
+            ++holes;
+        else
+            ++outerPolygons;
+    }
+    if (outerPolygons != 1 || holes != 0)
+        return fail(QStringLiteral("the normalized trail did not produce one continuous polygon"));
+
+    const QSet<QString> treeDefaults = featureTileSet(
+                Preferences::defaultTreeFeatureTiles());
+    if (treeDefaults.size() != 53 ||
+            !treeDefaults.contains(QStringLiteral("jumbo_tree_01_0")) ||
+            !treeDefaults.contains(
+                QStringLiteral("e_americanhollyJUMBOXL_1_0")) ||
+            !treeDefaults.contains(
+                QStringLiteral("e_yellowwoodJUMBOXXL_1_0"))) {
+        return fail(QStringLiteral("the default Tree tile catalogue is incomplete"));
+    }
+    const QSet<QString> primaryDefaults = featureTileSet(
+                Preferences::defaultPrimaryRoadFeatureTiles());
+    const QSet<QString> secondaryDefaults = featureTileSet(
+                Preferences::defaultSecondaryRoadFeatureTiles());
+    const QSet<QString> tertiaryDefaults = featureTileSet(
+                Preferences::defaultTertiaryRoadFeatureTiles());
+    if (primaryDefaults.size() != 8 || secondaryDefaults.size() != 4 ||
+            tertiaryDefaults.size() != 6 ||
+            !primaryDefaults.contains(QStringLiteral("blends_street_01_32")) ||
+            !secondaryDefaults.contains(QStringLiteral("blends_street_01_96")) ||
+            !tertiaryDefaults.contains(QStringLiteral("blends_street_01_16"))) {
+        return fail(QStringLiteral("the default Road tile catalogues are incomplete"));
+    }
+    if (!featureTileSet(QStringList()).isEmpty())
+        return fail(QStringLiteral("an empty detection catalogue was not disabled"));
+    if (Preferences::canonicalFeatureTileName(
+                QStringLiteral("blends_street_01_032")) !=
+            QStringLiteral("blends_street_01_32")) {
+        return fail(QStringLiteral("a padded tile ID was not normalized"));
+    }
+
+    if (summary) {
+        *summary = QStringLiteral("single-tile breaks closed, small enclosed holes filled, short isolated fragments removed, long narrow trails retained, one continuous polygon produced, configurable Tree and Road tile catalogues validated");
+    }
+    if (error)
+        error->clear();
+    return true;
 }
 
 bool InGameMapFeatureGenerator::generateWorld(WorldDocument *worldDoc, InGameMapFeatureGenerator::GenerateMode mode, FeatureType type)
@@ -178,7 +527,8 @@ bool InGameMapFeatureGenerator::shouldGenerateCell(WorldCell *cell)
 {
     switch (mFeatureType) {
     case FeatureBuilding:
-        return !cell->lots().isEmpty();
+        return !cell->lots().isEmpty()
+                || tmxContainsRoomDefs(cell->mapFilePath());
     case FeatureTree:
         return true;
     case FeatureWater:
@@ -231,15 +581,18 @@ bool InGameMapFeatureGenerator::generateCell(WorldCell *cell)
 
 bool InGameMapFeatureGenerator::doBuildings(WorldCell *cell, MapInfo *mapInfo)
 {
-    // Remove all "building=" features
     auto& features = cell->inGameMap().features();
     for (int i = features.size() - 1; i >= 0; i--) {
         auto* feature = features[i];
+        bool isBuilding = false;
         for (auto& property : feature->properties()) {
             if (property.mKey == QStringLiteral("building")) {
-                mWorldDoc->removeInGameMapFeature(cell, feature->index());
+                isBuilding = true;
+                break;
             }
         }
+        if (isBuilding)
+            mWorldDoc->removeInGameMapFeature(cell, feature->index());
     }
 
     DelayedMapLoader mapLoader;
@@ -254,17 +607,31 @@ bool InGameMapFeatureGenerator::doBuildings(WorldCell *cell, MapInfo *mapInfo)
             lots += lot;
         } else {
             mFailures += GenerateCellFailure(cell, MapManager::instance()->errorString());
-//            mError = MapManager::instance()->errorString();
-//            return false;
         }
     }
 
-#if 1
     while (mapLoader.isLoading()) {
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
     }
 
-    // This method won't work for buildings in the TMX, it only works for separate building files.
+    if (!mapLoader.errorString().isEmpty()) {
+        mError = mapLoader.errorString();
+        return false;
+    }
+
+    if (mapInfo->map() != nullptr) {
+        QRect bounds;
+        QVector<QRect> rects;
+        for (ObjectGroup *og : mapInfo->map()->objectGroups()) {
+            if (!processObjectGroup(cell, mapInfo, og, 0, QPoint(),
+                                    bounds, rects)) {
+                return false;
+            }
+        }
+        if (!traceBuildingOutline(cell, mapInfo, bounds, rects))
+            return false;
+    }
+
     for (WorldCellLot *lot : lots) {
         MapInfo *info = MapManager::instance()->mapInfo(lot->mapName());
         if (info != nullptr && info->map() != nullptr) {
@@ -282,343 +649,12 @@ bool InGameMapFeatureGenerator::doBuildings(WorldCell *cell, MapInfo *mapInfo)
     }
 
     return true;
-#else
-    // The cell map must be loaded before creating the MapComposite, which will
-    // possibly load embedded lots.
-    while (mapInfo->isLoading())
-        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-
-    MapComposite staticMapComposite(mapInfo);
-    MapComposite *mapComposite = &staticMapComposite;
-    while (mapComposite->waitingForMapsToLoad() || mapLoader.isLoading())
-        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-    if (!mapLoader.errorString().isEmpty()) {
-        mError = mapLoader.errorString();
-        return false;
-    }
-
-    foreach (WorldCellLot *lot, cell->lots()) {
-        MapInfo *info = MapManager::instance()->mapInfo(lot->mapName());
-        Q_ASSERT(info && info->map());
-        mapComposite->addMap(info, lot->pos(), lot->level());
-    }
-
-    return processObjectGroups(cell, mapComposite);
-#endif
-}
-
-bool InGameMapFeatureGenerator::processObjectGroups(WorldCell *cell, MapComposite *mapComposite)
-{
-    foreach (Layer *layer, mapComposite->map()->layers()) {
-        if (ObjectGroup *og = layer->asObjectGroup()) {
-            if (!processObjectGroup(cell, og, mapComposite->levelRecursive(),
-                                    mapComposite->originRecursive()))
-                return false;
-        }
-    }
-
-    foreach (MapComposite *subMap, mapComposite->subMaps())
-        if (!processObjectGroups(cell, subMap))
-            return false;
-
-    return true;
-}
-
-namespace {
-
-class OutlineCell {
-public:
-    OutlineCell(int x, int y)
-        : x(x)
-        , y(y)
-    {
-    }
-
-    int x = -1, y = -1;
-    bool w = false, n = false, e = false, s = false; // true if no cell in this direction
-    bool tw = false, tn = false, te = false, ts = false; // true if traced the given edge
-    bool inner = false;
-    bool start = false;
-};
-
-typedef std::shared_ptr<OutlineCell> OutlineCellPtr;
-
-class OutlineGrid {
-public:
-    std::vector<OutlineCellPtr> elements;
-    int W, H;
-    bool EXTEND = true;
-
-    void setSize(int w, int h) {
-        elements.resize(size_t(w * h));
-        W = w;
-        H = h;
-    }
-
-    void setInner(int x, int y) {
-        OutlineCellPtr f1 = get(x, y);
-        if (f1) {
-            f1->inner = true;
-        }
-    }
-
-    bool isInner(int x, int y) {
-        OutlineCellPtr f1 = get(x, y);
-        return f1 && (f1->start || f1->inner);
-    }
-
-    bool canTrace_W(int x, int y) {
-        OutlineCellPtr cell = get(x, y);
-        return cell && cell->inner && cell->w && !cell->tw;
-    }
-
-    bool canTrace_N(int x, int y) {
-        OutlineCellPtr cell = get(x, y);
-        return cell && cell->inner && cell->n && !cell->tn;
-    }
-
-    bool canTrace_E(int x, int y) {
-        OutlineCellPtr cell = get(x, y);
-        return cell && cell->inner && cell->e && !cell->te;
-    }
-
-    bool canTrace_S(int x, int y) {
-        OutlineCellPtr cell = get(x, y);
-        return cell && cell->inner && cell->s && !cell->ts;
-    }
-
-    OutlineCellPtr& elementAt(int x, int y) {
-        return elements[size_t(x + y * W)];
-    }
-
-    OutlineCellPtr get(int x, int y) {
-        if (x < 0 || x >= W)
-            return nullptr;
-        if (y < 0 || y >= H)
-            return nullptr;
-        if (!elementAt(x, y))
-            elementAt(x, y) = std::make_shared<OutlineCell>(x, y);
-        return elementAt(x, y);
-    }
-
-    void trace_W(OutlineCell& cell, QPolygon& nodes, int extend) {
-        const int x = cell.x, y = cell.y;
-        if (EXTEND && extend != -1) {
-            nodes[extend] = { x, y };
-        } else {
-            nodes += { x, y };
-        }
-        cell.tw = true; // done
-
-        // turn w, continue n, turn e
-        if (canTrace_S(x - 1, y - 1)) {
-            trace_S(*get(x - 1, y - 1), nodes, -1);
-        } else if (canTrace_W(x, y - 1)) {
-            trace_W(*get(x, y - 1), nodes, nodes.size()-1);
-        } else if (canTrace_N(x, y)) {
-            trace_N(cell, nodes, -1);
-        }
-    }
-
-    void trace_N(OutlineCell& cell, QPolygon& nodes, int extend) {
-        const int x = cell.x, y = cell.y;
-        if (EXTEND && extend != -1) {
-            nodes[extend] = { x + 1, y };
-        } else {
-            nodes += { x + 1, y };
-        }
-        cell.tn = true; // done
-
-        // turn n, continue e, turn s
-        if (canTrace_W(x + 1, y - 1)) {
-            trace_W(*get(x + 1, y - 1), nodes, -1);
-        } else if (canTrace_N(x + 1, y)) {
-            trace_N(*get(x + 1, y), nodes, nodes.size()-1);
-        } else if (canTrace_E(x, y)) {
-            trace_E(cell, nodes, -1);
-        }
-    }
-
-    void trace_E(OutlineCell& cell, QPolygon& nodes, int extend) {
-        const int x = cell.x, y = cell.y;
-        if (EXTEND && extend != -1) {
-            nodes[extend] = { x + 1, y + 1 };
-        } else {
-            nodes += { x + 1, y + 1 };
-        }
-        cell.te = true; // done
-
-        // turn e, continue s, turn w
-        if (canTrace_N(x + 1, y + 1)) {
-            trace_N(*get(x + 1, y + 1), nodes, -1);
-        } else if (canTrace_E(x, y + 1)) {
-            trace_E(*get(x, y + 1), nodes, nodes.size()-1);
-        } else if (canTrace_S(x, y)) {
-            trace_S(cell, nodes, -1);
-        }
-    }
-
-    void trace_S(OutlineCell& cell, QPolygon& nodes, int extend) {
-        const int x = cell.x, y = cell.y;
-        if (EXTEND && extend != -1) {
-            nodes[extend] = { x, y + 1 };
-        } else {
-            nodes += { x, y + 1 };
-        }
-        cell.ts = true; // done
-
-        // turn s, continue w, turn n
-        if (canTrace_E(x - 1, y + 1)) {
-            trace_E(*get(x - 1, y + 1), nodes, -1);
-        } else if (canTrace_S(x - 1, y)) {
-            trace_S(*get(x - 1, y), nodes, nodes.size()-1);
-        } else if (canTrace_W(x, y)) {
-            trace_W(cell, nodes, -1);
-        }
-    }
-
-    QPolygon trace(OutlineCell& cell) {
-        const int x = cell.x, y = cell.y;
-        QPolygon nodes;
-        QPoint node1(x, y);
-        nodes += node1;
-        cell.start = true;
-        trace_N(cell, nodes, -1);
-        if (nodes.back() == nodes.first())
-            nodes.pop_back();
-        return nodes;
-    }
-
-    void trace(bool extend, std::function<void(QPolygon&)> callback) {
-        EXTEND = extend;
-        for (int y = 0; y < H; y++) {
-            for (int x = 0; x < W; x++) {
-                OutlineCell& cell = *get(x, y);
-                if (!cell.inner)
-                    continue;
-                if (!isInner(x - 1, y))
-                    cell.w = true;
-                if (!isInner(x, y - 1))
-                    cell.n = true;
-                if (!isInner(x + 1, y))
-                    cell.e = true;
-                if (!isInner(x, y + 1))
-                    cell.s = true;
-            }
-        }
-
-        for (int y = 0; y < H; y++) {
-            for (int x = 0; x < W; x++) {
-                OutlineCellPtr cell = get(x, y);
-                // every poly must have a nw corner.
-                // this should only happen once.
-                if (cell && cell->n && cell->w && cell->inner && !(cell->tw || cell->tn || cell->te || cell->ts)) {
-                    QPolygon nodes = trace(*cell);
-                    if (nodes.isEmpty())
-                        continue;
-                    callback(nodes);
-                }
-            }
-        }
-    }
-};
-
-} // namespace
-
-bool InGameMapFeatureGenerator::processObjectGroup(WorldCell *cell, ObjectGroup *objectGroup, int levelOffset, const QPoint &offset)
-{
-    if (objectGroup->name().contains(QLatin1String("RoomDefs")) == false) {
-        return true;
-    }
-
-    int level = objectGroup->level();
-    level += levelOffset;
-
-    if (level != 0)
-        return true;
-
-    QRect bounds;
-    QVector<QRect> rects;
-
-    foreach (const MapObject *mapObject, objectGroup->objects()) {
-#if 0
-        if (mapObject->name().isEmpty() || mapObject->type().isEmpty())
-            continue;
-#endif
-        if (mapObject->width() * mapObject->height() <= 0)
-            continue;
-
-        if ((level <= 0) && BuildingEditor::RoofHiding::isEmptyOutside(mapObject->name())) {
-            continue;
-        }
-
-        int x = qFloor(mapObject->x());
-        int y = qFloor(mapObject->y());
-        int w = qCeil(mapObject->x() + mapObject->width()) - x;
-        int h = qCeil(mapObject->y() + mapObject->height()) - y;
-
-        if (objectGroup->map()->orientation() == Map::Isometric) {
-            x += 3 * level;
-            y += 3 * level;
-        }
-
-        // Apply the MapComposite offset in the top-level map.
-        x += offset.x();
-        y += offset.y();
-
-#if 0
-        if (x < 0 || y < 0 || x + w > 300 || y + h > 300) {
-            x = qBound(0, x, 300);
-            y = qBound(0, y, 300);
-            mError = tr("A RoomDef in cell %1,%2 overlaps cell boundaries.\nNear x,y=%3,%4")
-                    .arg(cell->x()).arg(cell->y()).arg(x).arg(y);
-            return false;
-        }
-#endif
-        if (bounds.isEmpty())
-            bounds = { x, y, w, h };
-        else
-            bounds |= { x, y, w, h };
-        rects += { x, y, w, h };
-    }
-
-    if (bounds.isEmpty())
-        return true;
-
-    OutlineGrid grid;
-    grid.setSize(bounds.width(), bounds.height());
-    for (auto& rect : rects) {
-        for (int y = 0; y < rect.height(); y++)
-            for (int x = 0; x < rect.width(); x++)
-                grid.setInner(rect.x() - bounds.x() + x, rect.y() - bounds.y() + y);
-    }
-
-    grid.trace(true, [&](QPolygon& nodes) {
-        nodes.translate(bounds.left(), bounds.top());
-
-        InGameMapFeature* feature = new InGameMapFeature(&cell->inGameMap());
-
-        InGameMapProperty property;
-        property.mKey = QStringLiteral("building");
-        property.mValue = QStringLiteral("yes");
-        feature->properties() += property;
-
-        feature->mGeometry.mType = QStringLiteral("Polygon");
-        InGameMapCoordinates coords;
-        for (auto& point : nodes) {
-            coords += InGameMapPoint(point.x(), point.y());
-        }
-        feature->mGeometry.mCoordinates += coords;
-
-        mWorldDoc->addInGameMapFeature(cell, cell->inGameMap().features().size(), feature);
-    });
-
-    return true;
 }
 
 bool InGameMapFeatureGenerator::processObjectGroup(WorldCell *cell, MapInfo *mapInfo, ObjectGroup *objectGroup, int levelOffset,
                                                    const QPoint &offset, QRect &bounds, QVector<QRect> &rects)
 {
+    Q_UNUSED(cell)
     Q_UNUSED(mapInfo)
 
     if (objectGroup->name().contains(QLatin1String("RoomDefs")) == false) {
@@ -633,10 +669,6 @@ bool InGameMapFeatureGenerator::processObjectGroup(WorldCell *cell, MapInfo *map
     }
 
     for (const MapObject *mapObject : objectGroup->objects()) {
-#if 0
-        if (mapObject->name().isEmpty() || mapObject->type().isEmpty())
-            continue;
-#endif
         if (mapObject->width() * mapObject->height() <= 0)
             continue;
 
@@ -654,19 +686,9 @@ bool InGameMapFeatureGenerator::processObjectGroup(WorldCell *cell, MapInfo *map
             y += 3 * level;
         }
 
-        // Apply the MapComposite offset in the top-level map.
         x += offset.x();
         y += offset.y();
 
-#if 0
-        if (x < 0 || y < 0 || x + w > 300 || y + h > 300) {
-            x = qBound(0, x, 300);
-            y = qBound(0, y, 300);
-            mError = tr("A RoomDef in cell %1,%2 overlaps cell boundaries.\nNear x,y=%3,%4")
-                    .arg(cell->x()).arg(cell->y()).arg(x).arg(y);
-            return false;
-        }
-#endif
         if (bounds.isEmpty())
             bounds = { x, y, w, h };
         else
@@ -681,7 +703,6 @@ bool InGameMapFeatureGenerator::traceBuildingOutline(WorldCell *cell, MapInfo *m
 {
     if (bounds.isEmpty())
         return true;
-#if 1
     ClipperLib::Clipper clipper;
     ClipperLib::Path path;
 
@@ -713,8 +734,6 @@ bool InGameMapFeatureGenerator::traceBuildingOutline(WorldCell *cell, MapInfo *m
         }
     }
 
-    // FIXME: This may create multiple features each with an outer and zero or more holes.
-    //        It would be better if a single feature per building was created.
     for (pzPolygon *poly : allPolygons) {
         ClipperLib::Path path = poly->outer;
         if (!validateGeneratedPolygon(path, cell, QStringLiteral("building"),
@@ -770,59 +789,7 @@ bool InGameMapFeatureGenerator::traceBuildingOutline(WorldCell *cell, MapInfo *m
     }
 
     qDeleteAll(allPolygons);
-#else
-    OutlineGrid grid;
-    grid.setSize(bounds.width(), bounds.height());
-    for (auto& rect : rects) {
-        for (int y = 0; y < rect.height(); y++)
-            for (int x = 0; x < rect.width(); x++)
-                grid.setInner(rect.x() - bounds.x() + x, rect.y() - bounds.y() + y);
-    }
-
-    grid.trace(true, [&](QPolygon& nodes) {
-        nodes.translate(bounds.left(), bounds.top());
-
-        if (isInvalidBuildingPolygon(nodes)) {
-            return;
-        }
-
-        InGameMapFeature* feature = new InGameMapFeature(&cell->inGameMap());
-
-        InGameMapProperty property;
-        property.mKey = QStringLiteral("building");
-        QString LEGEND = QStringLiteral("Legend");
-        if (mapInfo->map()->properties().contains(LEGEND)) {
-            property.mValue = mapInfo->map()->property(LEGEND);
-        } else {
-            property.mValue = QStringLiteral("yes");
-        }
-        feature->properties() += property;
-        for (auto it = mapInfo->map()->properties().cbegin(); it != mapInfo->map()->properties().cend(); it++) {
-            if (it.key() == LEGEND) {
-                continue;
-            }
-            property.mKey = it.key();
-            property.mValue = it.value();
-            feature->properties() += property;
-        }
-
-        feature->mGeometry.mType = QStringLiteral("Polygon");
-        InGameMapCoordinates coords;
-        for (auto& point : nodes) {
-            coords += InGameMapPoint(point.x(), point.y());
-        }
-        feature->mGeometry.mCoordinates += coords;
-
-        mWorldDoc->addInGameMapFeature(cell, cell->inGameMap().features().size(), feature);
-    });
-#endif
     return true;
-}
-
-bool InGameMapFeatureGenerator::isInvalidBuildingPolygon(const QPolygon &poly)
-{
-    QRect bounds = poly.boundingRect();
-    return (bounds.width() == 2) && (bounds.height() == 2);
 }
 
 #include <stack>
@@ -1180,49 +1147,93 @@ bool InGameMapFeatureGenerator::doRoads(WorldCell *worldCell, MapInfo *mapInfo)
     if (!layerGroup)
         return true;
     layerGroup->prepareDrawing2();
-
-    ClipperLib::Clipper primary, secondary, tertiary, trail, railway;
-    const QSet<int> primaryIds = {32, 37, 38, 39, 80, 85, 86, 87};
-    const QSet<int> secondaryIds = {96, 101, 102, 103};
-    const QSet<int> tertiaryIds = {16, 21, 48, 53, 54, 55};
-    const QSet<int> trailIds = {64, 69, 70, 71, 80, 85, 86, 87};
     const QSize mapSize = mapInfo->map()->size();
+    RoadMask primaryMask(mapSize);
+    RoadMask secondaryMask(mapSize);
+    RoadMask tertiaryMask(mapSize);
+    RoadMask trailMask(mapSize);
+    RoadMask railwayMask(mapSize);
+    const QSet<int> trailIds = {64, 69, 70, 71, 80, 85, 86, 87};
+    const Preferences *preferences = Preferences::instance();
+    const QSet<QString> primaryTiles = featureTileSet(
+                preferences->primaryRoadFeatureTiles());
+    const QSet<QString> secondaryTiles = featureTileSet(
+                preferences->secondaryRoadFeatureTiles());
+    const QSet<QString> tertiaryTiles = featureTileSet(
+                preferences->tertiaryRoadFeatureTiles());
+    const bool generateTrails = preferences->generateTrailFeatures();
     OrderedCellsTemporaries orderedCellsTemporaries;
     QVector<const Tiled::Cell*> cells;
     cells.reserve(40);
-
-    auto addSquare = [](ClipperLib::Clipper &clipper, int x, int y) {
-        ClipperLib::Path path;
-        path << ClipperLib::IntPoint(x, y)
-             << ClipperLib::IntPoint(x + 1, y)
-             << ClipperLib::IntPoint(x + 1, y + 1)
-             << ClipperLib::IntPoint(x, y + 1);
-        clipper.AddPath(path, ClipperLib::ptSubject, true);
-    };
-
     for (int y = 0; y < mapSize.height(); ++y) {
         for (int x = 0; x < mapSize.width(); ++x) {
             cells.clear();
             layerGroup->orderedCellsAt2(QPoint(x, y), orderedCellsTemporaries, cells);
+            bool trailCandidate = false;
+            bool water = false;
             for (const Tiled::Cell *cell : qAsConst(cells)) {
                 if (cell->isEmpty())
                     continue;
                 const QString tilesetName = cell->tile->tileset()->name();
                 const int tileId = cell->tile->id();
-                if (tilesetName == QStringLiteral("blends_street_01")) {
-                    if (primaryIds.contains(tileId)) addSquare(primary, x, y);
-                    else if (secondaryIds.contains(tileId)) addSquare(secondary, x, y);
-                    else if (tertiaryIds.contains(tileId)) addSquare(tertiary, x, y);
+                const QString tileName = featureTileName(cell->tile);
+                if (primaryTiles.contains(tileName)) {
+                    primaryMask.setValue(x, y);
+                } else if (secondaryTiles.contains(tileName)) {
+                    secondaryMask.setValue(x, y);
+                } else if (tertiaryTiles.contains(tileName)) {
+                    tertiaryMask.setValue(x, y);
                 } else if (tilesetName == QStringLiteral("blends_natural_01") &&
                            trailIds.contains(tileId)) {
-                    addSquare(trail, x, y);
+                    trailCandidate = true;
                 } else if (tilesetName == QStringLiteral("industry_railroad_01")) {
-                    addSquare(railway, x, y);
+                    railwayMask.setValue(x, y);
+                }
+                const QString waterProperty =
+                        cell->tile->property(QStringLiteral("water"))
+                        .trimmed().toLower();
+                if ((tilesetName == QStringLiteral("blends_natural_02") &&
+                     tileId < 8) ||
+                        (!waterProperty.isEmpty() &&
+                         waterProperty != QStringLiteral("false") &&
+                         waterProperty != QStringLiteral("0"))) {
+                    water = true;
                 }
             }
+            if (generateTrails && trailCandidate && !water)
+                trailMask.setValue(x, y);
         }
     }
-
+    ClipperLib::Clipper primary, secondary, tertiary, trail, railway;
+    auto prepareMask = [&](RoadMask &mask, const RoadMaskRules &rules,
+                           const QString &type, ClipperLib::Clipper &clipper) {
+        const int originalTiles = mask.tileCount();
+        const RoadMaskCleanup cleanup = normalizeRoadMask(mask, rules);
+        addRoadMaskToClipper(mask, clipper);
+        if (cleanup.bridgedTiles || cleanup.filledHoleTiles ||
+                cleanup.removedComponents) {
+            qInfo().noquote()
+                    << QStringLiteral("Generate Road Features normalized mask: type=%1 cell=%2,%3 tiles=%4->%5 bridged=%6 filled-holes=%7 removed-components=%8 removed-tiles=%9")
+                       .arg(type)
+                       .arg(worldCell->x()).arg(worldCell->y())
+                       .arg(originalTiles).arg(mask.tileCount())
+                       .arg(cleanup.bridgedTiles)
+                       .arg(cleanup.filledHoleTiles)
+                       .arg(cleanup.removedComponents)
+                       .arg(cleanup.removedTiles);
+        }
+    };
+    prepareMask(primaryMask, highwayRoadMaskRules,
+                QStringLiteral("primary"), primary);
+    prepareMask(secondaryMask, highwayRoadMaskRules,
+                QStringLiteral("secondary"), secondary);
+    prepareMask(tertiaryMask, highwayRoadMaskRules,
+                QStringLiteral("tertiary"), tertiary);
+    if (generateTrails)
+        prepareMask(trailMask, trailRoadMaskRules,
+                    QStringLiteral("trail"), trail);
+    prepareMask(railwayMask, railwayRoadMaskRules,
+                QStringLiteral("railway"), railway);
     auto createFeatures = [&](ClipperLib::Clipper &clipper,
                               const QString &key, const QString &value,
                               double simplificationTolerance,
@@ -1284,8 +1295,6 @@ bool InGameMapFeatureGenerator::doRoads(WorldCell *worldCell, MapInfo *mapInfo)
         }
         qDeleteAll(polygons);
     };
-
-    const Preferences *preferences = Preferences::instance();
     createFeatures(primary, QStringLiteral("highway"), QStringLiteral("primary"),
                    preferences->roadSimplificationHighway(),
                    preferences->roadPointSpacingHighway());
@@ -1295,9 +1304,11 @@ bool InGameMapFeatureGenerator::doRoads(WorldCell *worldCell, MapInfo *mapInfo)
     createFeatures(tertiary, QStringLiteral("highway"), QStringLiteral("tertiary"),
                    preferences->roadSimplificationHighway(),
                    preferences->roadPointSpacingHighway());
-    createFeatures(trail, QStringLiteral("highway"), QStringLiteral("trail"),
-                   preferences->roadSimplificationTrail(),
-                   preferences->roadPointSpacingTrail());
+    if (generateTrails) {
+        createFeatures(trail, QStringLiteral("highway"), QStringLiteral("trail"),
+                       preferences->roadSimplificationTrail(),
+                       preferences->roadPointSpacingTrail());
+    }
     createFeatures(railway, QStringLiteral("railway"), QStringLiteral("*"),
                    preferences->roadSimplificationRailway(),
                    preferences->roadPointSpacingRailway());
@@ -1314,6 +1325,11 @@ bool InGameMapFeatureGenerator::doTrees(WorldCell *cell, MapInfo *mapInfo)
             mWorldDoc->removeInGameMapFeature(cell, feature->index());
         }
     }
+
+    const QSet<QString> treeTiles = featureTileSet(
+                Preferences::instance()->treeFeatureTiles());
+    if (treeTiles.isEmpty())
+        return true;
 
     DelayedMapLoader mapLoader;
     mapLoader.addMap(mapInfo);
@@ -1340,7 +1356,7 @@ bool InGameMapFeatureGenerator::doTrees(WorldCell *cell, MapInfo *mapInfo)
         for (auto* cell : std::as_const(cells)) {
             if (cell->isEmpty())
                 continue;
-            if (cell->tile->id() >= 8 && cell->tile->id() <= 15 && cell->tile->tileset()->name() == QStringLiteral("vegetation_trees_01")) {
+            if (treeTiles.contains(featureTileName(cell->tile))) {
                 return true;
             }
         }

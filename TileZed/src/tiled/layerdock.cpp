@@ -38,12 +38,15 @@
 #include <QContextMenuEvent>
 #include <QLabel>
 #include <QMenu>
+#include <QSettings>
 #include <QSlider>
 #include <QUndoStack>
 #include <QToolBar>
 
 using namespace Tiled;
 using namespace Tiled::Internal;
+
+static const char *KEY_LAYER_VISIBILITY = "LayerDocks/Visibility";
 
 LayerDock::LayerDock(QWidget *parent):
     QDockWidget(parent),
@@ -165,6 +168,15 @@ void LayerDock::setMapDocument(MapDocument *mapDocument)
     mLayerView->setMapDocument(mapDocument);
     updateOpacitySlider();
 #ifdef ZOMBOID
+    if (mMapDocument) {
+        const int savedVisibility = qBound(
+                    0,
+                    QSettings().value(
+                        QLatin1String(KEY_LAYER_VISIBILITY),
+                        mMapDocument->map()->layerCount()).toInt(),
+                    mMapDocument->map()->layerCount());
+        setZomboidLayer(savedVisibility);
+    }
     updateZomboidLayerSlider();
 #endif
 }
@@ -237,6 +249,8 @@ void LayerDock::setZomboidLayer(int number)
 {
     if (!mMapDocument)
         return;
+
+    QSettings().setValue(QLatin1String(KEY_LAYER_VISIBILITY), number);
 
     int index = 0;
     foreach (Layer *layer, mMapDocument->map()->layers()) {

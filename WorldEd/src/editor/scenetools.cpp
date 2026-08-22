@@ -25,6 +25,7 @@
 #include "cellscene.h"
 #include "cellview.h"
 #include "clipboard.h"
+#include "expectedpropertiesdialog.h"
 #include "mapcomposite.h"
 #include "mapimagemanager.h"
 #include "mapmanager.h"
@@ -38,6 +39,8 @@
 #include "world.h"
 #include "worldcell.h"
 #include "worlddocument.h"
+#include "worldproperties.h"
+#include "worldobjectvalidation.h"
 #include "zoomable.h"
 
 #include "maprenderer.h"
@@ -52,6 +55,8 @@
 #include <QFormLayout>
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsView>
+#include <QHBoxLayout>
+#include <QIcon>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QMenu>
@@ -65,6 +70,28 @@
 using namespace Tiled;
 
 namespace {
+bool typeRequiresUnitRectangle(const QString &type)
+{
+    return type == QLatin1String("SpawnPoint")
+            || type == QLatin1String("WaterFlow")
+            || type == QLatin1String("RoomTone");
+}
+
+bool typeRequiresRectangle(const QString &type)
+{
+    return typeRequiresUnitRectangle(type)
+            || type == QLatin1String("WaterZone");
+}
+
+void resolvedObjectProperties(PropertyHolder *holder, PropertyList &result)
+{
+    for (PropertyTemplate *propertyTemplate : holder->templates())
+        resolvedObjectProperties(propertyTemplate, result);
+    for (Property *property : holder->properties()) {
+        result.removeAll(property->mDefinition);
+        result.append(property);
+    }
+}
 
 bool openInTileZed(const QString &mapPath, QWidget *parent)
 {
@@ -87,6 +114,287 @@ bool openInTileZed(const QString &mapPath, QWidget *parent)
     return true;
 }
 
+QString chooseBasementAccess(QWidget *parent, const QString &currentAccess)
+{
+    QDialog dialog(parent);
+    dialog.setWindowTitle(QObject::tr("Choose Basement Access"));
+    dialog.resize(920, 620);
+
+    QVBoxLayout layout(&dialog);
+    QLineEdit filter(&dialog);
+    filter.setPlaceholderText(QObject::tr("Filter basement accesses..."));
+    layout.addWidget(&filter);
+
+    QSplitter splitter(Qt::Horizontal, &dialog);
+    QListWidget accessList(&splitter);
+    accessList.setAlternatingRowColors(true);
+    accessList.setUniformItemSizes(true);
+    QWidget previewPanel(&splitter);
+    QVBoxLayout previewLayout(&previewPanel);
+    QLabel preview(&previewPanel);
+    preview.setAlignment(Qt::AlignCenter);
+    preview.setMinimumSize(420, 420);
+    preview.setFrameShape(QFrame::StyledPanel);
+    QLabel details(&previewPanel);
+    details.setAlignment(Qt::AlignHCenter | Qt::AlignTop);
+    details.setTextInteractionFlags(Qt::TextSelectableByMouse);
+    details.setWordWrap(true);
+    previewLayout.addWidget(&preview, 1);
+    previewLayout.addWidget(&details);
+    splitter.addWidget(&accessList);
+    splitter.addWidget(&previewPanel);
+    splitter.setStretchFactor(0, 2);
+    splitter.setStretchFactor(1, 3);
+    layout.addWidget(&splitter, 1);
+
+    QDialogButtonBox buttons(QDialogButtonBox::Ok |
+                             QDialogButtonBox::Cancel,
+                             Qt::Horizontal, &dialog);
+    QPushButton *okButton = buttons.button(QDialogButtonBox::Ok);
+    okButton->setEnabled(false);
+    layout.addWidget(&buttons);
+
+    QMap<QString, QFileInfo> sources;
+    const QDir sourceRoot(PortableSettings::basementSourcePath());
+    if (sourceRoot.exists()) {
+        QDirIterator iterator(sourceRoot.absolutePath(),
+                              QStringList() << QStringLiteral("*.tbx")
+                                            << QStringLiteral("*.tmx"),
+                              QDir::Files,
+                              QDirIterator::Subdirectories);
+        while (iterator.hasNext()) {
+            const QFileInfo info(iterator.next());
+            const QString key = info.completeBaseName().toCaseFolded();
+            if (!sources.contains(key) ||
+                    info.suffix().compare(QStringLiteral("tbx"),
+                                          Qt::CaseInsensitive) == 0)
+                sources.insert(key, info);
+        }
+    }
+    for (auto it = sources.cbegin(); it != sources.cend(); ++it) {
+        QListWidgetItem *listItem = new QListWidgetItem(
+                    it.value().completeBaseName(), &accessList);
+        listItem->setData(Qt::UserRole, it.value().absoluteFilePath());
+        listItem->setToolTip(QDir::toNativeSeparators(
+                                 it.value().absoluteFilePath()));
+    }
+    accessList.sortItems(Qt::AscendingOrder);
+
+    const auto refreshPreview = [&]() {
+        QListWidgetItem *listItem = accessList.currentItem();
+        okButton->setEnabled(listItem != nullptr);
+        if (!listItem) {
+            preview.clear();
+            details.setText(sources.isEmpty()
+                            ? QObject::tr("No TBX or TMX access was found in:\n%1")
+                              .arg(QDir::toNativeSeparators(
+                                       sourceRoot.absolutePath()))
+                            : QString());
+            return;
+        }
+        const QString path = listItem->data(Qt::UserRole).toString();
+        MapInfo *mapInfo = MapManager::instance()->loadMap(path);
+        if (!mapInfo || !mapInfo->isValid()) {
+            preview.setText(QObject::tr("Preview unavailable"));
+            details.setText(QDir::toNativeSeparators(path));
+            return;
+        }
+        MapImage *mapImage = MapImageManager::instance()->getMapImage(path);
+        if (mapImage && !mapImage->image().isNull()) {
+            preview.setPixmap(QPixmap::fromImage(mapImage->image()).scaled(
+                                  preview.size() - QSize(12, 12),
+                                  Qt::KeepAspectRatio,
+                                  Qt::SmoothTransformation));
+            listItem->setIcon(QIcon(QPixmap::fromImage(
+                                        mapImage->image()).scaled(
+                                        QSize(64, 64),
+                                        Qt::KeepAspectRatio,
+                                        Qt::SmoothTransformation)));
+        } else {
+            preview.setText(QObject::tr("Loading preview..."));
+        }
+        details.setText(QObject::tr("%1\n%2 x %3 tiles")
+                        .arg(QDir::toNativeSeparators(path))
+                        .arg(mapInfo->width()).arg(mapInfo->height()));
+    };
+
+    QObject::connect(&accessList, &QListWidget::currentItemChanged,
+                     &dialog, [&](QListWidgetItem *, QListWidgetItem *) {
+        refreshPreview();
+    });
+    QObject::connect(&filter, &QLineEdit::textChanged,
+                     &dialog, [&](const QString &text) {
+        QListWidgetItem *firstVisible = nullptr;
+        for (int index = 0; index < accessList.count(); ++index) {
+            QListWidgetItem *listItem = accessList.item(index);
+            const bool visible = listItem->text().contains(
+                        text.trimmed(), Qt::CaseInsensitive);
+            listItem->setHidden(!visible);
+            if (visible && !firstVisible)
+                firstVisible = listItem;
+        }
+        if (!accessList.currentItem() ||
+                accessList.currentItem()->isHidden())
+            accessList.setCurrentItem(firstVisible);
+    });
+    QObject::connect(MapImageManager::instance(),
+                     &MapImageManager::mapImageChanged,
+                     &dialog, [&](MapImage *mapImage) {
+        QListWidgetItem *listItem = accessList.currentItem();
+        if (!listItem || !mapImage || !mapImage->mapInfo())
+            return;
+        if (QFileInfo(listItem->data(Qt::UserRole).toString()) !=
+                QFileInfo(mapImage->mapInfo()->path()))
+            return;
+        refreshPreview();
+    });
+    QObject::connect(&buttons, &QDialogButtonBox::accepted,
+                     &dialog, &QDialog::accept);
+    QObject::connect(&buttons, &QDialogButtonBox::rejected,
+                     &dialog, &QDialog::reject);
+    QObject::connect(&accessList, &QListWidget::itemDoubleClicked,
+                     &dialog, [&](QListWidgetItem *) {
+        dialog.accept();
+    });
+
+    const QString currentBaseName =
+            QFileInfo(currentAccess.trimmed()).completeBaseName();
+    for (int index = 0; index < accessList.count(); ++index) {
+        if (accessList.item(index)->text().compare(
+                    currentBaseName, Qt::CaseInsensitive) == 0) {
+            accessList.setCurrentRow(index);
+            break;
+        }
+    }
+    if (!accessList.currentItem() && accessList.count() > 0)
+        accessList.setCurrentRow(0);
+    refreshPreview();
+    filter.setFocus();
+    if (dialog.exec() != QDialog::Accepted || !accessList.currentItem())
+        return QString();
+    return accessList.currentItem()->text();
+}
+
+ObjectItem *contextObjectItemAt(CellScene *scene, const QPointF &scenePos)
+{
+    QTransform transform;
+    if (!scene->views().isEmpty())
+        transform = scene->views().first()->viewportTransform();
+    for (QGraphicsItem *graphicsItem : scene->items(
+             scenePos, Qt::IntersectsItemShape,
+             Qt::DescendingOrder, transform)) {
+        ObjectItem *objectItem = dynamic_cast<ObjectItem *>(graphicsItem);
+        if (objectItem && !objectItem->isAdjacent())
+            return objectItem;
+    }
+    return nullptr;
+}
+
+enum class ObjectContextChoice
+{
+    None,
+    Properties,
+    BasementAccess,
+    Remove
+};
+
+ObjectContextChoice objectContextChoice(
+        QAction *action, QAction *propertiesAction,
+        QAction *accessAction, QAction *removeAction)
+{
+    if (!action)
+        return ObjectContextChoice::None;
+    if (propertiesAction && action == propertiesAction)
+        return ObjectContextChoice::Properties;
+    if (accessAction && action == accessAction)
+        return ObjectContextChoice::BasementAccess;
+    if (removeAction && action == removeAction)
+        return ObjectContextChoice::Remove;
+    return ObjectContextChoice::None;
+}
+
+QString removeObjectActionText(WorldCellObject *object)
+{
+    if (object->isRoomTone())
+        return QObject::tr("Remove Room Tone");
+    if (object->isSpawnPoint())
+        return QObject::tr("Remove Spawn Point");
+    return QObject::tr("Remove Object");
+}
+
+void showObjectContextMenu(CellScene *scene, ObjectItem *item,
+                           const QPoint &screenPos)
+{
+    if (!item || !item->object())
+        return;
+
+    WorldCellObject *object = item->object();
+    scene->document()->setSelectedObjects(
+                WorldCellObjectList() << object);
+
+    QMenu menu;
+    QAction *propertiesAction = nullptr;
+    if (ExpectedPropertiesDialog::canEdit(object)) {
+        propertiesAction = menu.addAction(
+                    QIcon(QLatin1String(
+                              ":images/16x16/document-properties.png")),
+                    QObject::tr("Edit %1 Properties...")
+                    .arg(object->type()->name()));
+    }
+
+    QAction *accessAction = nullptr;
+    if (WorldObjectValidation::supportsBasementAccess(object)) {
+        accessAction = menu.addAction(
+                    QIcon(QLatin1String(":images/tiled-icon-16.png")),
+                    QObject::tr("Choose Basement Access..."));
+    }
+
+    if (propertiesAction || accessAction)
+        menu.addSeparator();
+    QAction *removeAction = menu.addAction(
+                QIcon(QLatin1String(":images/16x16/edit-delete.png")),
+                removeObjectActionText(object));
+
+    const ObjectContextChoice choice = objectContextChoice(
+                menu.exec(screenPos), propertiesAction,
+                accessAction, removeAction);
+    if (choice == ObjectContextChoice::Properties) {
+        ExpectedPropertiesDialog::edit(
+                    scene->worldDocument(), object,
+                    MainWindow::instance());
+    } else if (choice == ObjectContextChoice::BasementAccess) {
+        PropertyDef *definition = scene->world()->propertyDefinition(
+                    QStringLiteral("Access"));
+        Property *property = definition
+                ? object->properties().find(definition) : nullptr;
+        QString currentAccess;
+        if (property)
+            currentAccess = property->mValue;
+        else if (definition) {
+            PropertyList resolved;
+            resolvedObjectProperties(object, resolved);
+            Property *resolvedProperty = resolved.find(definition);
+            if (resolvedProperty)
+                currentAccess = resolvedProperty->mValue;
+        }
+        const QString selectedAccess = chooseBasementAccess(
+                    scene->views().isEmpty()
+                    ? static_cast<QWidget *>(MainWindow::instance())
+                    : scene->views().first(), currentAccess);
+        if (!selectedAccess.isEmpty() && definition) {
+            if (property)
+                scene->worldDocument()->setPropertyValue(
+                            object, property, selectedAccess);
+            else
+                scene->worldDocument()->addProperty(
+                            object, QStringLiteral("Access"),
+                            selectedAccess);
+        }
+    } else if (choice == ObjectContextChoice::Remove) {
+        scene->worldDocument()->removeCellObject(
+                    scene->cell(), object->index());
+    }
+}
 }
 
 /////
@@ -268,12 +576,21 @@ void CreateObjectTool::editObjectPreset()
 }
 
 void CreateObjectTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
-{    
+{
     if (event->button() == Qt::LeftButton) {
 #if 1
         mStartScenePos = event->scenePos();
         mMousePressed = true;
         mAnchorPos = mScene->renderer()->pixelToTileCoordsInt(event->scenePos(), mScene->document()->currentLevel());
+        QString typeName = mObjectTypeName;
+        if (typeName.isEmpty()) {
+            WorldObjectGroup *group =
+                    mScene->document()->currentObjectGroup();
+            if (group && group->type())
+                typeName = group->type()->name();
+        }
+        if (typeRequiresUnitRectangle(typeName))
+            startNewMapObject(mAnchorPos);
 #else
         mAnchorPos = mScene->renderer()->pixelToTileCoords(event->scenePos(), mScene->document()->currentLevel());
 
@@ -292,13 +609,27 @@ void CreateObjectTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
         if (mItem) {
             cancelNewMapObject();
             event->accept();
+        } else if (ObjectItem *item = contextObjectItemAt(
+                       mScene, event->scenePos())) {
+            showObjectContextMenu(mScene, item, event->screenPos());
+            event->accept();
         }
+        mMousePressed = false;
     }
 }
 
 void CreateObjectTool::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 {
     if (mItem) {
+        if (WorldObjectValidation::requiresUnitRectangle(
+                    mItem->object())) {
+            mItem->object()->setPos(mAnchorPos);
+            mItem->object()->setWidth(1);
+            mItem->object()->setHeight(1);
+            mItem->synchWithObject();
+            event->accept();
+            return;
+        }
 #if 1
         QPointF pos = mScene->renderer()->pixelToTileCoordsInt(event->scenePos(), mScene->document()->currentLevel());
 #else
@@ -373,7 +704,8 @@ void CreateObjectTool::startNewMapObject(const QPointF &pos)
         }
     }
 #endif
-    mItem = new ObjectItem(obj, mScene);
+    WorldObjectValidation::applyCreationDefaults(obj);
+    mItem = mScene->newObjectItem(obj, nullptr);
     mItem->labelItem()->setShowSize(true);
     mItem->setZValue(10000);
     mScene->addItem(mItem);
@@ -397,6 +729,7 @@ void CreateObjectTool::cancelNewMapObject()
 void CreateObjectTool::finishNewMapObject()
 {
     WorldCellObject *obj = clearNewMapObjectItem();
+    WorldObjectValidation::applyCreationDefaults(obj);
     mScene->worldDocument()->addCellObject(mScene->cell(),
                                            mScene->cell()->objects().size(),
                                            obj);
@@ -416,6 +749,34 @@ SelectMoveObjectTool *SelectMoveObjectTool::instance()
 void SelectMoveObjectTool::deleteInstance()
 {
     delete mInstance;
+}
+
+bool SelectMoveObjectTool::validateContextMenuDispatch(QString *error)
+{
+    QAction propertiesAction(nullptr);
+    QAction accessAction(nullptr);
+    QAction removeAction(nullptr);
+    QAction unrelatedAction(nullptr);
+
+    if (objectContextChoice(nullptr, &propertiesAction, nullptr,
+                            &removeAction) != ObjectContextChoice::None
+            || objectContextChoice(&propertiesAction, &propertiesAction,
+                                   nullptr, &removeAction)
+               != ObjectContextChoice::Properties
+            || objectContextChoice(&accessAction, &propertiesAction,
+                                   &accessAction, &removeAction)
+               != ObjectContextChoice::BasementAccess
+            || objectContextChoice(&removeAction, &propertiesAction,
+                                   nullptr, &removeAction)
+               != ObjectContextChoice::Remove
+            || objectContextChoice(&unrelatedAction, &propertiesAction,
+                                   nullptr, &removeAction)
+               != ObjectContextChoice::None) {
+        if (error)
+            *error = tr("Object context-menu action dispatch is invalid");
+        return false;
+    }
+    return true;
 }
 
 void SelectMoveObjectTool::deactivate()
@@ -705,35 +1066,9 @@ void SelectMoveObjectTool::finishMoving(const QPointF &pos)
 
 void SelectMoveObjectTool::showContextMenu(const QPointF &scenePos, const QPoint &screenPos)
 {
-    ObjectItem *item = topmostItemAt(scenePos);
-    if (!item) {
-        return;
-    }
-
-    QList<WorldCellObject*> objects;
-    if (mScene->document()->selectedObjects().contains(item->object()))
-        objects = mScene->document()->selectedObjects();
-    else {
-        objects << item->object();
-        mScene->document()->setSelectedObjects(objects);
-    }
-    int count = objects.size();
-
-    QMenu menu;
-    QIcon removeIcon(QLatin1String(":images/16x16/edit-delete.png"));
-    QAction *removeAction = menu.addAction(removeIcon, (count > 1)
-                                           ? tr("Remove %1 Objects").arg(count)
-                                           : tr("Remove Object"));
-
-    QAction *action = menu.exec(screenPos);
-    if (action == removeAction) {
-        if (count > 1)
-            mScene->worldDocument()->undoStack()->beginMacro(removeAction->text());
-        foreach (WorldCellObject *obj, objects)
-            mScene->worldDocument()->removeCellObject(mScene->cell(), obj->index());
-        if (count > 1)
-            mScene->worldDocument()->undoStack()->endMacro();
-    }
+    showObjectContextMenu(mScene,
+                          contextObjectItemAt(mScene, scenePos),
+                          screenPos);
 }
 
 ObjectItem *SelectMoveObjectTool::topmostItemAt(const QPointF &scenePos, bool editable)
@@ -1129,6 +1464,46 @@ void SubMapTool::showContextMenu(const QPointF &scenePos, const QPoint &screenPo
         lightbulbMapAction = menu.addAction(lightIcon, tr("Show lights in %1").arg(mapName));
     else
         lightbulbMapAction = menu.addAction(lightIcon, tr("Hide lights in %1").arg(mapName));
+    menu.addSeparator();
+    const int lotLevel = item->lot()->level();
+    const int sourceMinLevel = item->subMap()->minLevel();
+    const int sourceMaxLevel = item->subMap()->maxLevel();
+    QMenu *verticalMenu = menu.addMenu(tr("Vertical Placement"));
+    verticalMenu->setTitle(tr("Vertical Placement (Level %1)")
+                           .arg(lotLevel));
+    QAction *sourceLevelsAction = verticalMenu->addAction(
+                tr("Source levels: %1 to %2")
+                .arg(sourceMinLevel).arg(sourceMaxLevel));
+    sourceLevelsAction->setEnabled(false);
+    QAction *worldLevelsAction = verticalMenu->addAction(
+                tr("Current world levels: %1 to %2")
+                .arg(lotLevel + sourceMinLevel)
+                .arg(lotLevel + sourceMaxLevel));
+    worldLevelsAction->setEnabled(false);
+    verticalMenu->addSeparator();
+    QAction *lowerAction = verticalMenu->addAction(
+                tr("Lower Entire Lot One Level..."));
+    QAction *raiseAction = verticalMenu->addAction(
+                tr("Raise Entire Lot One Level..."));
+    QAction *groundAction = verticalMenu->addAction(
+                tr("Return Entire Lot to Level 0..."));
+    lowerAction->setEnabled(lotLevel - 1 + sourceMinLevel >=
+                            MIN_WORLD_LEVEL);
+    raiseAction->setEnabled(lotLevel + 1 + sourceMaxLevel <=
+                            MAX_WORLD_LEVEL);
+    groundAction->setEnabled(lotLevel != 0 &&
+                             sourceMinLevel >= MIN_WORLD_LEVEL &&
+                             sourceMaxLevel <= MAX_WORLD_LEVEL);
+    verticalMenu->addSeparator();
+    const int openingCount =
+            mScene->basementGroundOpeningCount(item->lot());
+    QAction *pierceAction = verticalMenu->addAction(
+                tr("Open Ground at Basement Stairs..."));
+    pierceAction->setEnabled(openingCount > 0);
+    if (!openingCount) {
+        pierceAction->setToolTip(
+                    tr("No staircase from level -1 to level 0 was detected."));
+    }
     QIcon removeIcon(QLatin1String(":images/16x16/edit-delete.png"));
     QAction *removeAction = menu.addAction(removeIcon, tr("Remove Lot"));
     menu.addSeparator();
@@ -1141,6 +1516,68 @@ void SubMapTool::showContextMenu(const QPointF &scenePos, const QPoint &screenPo
         LightbulbsMgr::instance().toggleRoom(roomName);
     if (action == lightbulbMapAction)
         LightbulbsMgr::instance().toggleMap(mapName);
+    const auto confirmVerticalPlacement = [&](int newLevel) {
+        const int newWorldMin = newLevel + sourceMinLevel;
+        const int newWorldMax = newLevel + sourceMaxLevel;
+        return QMessageBox::warning(
+                    mScene->views().value(0),
+                    tr("Move Entire Lot Vertically"),
+                    tr("This changes the world level of the complete lot "
+                       "\"%1\".\n\n"
+                       "Source levels: %2 to %3\n"
+                       "Current world levels: %4 to %5\n"
+                       "Resulting world levels: %6 to %7\n\n"
+                       "Every floor, wall, window, stair, RoomDef, object, "
+                       "and collision layer moves together. If this source "
+                       "already stores its basement on negative levels, "
+                       "keep the lot at level 0.\n\nContinue?")
+                    .arg(mapName)
+                    .arg(sourceMinLevel).arg(sourceMaxLevel)
+                    .arg(lotLevel + sourceMinLevel)
+                    .arg(lotLevel + sourceMaxLevel)
+                    .arg(newWorldMin).arg(newWorldMax),
+                    QMessageBox::Yes | QMessageBox::No,
+                    QMessageBox::No) == QMessageBox::Yes;
+    };
+    if (action == lowerAction && confirmVerticalPlacement(lotLevel - 1))
+        mScene->worldDocument()->setLotLevel(item->lot(), lotLevel - 1);
+    if (action == raiseAction && confirmVerticalPlacement(lotLevel + 1))
+        mScene->worldDocument()->setLotLevel(item->lot(), lotLevel + 1);
+    if (action == groundAction && confirmVerticalPlacement(0))
+        mScene->worldDocument()->setLotLevel(item->lot(), 0);
+    if (action == pierceAction) {
+        const QMessageBox::StandardButton confirmation =
+                QMessageBox::warning(
+                    mScene->views().value(0),
+                    tr("Open Ground at Basement Stairs"),
+                    tr("WorldEd detected %n basement staircase opening(s).\n\n"
+                       "This will remove the level-zero Floor tile at each "
+                       "opening from the affected cell TMX file(s). Backup "
+                       "copies will be created beside the project before "
+                       "any file is changed.\n\nContinue?",
+                       "", openingCount),
+                    QMessageBox::Yes | QMessageBox::No,
+                    QMessageBox::No);
+        if (confirmation == QMessageBox::Yes) {
+            QStringList backupPaths;
+            QString error;
+            const int cleared = mScene->pierceGroundAtBasementStairs(
+                        item->lot(), &backupPaths, &error);
+            if (!cleared) {
+                QMessageBox::warning(
+                            mScene->views().value(0),
+                            tr("Basement Ground Opening"), error);
+            } else {
+                QMessageBox::information(
+                            mScene->views().value(0),
+                            tr("Basement Ground Opening"),
+                            tr("Removed %n level-zero Floor tile(s).\n\n"
+                               "Backup location(s):\n%1",
+                               "", cleared)
+                            .arg(backupPaths.join(QLatin1Char('\n'))));
+            }
+        }
+    }
     if (action == removeAction) {
         int lotIndex = mScene->cell()->indexOf(item->lot());
         mScene->worldDocument()->removeCellLot(mScene->cell(), lotIndex);
@@ -1191,7 +1628,8 @@ RoomToneCursorItem::RoomToneCursorItem(CellScene *scene, QGraphicsItem *parent) 
     QGraphicsItem(parent),
     mScene(scene),
     mRenderer(scene->renderer()),
-    mImage(QImage(QStringLiteral(":/images/SpeakerIcon.png")))
+    mImage(QIcon(QStringLiteral(":/images/speaker-tool.svg"))
+           .pixmap(32, 32).toImage())
 {
 }
 
@@ -1241,7 +1679,7 @@ SINGLETON_IMPL(RoomToneTool)
 
 RoomToneTool::RoomToneTool()
     : BaseCellSceneTool(QLatin1String("Place Room Tone"),
-                        QIcon(QLatin1String(":/images/SpeakerIcon.png")),
+                        QIcon(QLatin1String(":/images/speaker-tool.svg")),
                         QKeySequence()),
       mContextMenuVisible(false)
 {
@@ -1323,6 +1761,7 @@ void RoomToneTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
         PropertyDef *pd = mScene->world()->propertyDefinition(property->mDefinition->mName);
         obj->addProperty(obj->properties().size(), new Property(pd, pd->mDefaultValue));
     }
+    WorldObjectValidation::applyCreationDefaults(obj);
     mScene->worldDocument()->addCellObject(mScene->cell(),
                                            mScene->cell()->objects().size(),
                                            obj);
@@ -1345,24 +1784,13 @@ void RoomToneTool::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 
 void RoomToneTool::showContextMenu(const QPointF &scenePos, const QPoint &screenPos)
 {
-    RoomToneItem *item = topmostItemAt(scenePos);
+    ObjectItem *item = contextObjectItemAt(mScene, scenePos);
     if (!item) {
         return;
     }
 
     mContextMenuVisible = true;
-
-//    mScene->document()->setSelectedObjects(WorldCellObjectList() << item->object());
-
-    QMenu menu;
-    QIcon removeIcon(QLatin1String(":images/16x16/edit-delete.png"));
-    QAction *removeAction = menu.addAction(removeIcon, tr("Remove Room Tone"));
-
-    QAction *action = menu.exec(screenPos);
-    if (action == removeAction) {
-        mScene->worldDocument()->removeCellObject(mScene->cell(), item->object()->index());
-    }
-
+    showObjectContextMenu(mScene, item, screenPos);
     mContextMenuVisible = false;
     mContextMenuShown = QTime::currentTime();
 }
@@ -1628,8 +2056,7 @@ void SpawnPointTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
         // profession registry in B42 CharacterProfession.java.  "all" is a
         // WorldEd convenience value expanded by the spawnpoint exporter.
         QStringList professions;
-        professions << QLatin1String("all")
-                    << QLatin1String("burglar")
+        professions << QLatin1String("burglar")
                     << QLatin1String("burgerflipper")
                     << QLatin1String("carpenter")
                     << QLatin1String("chef")
@@ -1661,8 +2088,8 @@ void SpawnPointTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
     // Create the Professions property definition if needed
     PropertyDef *pd = mScene->world()->propertyDefinition(QLatin1String("Professions"));
     if (!pd) {
-        pd = new PropertyDef(QLatin1String("Professions"), QLatin1String("all"),
-                             tr("Comma-separated list of professions that may spawn here.  Use \"all\" to allow any profession to spawn here."),
+        pd = new PropertyDef(QLatin1String("Professions"), QLatin1String("unemployed"),
+                             tr("Comma-separated list of professions that may spawn here."),
                              pe);
         mScene->worldDocument()->addPropertyDefinition(pd);
     }
@@ -1687,6 +2114,7 @@ void SpawnPointTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
                                                mScene->document()->currentLevel(),
                                                1, 1);
     obj->addTemplate(obj->templates().size(), pt);
+    WorldObjectValidation::applyCreationDefaults(obj);
     mScene->worldDocument()->addCellObject(mScene->cell(),
                                            mScene->cell()->objects().size(),
                                            obj);
@@ -1709,24 +2137,13 @@ void SpawnPointTool::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 
 void SpawnPointTool::showContextMenu(const QPointF &scenePos, const QPoint &screenPos)
 {
-    SpawnPointItem *item = topmostItemAt(scenePos);
+    ObjectItem *item = contextObjectItemAt(mScene, scenePos);
     if (!item) {
         return;
     }
 
     mContextMenuVisible = true;
-
-//    mScene->document()->setSelectedObjects(WorldCellObjectList() << item->object());
-
-    QMenu menu;
-    QIcon removeIcon(QLatin1String(":images/16x16/edit-delete.png"));
-    QAction *removeAction = menu.addAction(removeIcon, tr("Remove Spawn Point"));
-
-    QAction *action = menu.exec(screenPos);
-    if (action == removeAction) {
-        mScene->worldDocument()->removeCellObject(mScene->cell(), item->object()->index());
-    }
-
+    showObjectContextMenu(mScene, item, screenPos);
     mContextMenuVisible = false;
     mContextMenuShown = QTime::currentTime();
 }
@@ -2501,6 +2918,15 @@ void AbstractCreatePolygonObjectTool::mouseReleaseEvent(QGraphicsSceneMouseEvent
 void AbstractCreatePolygonObjectTool::finishItem()
 {
     WorldObjectGroup *og = mScene->document()->currentObjectGroup();
+    if (og && og->type() && typeRequiresRectangle(og->type()->name())) {
+        QMessageBox::warning(
+                    MainWindow::instance(), tr("Rectangle required"),
+                    tr("%1 must be created with the rectangle object tool. Polygon, polyline and point geometry cannot be exported for this zone type.")
+                    .arg(og->type()->name()));
+        mPolygon.clear();
+        updatePathItem();
+        return;
+    }
 
     switch (mGeometryType) {
     case ObjectGeometryType::INVALID:
@@ -2641,6 +3067,13 @@ void AbstractCreatePolygonObjectTool::addPoint(const QPointF &scenePos)
     int level = mScene->document()->currentLevel();
     if (mGeometryType == ObjectGeometryType::Point) {
         WorldObjectGroup *og = mScene->document()->currentObjectGroup();
+        if (og && og->type() && typeRequiresRectangle(og->type()->name())) {
+            QMessageBox::warning(
+                        MainWindow::instance(), tr("Rectangle required"),
+                        tr("%1 must be created with the rectangle object tool. Point geometry cannot be exported for this zone type.")
+                        .arg(og->type()->name()));
+            return;
+        }
         QPointF cellPos = mScene->renderer()->pixelToTileCoordsNearest(scenePos, level);
         WorldCellObjectPoints points;
         points += WorldCellObjectPoint(cellPos.x(), cellPos.y());
@@ -3301,19 +3734,22 @@ void WorldCellTool::finishMoving(const QPointF &pos)
     QPoint startCellPos = mScene->pixelToCellCoordsInt(mStartScenePos);
     QPoint dropCellPos = mDropTilePos;
     if (startCellPos != dropCellPos) {
+        const QPoint cellOffset = dropCellPos - startCellPos;
         QUndoStack *undoStack = mScene->worldDocument()->undoStack();
         int count = mMovingCells.size();
         undoStack->beginMacro(tr("Move %1 Cell%2").arg(count).arg(QLatin1String((count > 1) ? "s" : "")));
         undoStack->push(new ProgressBegin(tr("Moving Cells"))); // in case of multiple loadMap() calls
         mOrderedMovingCells.clear();
         foreach (WorldCell *cell, mMovingCells)
-            pushCellToMove(cell, dropCellPos - startCellPos);
+            pushCellToMove(cell, cellOffset);
         QList<WorldCell*> newSelection;
         foreach (WorldCell *cell, mOrderedMovingCells) {
-            QPoint newPos = cell->pos() + dropCellPos - startCellPos;
+            QPoint newPos = cell->pos() + cellOffset;
             mScene->worldDocument()->moveCell(cell, newPos);
             newSelection += mScene->world()->cellAt(newPos);
         }
+        MainWindow::instance()->moveCellCoordinateData(
+                    mScene->worldDocument(), mMovingCells, cellOffset);
         mScene->worldDocument()->setSelectedCells(newSelection, true);
         undoStack->push(new ProgressEnd(tr("Undoing Move Cells"))); // in case of multiple loadMap() calls
         undoStack->endMacro();
@@ -4027,6 +4463,41 @@ PasteCellsTool::~PasteCellsTool()
 {
 }
 
+bool PasteCellsTool::validateCellPastePlacement(QString *summary,
+                                                QString *error)
+{
+    QVector<QPoint> sourceCells;
+    sourceCells << QPoint(2, 3) << QPoint(3, 3) << QPoint(2, 4);
+    const QPoint sourceAnchor = topLeftCell(sourceCells, QPoint(-1, -1));
+    const QPoint selectedAnchor = topLeftCell(
+                QVector<QPoint>() << QPoint(7, 5), sourceAnchor);
+    const QRect worldBounds(0, 0, 10, 10);
+    const QPoint dropAnchor = boundedDropCell(
+                sourceCells, sourceAnchor, selectedAnchor, worldBounds);
+    if (sourceAnchor != QPoint(2, 3)
+            || dropAnchor != QPoint(7, 5)
+            || pastedCellPosition(QPoint(2, 3), sourceAnchor, dropAnchor)
+               != QPoint(7, 5)
+            || pastedCellPosition(QPoint(3, 3), sourceAnchor, dropAnchor)
+               != QPoint(8, 5)
+            || pastedCellPosition(QPoint(2, 4), sourceAnchor, dropAnchor)
+               != QPoint(7, 6)) {
+        if (error)
+            *error = tr("The selected target cell did not anchor the paste.");
+        return false;
+    }
+    if (boundedDropCell(sourceCells, sourceAnchor, QPoint(9, 9),
+                        worldBounds) != QPoint(8, 8)) {
+        if (error)
+            *error = tr("The paste footprint was not kept inside the world.");
+        return false;
+    }
+    if (summary)
+        *summary = tr("selected-cell anchoring, relative multi-cell positions "
+                      "and world-bound clamping verified");
+    return true;
+}
+
 void PasteCellsTool::activate()
 {
     BaseWorldSceneTool::activate();
@@ -4036,9 +4507,12 @@ void PasteCellsTool::activate()
 void PasteCellsTool::deactivate()
 {
     BaseWorldSceneTool::deactivate();
-
-    // The user might switch tools while this tool is active
     cancelMoving();
+}
+
+void PasteCellsTool::restart()
+{
+    startMoving();
 }
 
 void PasteCellsTool::setScene(BaseGraphicsScene *scene)
@@ -4063,34 +4537,50 @@ void PasteCellsTool::updateEnabledState()
 void PasteCellsTool::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) {
+        qInfo() << "Cell paste cancelled";
         ToolManager::instance()->selectTool(WorldCellTool::instance());
         if (!isCurrent()) {
             cancelMoving();
         }
         event->accept();
+        return;
     }
+    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+        if (confirmOccupiedTargets() && pasteCells())
+            ToolManager::instance()->selectTool(WorldCellTool::instance());
+        event->accept();
+        return;
+    }
+    event->ignore();
 }
 
 void PasteCellsTool::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
-        pasteCells(event->scenePos());
+        if (!updateDropPosition(event->scenePos())) {
+            event->accept();
+            return;
+        }
+        if (confirmOccupiedTargets() && pasteCells())
+            ToolManager::instance()->selectTool(WorldCellTool::instance());
         event->accept();
         return;
     }
-    // Right-clicks exits pasting mode, same as the Escape key.
     if (event->button() == Qt::RightButton) {
+        qInfo() << "Cell paste cancelled";
         ToolManager::instance()->selectTool(WorldCellTool::instance());
         if (!isCurrent()) {
             cancelMoving();
         }
         event->accept();
+        return;
     }
+    event->ignore();
 }
 
 void PasteCellsTool::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 {
-    updateMovingItems(event->scenePos(), event->modifiers());
+    updateDropPosition(event->scenePos());
     event->accept();
 }
 
@@ -4102,82 +4592,131 @@ void PasteCellsTool::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
 
 void PasteCellsTool::startMoving()
 {
-    QRectF tileBounds;
+    cancelMoving();
+    if (!mScene)
+        return;
+
+    mSourceCellPositions.clear();
 
     foreach (WorldCellContents *contents, Clipboard::instance()->cellsInClipboard()) {
         PasteCellItem *dndItem = new PasteCellItem(contents, mScene);
         mDnDItems.append(dndItem);
         dndItem->setZValue(1000);
         mScene->addItem(dndItem);
-
-        tileBounds |= QRectF(contents->pos(), QSize(1, 1));
+        mSourceCellPositions.append(contents->pos());
     }
 
-    mStartScenePos = mScene->cellToPixelCoords(tileBounds.center());
+    if (mSourceCellPositions.isEmpty())
+        return;
+
+    mSourceCellPos = topLeftCell(mSourceCellPositions, QPoint());
+    mStartScenePos = mScene->cellToPixelCoords(mSourceCellPos);
+
+    QPoint requestedDrop = mSourceCellPos;
+    const QList<WorldCell*> &selectedCells =
+            mScene->worldDocument()->selectedCells();
+    if (!selectedCells.isEmpty()) {
+        QVector<QPoint> selectedPositions;
+        selectedPositions.reserve(selectedCells.size());
+        for (WorldCell *cell : selectedCells)
+            selectedPositions.append(cell->pos());
+        requestedDrop = topLeftCell(selectedPositions, mSourceCellPos);
+    }
+
+    mDropTilePos = boundedDropCell(mSourceCellPositions, mSourceCellPos,
+                                   requestedDrop,
+                                   mScene->world()->bounds());
+    const QPointF dropScenePos = mScene->cellToPixelCoords(mDropTilePos);
+    for (PasteCellItem *item : std::as_const(mDnDItems)) {
+        item->setDragOffset(dropScenePos - mStartScenePos);
+        const QPoint targetPosition = pastedCellPosition(
+                    item->cellPos(), mSourceCellPos, mDropTilePos);
+        item->setTargetOccupied(!mScene->world()->cellAt(targetPosition)->isEmpty());
+    }
+    qInfo() << "Cell paste preview started" << mDnDItems.size()
+            << "source anchor" << mSourceCellPos
+            << "target anchor" << mDropTilePos;
+    setStatusInfo(tr("Cell paste preview at %1,%2. Move the pointer, then "
+                     "left-click or press Enter once to place it. "
+                     "Right-click or Escape cancels.")
+                  .arg(mDropTilePos.x()).arg(mDropTilePos.y()));
 }
 
-void PasteCellsTool::updateMovingItems(const QPointF &pos, Qt::KeyboardModifiers modifiers)
+bool PasteCellsTool::updateDropPosition(const QPointF &pos)
 {
-    Q_UNUSED(modifiers)
-#if 0
-    // Snap-to-grid
-    QPointF pt = mScene->pixelToCellCoords(mStartScenePos);
-    qreal x1 = pt.x() - (int)pt.x();
-    qreal y1 = pt.y() - (int)pt.y();
+    if (!mScene || mDnDItems.isEmpty())
+        return false;
+    WorldCell *targetCell = mScene->pointToCell(pos);
+    if (!targetCell)
+        return false;
 
-    pt = mScene->pixelToCellCoords(pos);
-
-    // Pick the correct quadrant of the mouse-over cell depending on
-    // the quadrant the hot-spot is in
-    qreal x2 = pt.x() - int(pt.x());
-    qreal y2 = pt.y() - int(pt.y());
-    if (x2 - x1 > 0.5)
-        pt.setX(pt.x() + 1);
-    else if (x2 - x1 < -0.5)
-        pt.setX(pt.x() - 1);
-    if (y2 - y1 > 0.5)
-        pt.setY(pt.y() + 1);
-    else if (y2 - y1 < -0.5)
-        pt.setY(pt.y() - 1);
-
-    Q_ASSERT(mEventView);
-    qreal frac = 0.25, halfFrac = frac/2;
-    qreal scale = qMin(qMax(frac, mEventView->zoomable()->scale()),1.0);
-    QPolygonF poly = mScene->cellRectToPolygon(QRectF(int(pt.x())+x1-halfFrac/scale, int(pt.y())+y1-halfFrac/scale, frac/scale, frac/scale));
-    if (poly.containsPoint(pos, Qt::OddEvenFill))
-        pt = mScene->cellToPixelCoords(int(pt.x())+x1, int(pt.y())+y1);
-    else
-        pt = pos;
-#endif
-    QVector<QPoint> cellPositions;(mDnDItems.size());
-    cellPositions.clear();
-    foreach (PasteCellItem *item, mDnDItems)
-        cellPositions.append(item->cellPos());
-    QPointF pt = restrictDragging(cellPositions, mStartScenePos, pos);
-
-    foreach (PasteCellItem *item, mDnDItems)
-        item->setDragOffset(pt - mStartScenePos);
-
-    mDropTilePos = mScene->pixelToCellCoordsInt(pt);
+    const QPoint requestedDrop = targetCell->pos();
+    mDropTilePos = boundedDropCell(mSourceCellPositions, mSourceCellPos,
+                                   requestedDrop,
+                                   mScene->world()->bounds());
+    const QPointF dropScenePos = mScene->cellToPixelCoords(mDropTilePos);
+    for (PasteCellItem *item : std::as_const(mDnDItems)) {
+        item->setDragOffset(dropScenePos - mStartScenePos);
+        const QPoint targetPosition = pastedCellPosition(
+                    item->cellPos(), mSourceCellPos, mDropTilePos);
+        item->setTargetOccupied(!mScene->world()->cellAt(targetPosition)->isEmpty());
+    }
+    setStatusInfo(tr("Cell paste preview at %1,%2. Green targets are empty. "
+                     "Orange targets already contain data. Left-click or "
+                     "press Enter once to place. Right-click or Escape cancels.")
+                  .arg(mDropTilePos.x()).arg(mDropTilePos.y()));
+    return true;
 }
 
-void PasteCellsTool::pasteCells(const QPointF &pos)
+bool PasteCellsTool::confirmOccupiedTargets() const
 {
-    Q_UNUSED(pos)
-    QPoint startCellPos = mScene->pixelToCellCoordsInt(mStartScenePos);
+    QStringList occupied;
+    for (PasteCellItem *item : mDnDItems) {
+        const QPoint targetPosition = pastedCellPosition(
+                    item->cellPos(), mSourceCellPos, mDropTilePos);
+        WorldCell *targetCell = mScene->world()->cellAt(targetPosition);
+        if (targetCell && !targetCell->isEmpty())
+            occupied += QStringLiteral("%1,%2")
+                    .arg(targetPosition.x()).arg(targetPosition.y());
+    }
+    if (occupied.isEmpty())
+        return true;
+
+    const QString targets = occupied.mid(0, 12).join(QLatin1String(", "))
+            + (occupied.size() > 12
+               ? tr(" and %1 more").arg(occupied.size() - 12)
+               : QString());
+    return QMessageBox::warning(
+                MainWindow::instance(), tr("Paste Into Non-Empty Cells"),
+                tr("The target contains %1 non-empty cell(s): %2\n\n"
+                   "Pasting will merge the copied map, lots, zones, "
+                   "properties and features with the existing cell data. "
+                   "Overlapping content may result. Continue?")
+                .arg(occupied.size()).arg(targets),
+                QMessageBox::Yes | QMessageBox::No,
+                QMessageBox::No) == QMessageBox::Yes;
+}
+
+bool PasteCellsTool::pasteCells()
+{
+    if (mDnDItems.isEmpty())
+        return false;
+
+    QPoint startCellPos = mSourceCellPos;
     QPoint dropCellPos = mDropTilePos;
 
     QUndoStack *undoStack = mScene->worldDocument()->undoStack();
     int count = mDnDItems.size();
+    MainWindow::instance()->beginDocumentTransaction();
     undoStack->beginMacro(tr("Paste %1 Cell%2").arg(count).arg(QLatin1String((count > 1) ? "s" : "")));
     undoStack->push(new ProgressBegin(tr("Pasting Cells"))); // in case of multiple loadMap() calls
 #if 1
-    // This can be called multiple times.
     Clipboard::instance()->pasteEverythingButCells(mScene->worldDocument());
 #endif
     QList<WorldCell*> newSelection;
     foreach (PasteCellItem *item, mDnDItems) {
-        QPoint newPos = item->cellPos() + dropCellPos - startCellPos;
+        QPoint newPos = pastedCellPosition(item->cellPos(), startCellPos,
+                                           dropCellPos);
         WorldCell *replace = mScene->world()->cellAt(newPos);
         WorldCellContents *contents = new WorldCellContents(item->contents(), replace);
 #if 1
@@ -4191,12 +4730,61 @@ void PasteCellsTool::pasteCells(const QPointF &pos)
     mScene->worldDocument()->setSelectedCells(newSelection, true);
     undoStack->push(new ProgressEnd(tr("Undoing Paste Cells"))); // in case of multiple loadMap() calls
     undoStack->endMacro();
+    MainWindow::instance()->endDocumentTransaction();
+    qInfo() << "Cell paste completed" << count
+            << "source anchor" << startCellPos
+            << "target anchor" << dropCellPos;
+    return true;
+}
+
+QPoint PasteCellsTool::topLeftCell(const QVector<QPoint> &cellPositions,
+                                   const QPoint &fallback)
+{
+    if (cellPositions.isEmpty())
+        return fallback;
+    QRect bounds(cellPositions.first(), QSize(1, 1));
+    for (const QPoint &cellPosition : cellPositions)
+        bounds |= QRect(cellPosition, QSize(1, 1));
+    return bounds.topLeft();
+}
+
+QPoint PasteCellsTool::boundedDropCell(const QVector<QPoint> &cellPositions,
+                                       const QPoint &sourceCell,
+                                       const QPoint &requestedDrop,
+                                       const QRect &worldBounds)
+{
+    if (cellPositions.isEmpty())
+        return requestedDrop;
+
+    const QPoint delta = requestedDrop - sourceCell;
+    QRect cellBounds(cellPositions.first() + delta, QSize(1, 1));
+    for (const QPoint &cellPos : cellPositions)
+        cellBounds |= QRect(cellPos + delta, QSize(1, 1));
+
+    QPoint drop = requestedDrop;
+    if (cellBounds.left() < worldBounds.left())
+        drop.rx() += worldBounds.left() - cellBounds.left();
+    if (cellBounds.top() < worldBounds.top())
+        drop.ry() += worldBounds.top() - cellBounds.top();
+    if (cellBounds.right() > worldBounds.right())
+        drop.rx() += worldBounds.right() - cellBounds.right();
+    if (cellBounds.bottom() > worldBounds.bottom())
+        drop.ry() += worldBounds.bottom() - cellBounds.bottom();
+    return drop;
+}
+
+QPoint PasteCellsTool::pastedCellPosition(const QPoint &cellPosition,
+                                          const QPoint &sourceCell,
+                                          const QPoint &dropCell)
+{
+    return cellPosition + dropCell - sourceCell;
 }
 
 void PasteCellsTool::cancelMoving()
 {
     qDeleteAll(mDnDItems);
     mDnDItems.clear();
+    mSourceCellPositions.clear();
 }
 
 /////

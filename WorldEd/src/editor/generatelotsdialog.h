@@ -14,7 +14,7 @@ class WorldDocument;
 class GenerateLotsDialog : public QDialog
 {
     Q_OBJECT
-    
+
 public:
     explicit GenerateLotsDialog(WorldDocument *worldDoc, QWidget *parent = 0);
     ~GenerateLotsDialog();

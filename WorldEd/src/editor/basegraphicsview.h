@@ -78,7 +78,7 @@ public:
     };
 
     explicit BaseGraphicsView(AllowOpenGL openGL, QWidget *parent = 0);
-    
+
     void setHandScrolling(bool handScrolling);
 
     void hideEvent(QHideEvent *event);

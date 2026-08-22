@@ -96,23 +96,36 @@ Every application log now starts with a privacy-limited machine summary:
 - operating-system-reported GPU/display adapters
 - Qt version, Qt ABI, and process bitness
 
-No username, hostname, serial number, IP address, or hardware identifier is
-collected. A remote desktop session may expose only its remote display adapter.
-When WorldEd creates its native OpenGL context, it additionally records the
-actual OpenGL vendor, renderer, and version selected by the driver.
+WorldEd BMP To TMX provides **Update Rules/Blends metadata only** for existing
+TMX maps assigned to all world cells or only the selected cells. It replaces
+the stored Rules and Blends paths, aliases, rules, and blends. Bitmap pixels,
+layers, objects, tilesets, no-blend masks, and edge settings remain unchanged.
+WorldEd lists the files first, skips identical snapshots, writes atomically,
+and creates a dated project backup before changing any TMX file.
 
-TileZed logs a warning when BMP Rules regeneration takes 250 ms or more. The
-message contains the caller's requested rectangle, the true dirty rectangle,
-the bounded work rectangle, and deferred tile-initialization time. This
-diagnostic concerns the terrain/BMP `Rules.txt` imported through the BMP Tool;
-it is not an Automapper-manifest reload.
+Older TMX files can retain unresolved tileset references. Removing only the
+tilesets that no longer resolve to a PNG can reduce unnecessary rule work.
+Project Doctor can inspect and repair those references with a backup.
 
-For an older TMX, record the counts displayed by **Import Rules** and
-**Import Blends** before accepting replacement. Each TMX has one embedded
-snapshot. Import replaces that snapshot in memory and Save persists one
-replacement block. Reload after Import is unnecessary. If the selected file
-is already identical, TileZed reports a no-op and does not recreate the BMP
-blender.
+TileZed also records a rate-limited warning when ground-brush preparation takes
+40 ms or more. The line separates temporary Rules and Blends calculation from
+automatic blend-tile cleanup and includes the brush bounds and active metadata
+counts.
+
+The deployed validator can measure a specific map while checking that indexed
+Blends and sparse dirty regions produce the same layers as their compatibility
+paths. It also verifies that the Sand rule resolves only its declared tiles
+when similarly named test or custom sheets are present. When the benchmark map
+contains `blends_natural_01_TEST`, the validator removes and restores that
+sheet, rebuilds the automatic layers, and checks the Sand output after both
+operations:
+
+```powershell
+TileZed.exe --validate-brush-performance C:\path\to\map.tmx
+```
+
+Without a TMX argument, the command runs the built-in brush, undo, Rules, and
+Blends checks only.
 
 ## Reproducing a problem
 

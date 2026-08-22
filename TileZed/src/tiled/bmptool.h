@@ -26,6 +26,8 @@
 #include <QSize>
 #include <QUndoCommand>
 
+#include <cstring>
+
 class QImage;
 
 namespace Tiled {
@@ -568,10 +570,18 @@ public:
         QRect oldBounds(0, 0, width(), height());
         QRect newBounds(0, 0, size.width(), size.height());
         QRect area = oldBounds.translated(offset) & newBounds;
-        for (int y = area.top(); y <= area.bottom(); ++y) {
-           for (int x = area.left(); x <= area.right(); ++x) {
-               newImage.setPixel(x, y, pixel(x - offset.x(), y - offset.y()));
-           }
+        if (depth() == 32 && format() == newImage.format()) {
+            for (int y = area.top(); y <= area.bottom(); ++y) {
+                std::memcpy(newImage.scanLine(y) + area.left() * 4,
+                            constScanLine(y - offset.y())
+                            + (area.left() - offset.x()) * 4,
+                            size_t(area.width()) * 4);
+            }
+        } else {
+            for (int y = area.top(); y <= area.bottom(); ++y) {
+                for (int x = area.left(); x <= area.right(); ++x)
+                    newImage.setPixel(x, y, pixel(x - offset.x(), y - offset.y()));
+            }
         }
 
         *this = newImage;
@@ -580,11 +590,21 @@ public:
     // This is like TileLayer::merge().
     void merge(const QPoint &pos, const ResizableImage *other, const QRegion &otherRegion)
     {
-        QRegion region = otherRegion.translated(pos) & QRect(0, 0, width(), height());
+        QRegion region = otherRegion.translated(pos)
+                & QRect(0, 0, width(), height())
+                & QRect(pos, other->size());
         for (QRect area : region) {
-            for (int y = area.top(); y <= area.bottom(); ++y) {
-                for (int x = area.left(); x <= area.right(); ++x) {
-                    setPixel(x, y, other->pixel(x - pos.x(), y - pos.y()));
+            if (depth() == 32 && format() == other->format()) {
+                for (int y = area.top(); y <= area.bottom(); ++y) {
+                    std::memcpy(scanLine(y) + area.left() * 4,
+                                other->constScanLine(y - pos.y())
+                                + (area.left() - pos.x()) * 4,
+                                size_t(area.width()) * 4);
+                }
+            } else {
+                for (int y = area.top(); y <= area.bottom(); ++y) {
+                    for (int x = area.left(); x <= area.right(); ++x)
+                        setPixel(x, y, other->pixel(x - pos.x(), y - pos.y()));
                 }
             }
         }

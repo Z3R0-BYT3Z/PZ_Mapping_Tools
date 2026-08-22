@@ -35,6 +35,7 @@
 
 #include <QApplication>
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QPainter>
 #include <QUndoCommand>
 #include <QVector2D>
@@ -169,12 +170,16 @@ PaintBMP::PaintBMP(MapDocument *mapDocument, int bmpIndex,
     mRegion(region),
     mMergeable(false)
 {
+    QElapsedTimer totalTimer;
+    totalTimer.start();
     QImage &image = mMapDocument->map()->rbmp(mBmpIndex).rimage();
     mErased = image.copy(mX, mY, mSource.width(), mSource.height());
 
     if (!erase || mBmpIndex != 0)
         return;
 
+    QElapsedTimer blenderTimer;
+    blenderTimer.start();
     Map *origMap = mMapDocument->map();
     Map map(origMap->orientation(), origMap->width(), origMap->height(),
             origMap->tileWidth(), origMap->tileHeight());
@@ -194,10 +199,13 @@ PaintBMP::PaintBMP(MapDocument *mapDocument, int bmpIndex,
     }
     BmpBlender blender(&map);
     blender.setHack(true);
-    blender.fromMap();
+    blender.setUseBlendCandidateIndex(false);
     QRect r = mRegion.boundingRect();
     blender.tilesToPixels(r.left() - 2, r.top() - 2, r.right() + 2, r.bottom() + 2);
     blender.flush(r);
+    const qint64 blenderMs = blenderTimer.elapsed();
+    QElapsedTimer cleanupTimer;
+    cleanupTimer.start();
 
     // Remove known blend tiles from every layer on level 0.
     // Do this adjacent to the painted area as well.
@@ -227,6 +235,22 @@ PaintBMP::PaintBMP(MapDocument *mapDocument, int bmpIndex,
             mEraseTilesCmds += cmd;
             mEraseRgns += eraseRgn;
         }
+    }
+    const qint64 cleanupMs = cleanupTimer.elapsed();
+    const qint64 totalMs = totalTimer.elapsed();
+    static QElapsedTimer slowLogLimiter;
+    if (totalMs >= 40
+            && (!slowLogLimiter.isValid()
+                || slowLogLimiter.elapsed() >= 2000)) {
+        slowLogLimiter.restart();
+        qWarning() << "Ground BMP brush preparation was slow:"
+                   << totalMs << "ms total,"
+                   << blenderMs << "ms temporary blender,"
+                   << cleanupMs << "ms blend cleanup,"
+                   << "paint bounds" << mRegion.boundingRect()
+                   << "paint rects" << mRegion.rectCount()
+                   << "rules" << origMap->bmpSettings()->rules().size()
+                   << "blends" << origMap->bmpSettings()->blends().size();
     }
 }
 
@@ -720,11 +744,18 @@ static QRegion bmpPixelRegion(Map *map, int bmpIndex, const QRegion &tileRgn, QR
     for (QRect r : tileRgn) {
         r &= mapBounds;
         for (int y = r.top(); y <= r.bottom(); y++) {
+            int runStart = -1;
             for (int x = r.left(); x <= r.right(); x++) {
                 if (bmpImage.pixel(x, y) != pixel) {
-                    paintRgn += QRect(x, y, 1, 1);
+                    if (runStart == -1)
+                        runStart = x;
+                } else if (runStart != -1) {
+                    paintRgn += QRect(runStart, y, x - runStart, 1);
+                    runStart = -1;
                 }
             }
+            if (runStart != -1)
+                paintRgn += QRect(runStart, y, r.right() - runStart + 1, 1);
         }
     }
     return paintRgn;

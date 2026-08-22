@@ -16,6 +16,7 @@
  */
 
 #include "ingamemapwriter.h"
+#include "ingamemapwriterbinary.h"
 
 #include "world.h"
 #include "worldcell.h"
@@ -79,6 +80,8 @@ public:
         w.writeStartElement(QLatin1String("world"));
 
         w.writeAttribute(QLatin1String("version"), QLatin1String("1.0"));
+        w.writeAttribute(QLatin1String("cellSize"),
+                         QString::number(world->cellSize()));
 
         for (int y = 0; y < world->height(); y++) {
             for (int x = 0; x < world->width(); x++) {
@@ -237,7 +240,13 @@ bool InGameMapWriter::writeWorld(World *world, const QString &filePath)
     if (!d->openFile(&tempFile))
         return false;
 
-    d->writeWorld(world, &tempFile, QFileInfo(filePath).absolutePath());
+    World *worldForExport = world;
+    if (world->cellSize() != 256)
+        worldForExport = convertInGameMapWorldCellSize(world, 256);
+    d->writeWorld(worldForExport, &tempFile,
+                  QFileInfo(filePath).absolutePath());
+    if (worldForExport != world)
+        delete worldForExport;
 
     if (tempFile.error() != QFile::NoError) {
         d->mError = tempFile.errorString();
@@ -298,7 +307,12 @@ bool InGameMapWriter::writeWorld(World *world, const QString &filePath)
 void InGameMapWriter::writeWorld(World *world, QIODevice *device, const QString &absDirPath)
 {
     d->mOutputPath = QStringLiteral("<device>");
-    d->writeWorld(world, device, absDirPath);
+    World *worldForExport = world;
+    if (world->cellSize() != 256)
+        worldForExport = convertInGameMapWorldCellSize(world, 256);
+    d->writeWorld(worldForExport, device, absDirPath);
+    if (worldForExport != world)
+        delete worldForExport;
 }
 
 void InGameMapWriter::setFeatureScope(InGameMapFeatureScope scope)

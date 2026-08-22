@@ -19,31 +19,35 @@ after they are restarted.
 
 ## What each file does
 
-| File | Used mainly by | Purpose | Normal user action |
-|---|---|---|---|
-| `Tilesets.txt` | All three tools | Ordered catalogue of logical sheet names, PNG locations, and logical columns/rows | Use the Tileset tools or catalogue rebuild; do not casually reorder it |
-| `TileProperties.txt` | TileZed, BuildingEd | Controls and tooltips shown by the TileDef property editor | Edit only when adding a verified engine property |
-| `BuildingTiles.txt` | BuildingEd | Tile categories used by walls, roofs, windows, grime, and object tools | Normally read-only |
-| `BuildingFurniture.txt` | BuildingEd | Named furniture/object groups and their ordered tile definitions | Normally read-only |
-| `BuildingTemplates.txt` | BuildingEd | Reusable building defaults and template categories | Normally read-only |
-| `TMXConfig.txt` | TileZed, BuildingEd | Layer/object layout used when creating or exporting maps | Normally read-only |
-| `RoomNames.txt` | BuildingEd | Valid room-name catalogue | Choose values in BuildingEd |
-| `RoomTone.txt` | BuildingEd | Valid room-tone/building-type catalogue | Choose values in BuildingEd |
-| `WorldDefaults.txt` | WorldEd | Default object types, groups, properties, templates, colors, professions, and Build 42 zone values | Project-specific values belong in the PZW project |
-| `Rules.txt` | WorldEd terrain/BMP tools | Color aliases and terrain-generation rules | Copy into a project before customizing |
-| `Blends.txt` | WorldEd terrain/BMP tools | Terrain edge and overlay transitions | Copy into a project before customizing |
-| `MapBaseXML.txt` | WorldEd BMP-to-TMX | Base TMX layer/object structure for generated maps | Normally read-only |
-| `Roads.txt` | WorldEd | Road drawing presets | Normally read-only |
-| `Fences.txt` | TileZed Lua tools | Fence presets and directional tile choices | Use through Draw Fence |
-| `Curbs.txt` | TileZed Lua tools | Curb presets and near/far/sunken pieces | Use through Draw Curb |
-| `Edges.txt` | TileZed Lua tools | Terrain-edge presets | Use through Draw Edge |
-| `LuaTools.txt` | TileZed | Menu labels, icons, and scripts for shipped Lua tools | Add user tools in a separate user catalogue |
-| `Rearrange.txt` | TileZed | Ordered tile selections used by rearrangement helpers | Normally read-only |
-| `RearrangeGrid.txt` | TileZed | Old/new tile-grid remapping tables | Normally read-only |
+| File | Used mainly by | Purpose |
+|---|---|---|
+| `Tilesets.txt` | All tools | Ordered logical sheet names, image paths, columns, and rows |
+| `TileProperties.txt` | TileZed, BuildingEd | TileDef controls and tooltips |
+| `BuildingTiles.txt` | BuildingEd | Walls, roofs, windows, grime, and object categories |
+| `BuildingFurniture.txt` | BuildingEd, Pack Extractor | Furniture groups and ordered multi-tile definitions |
+| `BuildingTemplates.txt` | BuildingEd | Building defaults and template categories |
+| `TMXConfig.txt` | TileZed, BuildingEd | Layer and object layout for created maps |
+| `RoomNames.txt` | BuildingEd | Room-name catalogue |
+| `RoomTone.txt` | BuildingEd | Room-tone and building-type catalogue |
+| `WorldDefaults.txt` | WorldEd | Object types, groups, properties, templates, colors, professions, and zone values |
+| `Rules.txt` | WorldEd BMP tools | Color aliases and terrain-generation rules |
+| `Blends.txt` | WorldEd BMP tools | Terrain edges and overlay transitions |
+| `MapBaseXML.txt` | WorldEd BMP tools | Base TMX structure for generated maps |
+| `MapToPNG.txt` | WorldEd Create World Image | Tile-to-color rules for rendering compiled LOT data to PNG |
+| `Roads.txt` | WorldEd | Road presets |
+| `Fences.txt` | TileZed | Fence presets and directional pieces |
+| `Curbs.txt` | TileZed | Curb presets and directional pieces |
+| `Edges.txt` | TileZed | Terrain-edge presets |
+| `LuaTools.txt` | TileZed | Shipped Lua tool menu entries, icons, and scripts |
+| `Rearrange.txt` | TileZed | Ordered tile selections for rearrangement tools |
+| `RearrangeGrid.txt` | TileZed | Old and new tile-grid mappings |
 
-Legacy source files such as `MapToPNG.txt`, `Textures.txt`, `TileShapes.txt`,
-and `thumbnails.txt` are not shipped as active runtime catalogues. Their old
-presence in `config` did not make a current feature use them.
+WorldEd can synchronize the selected `Rules.txt` and `Blends.txt` into the
+embedded metadata snapshot of existing assigned TMX maps without regenerating
+their terrain images or rewriting their map content.
+
+Legacy files such as `Textures.txt`, `TileShapes.txt`, and `thumbnails.txt`
+are not active runtime catalogues.
 
 ## Current Build 42.20 audit
 

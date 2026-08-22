@@ -128,6 +128,7 @@ void MapScene::setMapDocument(MapDocument *mapDocument)
         mMapDocument->disconnect(this);
 
     mMapDocument = mapDocument;
+    loadPartialChunks();
 #ifdef ZOMBOID
     mGridItem->setMapDocument(mapDocument);
 #endif
@@ -172,8 +173,84 @@ void MapScene::setMapDocument(MapDocument *mapDocument)
         // The tooltip on lot objects contains the relative path to the lot.
         connect(mMapDocument, &MapDocument::fileNameChanged,
                 this, &MapScene::syncAllObjectItems);
+        connect(mMapDocument, &MapDocument::fileNameChanged,
+                this, &MapScene::savePartialChunks);
 #endif
     }
+}
+
+bool MapScene::supportsPartialChunks() const
+{
+    return mMapDocument && mMapDocument->map()
+            && mMapDocument->map()->size() == QSize(256, 256)
+            && !mMapDocument->fileName().isEmpty();
+}
+
+bool MapScene::partialChunksEnabled() const
+{
+    return supportsPartialChunks() && mPartialChunks.enabled();
+}
+
+int MapScene::selectedPartialChunkCount() const
+{
+    return mPartialChunks.selectedCount();
+}
+
+bool MapScene::partialChunkPreviewSelected(int x, int y) const
+{
+    if (mPartialChunkLassoActive && partialChunkLassoRect().contains(x, y))
+        return mPartialChunkLassoSelect;
+    return mPartialChunks.isSelected(x, y);
+}
+
+void MapScene::setPartialChunksEnabled(bool enabled)
+{
+    if (!supportsPartialChunks())
+        return;
+    mPartialChunkLassoActive = false;
+    mPartialChunks.setEnabled(enabled);
+    savePartialChunks();
+    update();
+    emit partialChunkSelectionChanged();
+}
+
+void MapScene::selectAllPartialChunks()
+{
+    if (!partialChunksEnabled())
+        return;
+    mPartialChunkLassoActive = false;
+    mPartialChunks.selectAll();
+    savePartialChunks();
+    update();
+    emit partialChunkSelectionChanged();
+}
+
+void MapScene::clearPartialChunks()
+{
+    if (!partialChunksEnabled())
+        return;
+    mPartialChunkLassoActive = false;
+    mPartialChunks.clear();
+    savePartialChunks();
+    update();
+    emit partialChunkSelectionChanged();
+}
+
+void MapScene::loadPartialChunks()
+{
+    QString error;
+    const QString path = mMapDocument ? mMapDocument->fileName() : QString();
+    if (!mPartialChunks.load(path, &error) && !error.isEmpty())
+        emit partialChunkSaveFailed(error);
+}
+
+void MapScene::savePartialChunks()
+{
+    if (!mMapDocument || mMapDocument->fileName().isEmpty())
+        return;
+    QString error;
+    if (!mPartialChunks.save(mMapDocument->fileName(), &error))
+        emit partialChunkSaveFailed(error);
 }
 
 void MapScene::setSelectedObjectItems(const QSet<MapObjectItem *> &items)
@@ -676,9 +753,32 @@ void MapScene::setHighlightCurrentLayer(bool highlightCurrentLayer)
 void MapScene::drawForeground(QPainter *painter, const QRectF &rect)
 {
 #ifdef ZOMBOID
-    // There is a GridItem that draws the grid for us.
-    Q_UNUSED(painter)
     Q_UNUSED(rect)
+    if (!partialChunksEnabled())
+        return;
+    painter->save();
+    QColor chunkColor = Preferences::instance()->gridColor();
+    chunkColor.setAlpha(210);
+    QPen pen(chunkColor);
+    pen.setCosmetic(true);
+    painter->setPen(pen);
+    for (int y = 0; y < PZTools::PartialChunkSelection::ChunksPerCell; ++y) {
+        for (int x = 0; x < PZTools::PartialChunkSelection::ChunksPerCell; ++x) {
+            const QRect chunkRect(
+                        x * PZTools::PartialChunkSelection::ChunkSize,
+                        y * PZTools::PartialChunkSelection::ChunkSize,
+                        PZTools::PartialChunkSelection::ChunkSize,
+                        PZTools::PartialChunkSelection::ChunkSize);
+            QColor selectedColor = chunkColor;
+            selectedColor.setAlpha(22);
+            painter->setBrush(partialChunkPreviewSelected(x, y)
+                              ? selectedColor
+                              : QColor(10, 10, 10, 165));
+            painter->drawPolygon(mMapDocument->renderer()->tileToPixelCoords(
+                                     chunkRect, mMapDocument->currentLevel()));
+        }
+    }
+    painter->restore();
 #else
     if (!mMapDocument || !mGridVisible)
         return;
@@ -715,6 +815,14 @@ void MapScene::mouseMoveEvent(QGraphicsSceneMouseEvent *mouseEvent)
     if (!mMapDocument)
         return;
 
+    if (mPartialChunkLassoActive) {
+        mPartialChunkLassoCurrent = partialChunkAt(
+                    mouseEvent->scenePos(), true);
+        update();
+        mouseEvent->accept();
+        return;
+    }
+
     QGraphicsScene::mouseMoveEvent(mouseEvent);
     if (mouseEvent->isAccepted())
         return;
@@ -728,6 +836,19 @@ void MapScene::mouseMoveEvent(QGraphicsSceneMouseEvent *mouseEvent)
 
 void MapScene::mousePressEvent(QGraphicsSceneMouseEvent *mouseEvent)
 {
+    if (partialChunksEnabled() && mouseEvent->button() == Qt::LeftButton) {
+        const QPoint chunk = partialChunkAt(mouseEvent->scenePos(), false);
+        if (chunk.x() >= 0 && chunk.y() >= 0) {
+            mPartialChunkLassoActive = true;
+            mPartialChunkLassoStart = chunk;
+            mPartialChunkLassoCurrent = chunk;
+            mPartialChunkLassoSelect = !mPartialChunks.isSelected(
+                        chunk.x(), chunk.y());
+            update();
+            mouseEvent->accept();
+            return;
+        }
+    }
     QGraphicsScene::mousePressEvent(mouseEvent);
     if (mouseEvent->isAccepted())
         return;
@@ -740,6 +861,21 @@ void MapScene::mousePressEvent(QGraphicsSceneMouseEvent *mouseEvent)
 
 void MapScene::mouseReleaseEvent(QGraphicsSceneMouseEvent *mouseEvent)
 {
+    if (mPartialChunkLassoActive && mouseEvent->button() == Qt::LeftButton) {
+        mPartialChunkLassoCurrent = partialChunkAt(
+                    mouseEvent->scenePos(), true);
+        const QRect chunks = partialChunkLassoRect();
+        for (int y = chunks.top(); y <= chunks.bottom(); ++y) {
+            for (int x = chunks.left(); x <= chunks.right(); ++x)
+                mPartialChunks.setSelected(x, y, mPartialChunkLassoSelect);
+        }
+        mPartialChunkLassoActive = false;
+        savePartialChunks();
+        update();
+        emit partialChunkSelectionChanged();
+        mouseEvent->accept();
+        return;
+    }
     QGraphicsScene::mouseReleaseEvent(mouseEvent);
     if (mouseEvent->isAccepted())
         return;
@@ -748,6 +884,27 @@ void MapScene::mouseReleaseEvent(QGraphicsSceneMouseEvent *mouseEvent)
         mouseEvent->accept();
         mActiveTool->mouseReleased(mouseEvent);
     }
+}
+
+QPoint MapScene::partialChunkAt(const QPointF &scenePos, bool clamp) const
+{
+    if (!mMapDocument)
+        return QPoint(-1, -1);
+    QPoint tile = mMapDocument->renderer()->pixelToTileCoordsInt(
+                scenePos, mMapDocument->currentLevel());
+    if (!clamp && (tile.x() < 0 || tile.y() < 0
+                   || tile.x() >= 256 || tile.y() >= 256))
+        return QPoint(-1, -1);
+    tile.setX(qBound(0, tile.x(), 255));
+    tile.setY(qBound(0, tile.y(), 255));
+    return QPoint(tile.x() / PZTools::PartialChunkSelection::ChunkSize,
+                  tile.y() / PZTools::PartialChunkSelection::ChunkSize);
+}
+
+QRect MapScene::partialChunkLassoRect() const
+{
+    return QRect(mPartialChunkLassoStart,
+                 mPartialChunkLassoCurrent).normalized();
 }
 
 /**

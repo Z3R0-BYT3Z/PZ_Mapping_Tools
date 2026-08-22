@@ -37,6 +37,8 @@ win32 {
 DEFINES += QT_NO_CAST_FROM_ASCII \
     QT_NO_CAST_TO_ASCII
 
+INCLUDEPATH += ../../../shared
+
 # Release with debug info
 msvc:QMAKE_CXXFLAGS_RELEASE += /Zi
 msvc:QMAKE_LFLAGS_RELEASE += /DEBUG /OPT:REF /OPT:ICF
@@ -66,15 +68,19 @@ OBJECTS_DIR = .obj
 
 SOURCES += main.cpp\
     ../firstlaunchdialog.cpp \
+    ../../../shared/partialchunkselection.cpp \
     biomemapgeneratordialog.cpp \
     biomemapitem.cpp \
     biomemapimageprocessor.cpp \
     terrainimageeditordialog.cpp \
     worldgenpreviewdialog.cpp \
     tilesetcleanupdialog.cpp \
+    vehiclemeshpreview.cpp \
     BuildingEditor/buildingfurniturefile.cpp \
     BuildingEditor/buildingtilesfile.cpp \
     exportlotsprogressdialog.cpp \
+    environmentpreviewitem.cpp \
+    expectedpropertiesdialog.cpp \
     generatelotsfailuredialog.cpp \
     loadthumbnailsdialog.cpp \
     lotfilesmanager256.cpp \
@@ -93,6 +99,7 @@ SOURCES += main.cpp\
     InGameMap/ingamemapundo.cpp \
     InGameMap/ingamemapwriter.cpp \
     InGameMap/ingamemapwriterbinary.cpp \
+    InGameMap/worldmapannotationsdialog.cpp \
     navigation/chunkdatafile256.cpp \
     navigation/isochunk256.cpp \
     navigation/isogridsquare256.cpp \
@@ -137,6 +144,7 @@ SOURCES += main.cpp\
     basegraphicsscene.cpp \
     lotsdock.cpp \
     worldcellobject.cpp \
+    worldobjectvalidation.cpp \
     objectsdock.cpp \
     toolmanager.cpp \
     properties.cpp \
@@ -161,6 +169,7 @@ SOURCES += main.cpp\
     bmptotmxconfirmdialog.cpp \
     resizeworlddialog.cpp \
     newworlddialog.cpp \
+    otherworldsdialog.cpp \
     tilemetainfomgr.cpp \
     tilesetmanager.cpp \
     BuildingEditor/furnituregroups.cpp \
@@ -208,9 +217,12 @@ HEADERS  += mainwindow.h \
     terrainimageeditordialog.h \
     worldgenpreviewdialog.h \
     tilesetcleanupdialog.h \
+    vehiclemeshpreview.h \
     BuildingEditor/buildingfurniturefile.h \
     BuildingEditor/buildingtilesfile.h \
     exportlotsprogressdialog.h \
+    environmentpreviewitem.h \
+    expectedpropertiesdialog.h \
     generatelotsfailuredialog.h \
     InGameMap/clipper.hpp \
     InGameMap/ingamemapcell.h \
@@ -225,6 +237,7 @@ HEADERS  += mainwindow.h \
     InGameMap/ingamemapundo.h \
     InGameMap/ingamemapwriter.h \
     InGameMap/ingamemapwriterbinary.h \
+    InGameMap/worldmapannotationsdialog.h \
     loadthumbnailsdialog.h \
     lotfilesmanager256.h \
     luatable.h \
@@ -249,6 +262,7 @@ HEADERS  += mainwindow.h \
     world.h \
     worlddocument.h \
     worldcell.h \
+    worldobjectvalidation.h \
     cellview.h \
     cellscene.h \
     document.h \
@@ -296,6 +310,7 @@ HEADERS  += mainwindow.h \
     bmptotmxconfirmdialog.h \
     resizeworlddialog.h \
     newworlddialog.h \
+    otherworldsdialog.h \
     tilemetainfomgr.h \
     tilesetmanager.h \
     BuildingEditor/furnituregroups.h \
@@ -400,6 +415,7 @@ configTxtFiles.path = $${CONFIG_PREFIX}
 configTxtFiles.files = \
     $${top_srcdir}/Blends.txt \
     $${top_srcdir}/MapBaseXML.txt \
+    $${top_srcdir}/MapToPNG.txt \
     $${top_srcdir}/Rules.txt \
     $${top_srcdir}/WorldDefaults.txt
 INSTALLS += configTxtFiles

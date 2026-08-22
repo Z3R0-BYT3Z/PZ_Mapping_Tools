@@ -444,6 +444,7 @@ void RegionsDock::setDocument(Document *document)
             mWorldDocument->disconnect(this);
         mWorldDocument = worldDocument;
         mRegions.clear();
+        mSavedRegions.clear();
         mSelectedRegion = -1;
         mUndoStack->clear();
         if (mWorldDocument) {
@@ -488,7 +489,7 @@ QString RegionsDock::defaultFileName() const
 }
 bool RegionsDock::maybeSaveCurrentFile()
 {
-    if (!mWorldDocument || mUndoStack->isClean())
+    if (!mWorldDocument || !hasUnsavedChanges())
         return true;
     const QMessageBox::StandardButton answer = QMessageBox::question(
                 this, tr("Unsaved Regions"),
@@ -497,7 +498,7 @@ bool RegionsDock::maybeSaveCurrentFile()
                 QMessageBox::Save);
     if (answer == QMessageBox::Save) {
         saveFile();
-        return mUndoStack->isClean();
+        return !hasUnsavedChanges();
     }
     return true;
 }
@@ -521,7 +522,7 @@ void RegionsDock::loadFile()
         if (mFileNameEdit->text().trimmed().isEmpty())
             return;
     }
-    if (!mUndoStack->isClean()) {
+    if (hasUnsavedChanges()) {
         const QMessageBox::StandardButton answer = QMessageBox::question(
                     this, tr("Reload Regions"),
                     tr("Discard unsaved region changes and reload the file?"),
@@ -536,6 +537,7 @@ void RegionsDock::loadFile()
         return;
     }
     mRegions = loaded;
+    mSavedRegions = loaded;
     mSelectedRegion = mRegions.isEmpty() ? -1 : 0;
     mUndoStack->clear();
     mUndoStack->setClean();
@@ -561,8 +563,9 @@ bool RegionsDock::saveForProject()
         fileName = defaultFileName();
         mFileNameEdit->setText(QDir::toNativeSeparators(fileName));
     }
-    if (mRegions.isEmpty() && mUndoStack->isClean() &&
+    if (mRegions.isEmpty() && !hasUnsavedChanges() &&
             !QFileInfo::exists(fileName)) {
+        mFileNameEdit->setText(QDir::toNativeSeparators(defaultFileName()));
         return true;
     }
     return saveCurrentFile(false);
@@ -594,12 +597,17 @@ bool RegionsDock::saveCurrentFile(bool chooseFileWhenMissing)
         return false;
     }
     mFileNameEdit->setText(QDir::toNativeSeparators(info.absoluteFilePath()));
+    mSavedRegions = mRegions;
     mUndoStack->setClean();
     qInfo().noquote() << "Regions editor saved"
                       << mRegions.size() << "record(s) to"
                       << QDir::toNativeSeparators(info.absoluteFilePath());
     updateUi();
     return true;
+}
+bool RegionsDock::hasUnsavedChanges() const
+{
+    return !mUndoStack->isClean() || mRegions != mSavedRegions;
 }
 bool RegionsDock::readFile(const QString &fileName,
                            QVector<RegionRecord> *regions,
@@ -1417,7 +1425,7 @@ void RegionsDock::updateUi()
         mHeightSpinBox->setValue(1);
     }
     mUpdatingUi = false;
-    const QString state = mUndoStack->isClean()
+    const QString state = !hasUnsavedChanges()
             ? tr("saved") : tr("modified");
     mStatusLabel->setText(tr("%1 region(s), %2. Duplicate names and "
                              "overlapping rectangles are allowed.")

@@ -36,6 +36,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScrollBar>
+#include <QSet>
 #include <QWheelEvent>
 #include <qmath.h>
 
@@ -582,11 +583,13 @@ void BuildingBaseScene::synchObjectItemVisibility()
 }
 
 void BuildingOrthoScene::setToolTiles(const FloorTileGrid *tiles, const QPoint &pos,
-                                   const QString &layerName)
+                                   const QString &layerName,
+                                   bool reusableSource)
 {
     Q_UNUSED(tiles)
     Q_UNUSED(pos)
     Q_UNUSED(layerName)
+    Q_UNUSED(reusableSource)
 }
 
 void BuildingOrthoScene::clearToolTiles()
@@ -848,11 +851,24 @@ void GraphicsFloorItem::mapResized()
 void GraphicsFloorItem::floorEdited()
 {
     mBmp->fill(Qt::black);
+    const QSet<Room *> rooms(mFloor->building()->rooms().cbegin(),
+                             mFloor->building()->rooms().cend());
+    int invalidRoomCells = 0;
     for (int x = 0; x < mFloor->width(); x++) {
         for (int y = 0; y < mFloor->height(); y++) {
-            if (Room *room = mFloor->GetRoomAt(x, y))
+            if (Room *room = mFloor->GetRoomAt(x, y)) {
+                if (!rooms.contains(room)) {
+                    ++invalidRoomCells;
+                    continue;
+                }
                 mBmp->setPixel(x, y, room->Color);
+            }
         }
+    }
+    if (invalidRoomCells) {
+        qWarning() << "BuildingEd deferred floor refresh skipped"
+                   << invalidRoomCells << "stale room cells on level"
+                   << mFloor->level();
     }
     update();
 }
@@ -1586,7 +1602,7 @@ void BuildingOrthoScene::setDocument(BuildingDocument *doc)
         connect(mDocument, &BuildingDocument::selectedObjectsChanged,
                 this, &BuildingBaseScene::selectedObjectsChanged);
 
-        connect(mDocument, &BuildingDocument::roomChanged,
+        connect(mDocument, &BuildingDocument::roomColorChanged,
                 this, &BuildingOrthoScene::roomChanged);
         connect(mDocument, &BuildingDocument::roomAdded,
                 this, &BuildingOrthoScene::roomAdded);

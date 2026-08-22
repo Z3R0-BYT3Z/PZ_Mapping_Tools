@@ -44,7 +44,7 @@ BuildingTileEntryView::BuildingTileEntryView(QWidget *parent) :
     connect(TileMetaInfoMgr::instance(), &TileMetaInfoMgr::tilesetRemoved,
             this, &BuildingTileEntryView::tilesetRemoved);
 
-    model()->setShowEmptyTilesAsMissig(true);
+    model()->setShowTransparentTiles(true);
 }
 
 void BuildingTileEntryView::clear()

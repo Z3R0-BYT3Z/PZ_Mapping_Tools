@@ -187,7 +187,10 @@ PropertyList PropertyList::clone() const
     PropertyList copy;
     const_iterator it = constBegin();
     while (it != constEnd()) {
-        copy += new Property((*it)->mDefinition, (*it)->mValue);
+        Property *property =
+                new Property((*it)->mDefinition, (*it)->mValue);
+        property->mNote = (*it)->mNote;
+        copy += property;
         it++;
     }
     return copy;

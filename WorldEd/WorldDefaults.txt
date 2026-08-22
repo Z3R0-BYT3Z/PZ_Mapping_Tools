@@ -16,7 +16,6 @@ enum
 {
     name = Professions
     values = [
-        all
         burglar
         burgerflipper
         carpenter
@@ -50,14 +49,15 @@ property
 {
     name = Direction
     default = N
+    description = Cardinal direction used by vehicle, mannequin, and stair properties.
     enum = Direction
 }
 
 property
 {
     name = Professions
-    default = all
-    description = Professions allowed to use this spawn point. Choose one or more values; all allows every profession.
+    default = unemployed
+    description = Professions allowed to use this spawn point. Choose one or more explicit values.
     enum = Professions
 }
 
@@ -68,7 +68,7 @@ template
     property
     {
         name = Professions
-        value = all
+        value = unemployed
     }
 }
 
@@ -88,6 +88,7 @@ property
 {
     name = FaceDirection
     default = true
+    description = When enabled, vehicles face the selected Direction.
 }
 
 template
@@ -303,12 +304,14 @@ property
 {
     name = WaterDirection
     default = 0.0
+    description = Water flow direction in degrees.
 }
 
 property
 {
     name = WaterSpeed
     default = 0.0
+    description = Water flow speed. Zero creates still water.
 }
 
 template
@@ -371,6 +374,21 @@ template
     }
 }
 
+template
+{
+    name = WaterFlow
+    property
+    {
+        name = WaterDirection
+        value = 0
+    }
+    property
+    {
+        name = WaterSpeed
+        value = 0.0
+    }
+}
+
 objecttype
 {
     name = WaterFlow
@@ -390,12 +408,14 @@ property
 {
     name = WaterGround
     default = false
+    description = Marks the zone as water ground for the water renderer.
 }
 
 property
 {
     name = WaterShore
     default = true
+    description = Enables shoreline behavior around the water zone.
 }
 
 objecttype
@@ -432,6 +452,7 @@ property
 {
     name = Female
     default = true
+    description = Selects the mannequin gender when no script overrides it.
 }
 
 property
@@ -478,6 +499,7 @@ property
 {
     name = Skin
     default = White
+    description = Selects the mannequin skin variant.
     enum = Skin
 }
 
@@ -774,6 +796,7 @@ property
 {
     name = RoomTone
     default = Generic
+    description = Build 42 room audio profile applied at this location.
     enum = RoomTone
 }
 
@@ -781,6 +804,7 @@ property
 {
     name = EntireBuilding
     default = false
+    description = Applies the selected RoomTone to the complete building.
 }
 
 template
@@ -841,6 +865,7 @@ property
 {
     name = Action
     default =
+    description = Animal route action used by this zone or polyline.
     enum = AnimalAction
 }
 
@@ -848,6 +873,7 @@ property
 {
     name = AnimalType
     default =
+    description = Animal category associated with a Follow route.
     enum = Animal
 }
 
@@ -855,6 +881,7 @@ property
 {
     name = SpawnAnimals
     default = true
+    description = Allows animals to spawn from this Animal zone.
 }
 
 property
@@ -881,6 +908,7 @@ property
 {
     name = StairDirection
     default = N
+    description = Direction of the basement access stair.
     enum = Direction
 }
 
@@ -888,12 +916,14 @@ property
 {
     name = StairX
     default = 0
+    description = Stair X coordinate within the basement zone.
 }
 
 property
 {
     name = StairY
     default = 0
+    description = Stair Y coordinate within the basement zone.
 }
 
 template
@@ -932,6 +962,7 @@ property
 {
     name = Rocks
     default = false
+    description = Enables WorldGen rock placement in this zone.
 }
 
 template

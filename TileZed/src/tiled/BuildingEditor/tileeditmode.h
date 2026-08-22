@@ -69,7 +69,7 @@ public:
 
 signals:
     void viewAddedForDocument(BuildingEditor::BuildingDocument *doc, BuildingEditor::BuildingIsoView *view);
-    
+
 public slots:
     void onActiveStateChanged(bool active);
 

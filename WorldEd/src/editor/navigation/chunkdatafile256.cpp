@@ -33,7 +33,7 @@ ChunkDataFile256::ChunkDataFile256()
 
 }
 
-void ChunkDataFile256::fromMap(CombinedCellMaps &combinedMaps, MapComposite *mapComposite, const LotFile::RectLookup<LotFile::RoomRect> &roomRectLookup, const GenerateLotsSettings &settings)
+void ChunkDataFile256::fromMap(CombinedCellMaps &combinedMaps, MapComposite *mapComposite, const LotFile::RectLookup<LotFile::RoomRect> &roomRectLookup, const GenerateLotsSettings &settings, const QBitArray *selectedChunks)
 {
     QString lotsDirectory = settings.exportDir;
     QFile file(lotsDirectory + QString::fromLatin1("/chunkdata_%1_%2.bin")
@@ -72,6 +72,12 @@ void ChunkDataFile256::fromMap(CombinedCellMaps &combinedMaps, MapComposite *map
 
     for (int yy = 0; yy < CHUNKS_PER_CELL_256; yy++) {
         for (int xx = 0; xx < CHUNKS_PER_CELL_256; xx++) {
+            if (selectedChunks
+                    && !selectedChunks->testBit(
+                        xx + yy * CHUNKS_PER_CELL_256)) {
+                out << quint8(NULL_CHUNK);
+                continue;
+            }
             QRect chunkRect(cellMinX256 + xx * CHUNK_SIZE_256, cellMinY256 + yy * CHUNK_SIZE_256, CHUNK_SIZE_256, CHUNK_SIZE_256);
             QList<LotFile::RoomRect*> roomRects;
             roomRectLookup.overlapping(QRect(xx * CHUNK_SIZE_256, yy * CHUNK_SIZE_256, CHUNK_SIZE_256, CHUNK_SIZE_256), roomRects);

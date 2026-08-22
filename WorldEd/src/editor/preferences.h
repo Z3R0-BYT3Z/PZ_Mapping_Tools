@@ -61,8 +61,21 @@ public:
     int roadPointSpacingHighway() const { return mRoadPointSpacingHighway; }
     qreal roadSimplificationTrail() const { return mRoadSimplificationTrail; }
     int roadPointSpacingTrail() const { return mRoadPointSpacingTrail; }
+    bool generateTrailFeatures() const { return mGenerateTrailFeatures; }
     qreal roadSimplificationRailway() const { return mRoadSimplificationRailway; }
     int roadPointSpacingRailway() const { return mRoadPointSpacingRailway; }
+    QStringList treeFeatureTiles() const { return mTreeFeatureTiles; }
+    QStringList primaryRoadFeatureTiles() const
+    { return mPrimaryRoadFeatureTiles; }
+    QStringList secondaryRoadFeatureTiles() const
+    { return mSecondaryRoadFeatureTiles; }
+    QStringList tertiaryRoadFeatureTiles() const
+    { return mTertiaryRoadFeatureTiles; }
+    static QStringList defaultTreeFeatureTiles();
+    static QStringList defaultPrimaryRoadFeatureTiles();
+    static QStringList defaultSecondaryRoadFeatureTiles();
+    static QStringList defaultTertiaryRoadFeatureTiles();
+    static QString canonicalFeatureTileName(const QString &tile);
     bool showMiniMap() const;
     int miniMapWidth() const;
     bool highlightCurrentLevel() const;
@@ -99,6 +112,9 @@ public:
 
     bool showObjects() const { return mShowObjects; }
     bool showObjectNames() const { return mShowObjectNames; }
+    bool showVehicleMeshPreviews() const { return mShowVehicleMeshPreviews; }
+    qreal vehicleMeshPreviewScale() const { return mVehicleMeshPreviewScale; }
+    qreal vehicleMeshPreviewQuality() const { return mVehicleMeshPreviewQuality; }
     bool showBMPs() const { return mShowBMPs; }
     bool showZombieSpawnImage() const { return mShowZombieSpawnImage; }
     qreal zombieSpawnImageOpacity() const { return mZombieSpawnImageOpacity; }
@@ -137,6 +153,10 @@ signals:
 
     void showObjectsChanged(bool show);
     void showObjectNamesChanged(bool show);
+    void showVehicleMeshPreviewsChanged(bool show);
+    void vehicleMeshPreviewScaleChanged(qreal scale);
+    void vehicleMeshPreviewQualityChanged(qreal quality);
+    void vehicleMeshPreviewAtlasChanged();
     void showBMPsChanged(bool show);
     void showZombieSpawnImageChanged(bool show);
     void zombieSpawnImageOpacityChanged(qreal opacity);
@@ -173,12 +193,21 @@ public slots:
     void setRoadPointSpacingHighway(int spacing);
     void setRoadSimplificationTrail(qreal tolerance);
     void setRoadPointSpacingTrail(int spacing);
+    void setGenerateTrailFeatures(bool enabled);
     void setRoadSimplificationRailway(qreal tolerance);
     void setRoadPointSpacingRailway(int spacing);
+    void setTreeFeatureTiles(const QStringList &tiles);
+    void setPrimaryRoadFeatureTiles(const QStringList &tiles);
+    void setSecondaryRoadFeatureTiles(const QStringList &tiles);
+    void setTertiaryRoadFeatureTiles(const QStringList &tiles);
     void setShowMiniMap(bool show);
     void setMiniMapWidth(int width);
     void setShowObjects(bool show);
     void setShowObjectNames(bool show);
+    void setShowVehicleMeshPreviews(bool show);
+    void setVehicleMeshPreviewScale(qreal scale);
+    void setVehicleMeshPreviewQuality(qreal quality);
+    void notifyVehicleMeshPreviewAtlasChanged();
     void setShowBMPs(bool show);
     void setShowZombieSpawnImage(bool show);
     void setZombieSpawnImageOpacity(qreal opacity);
@@ -212,13 +241,21 @@ private:
     int mRoadPointSpacingHighway;
     qreal mRoadSimplificationTrail;
     int mRoadPointSpacingTrail;
+    bool mGenerateTrailFeatures;
     qreal mRoadSimplificationRailway;
     int mRoadPointSpacingRailway;
+    QStringList mTreeFeatureTiles;
+    QStringList mPrimaryRoadFeatureTiles;
+    QStringList mSecondaryRoadFeatureTiles;
+    QStringList mTertiaryRoadFeatureTiles;
     bool mUseOpenGL;
     bool mLoadAllWorldThumbnails;
     bool mShowWorldThumbnails;
     bool mShowObjects;
     bool mShowObjectNames;
+    bool mShowVehicleMeshPreviews;
+    qreal mVehicleMeshPreviewScale;
+    qreal mVehicleMeshPreviewQuality;
     bool mShowBMPs;
     bool mShowMiniMap;
     bool mShowZombieSpawnImage;

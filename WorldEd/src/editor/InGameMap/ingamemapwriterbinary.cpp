@@ -60,7 +60,11 @@ public:
         int maxCell256Y = std::ceil(((mWorldBoundsOld.bottom() + 1) * mCellSizeOld - 1) / float(mCellSizeNew));
         mWorldBoundsNew = QRect(minCell256X, minCell256Y, maxCell256X - minCell256X, maxCell256Y - minCell256Y);
 
-        World *world256 = new World(mWorldBoundsNew.width(), mWorldBoundsNew.height());
+        const WorldGridFormat format = mCellSizeNew == 256
+                ? WorldGridFormat::Native256
+                : WorldGridFormat::Legacy300;
+        World *world256 = new World(mWorldBoundsNew.width(),
+                                    mWorldBoundsNew.height(), format);
 
         GenerateLotsSettings generateLotsSettingsNew;
         generateLotsSettingsNew.worldOrigin = mWorldBoundsNew.topLeft();
@@ -262,6 +266,12 @@ public:
 };
 
 } // namespace anonymous
+
+World *convertInGameMapWorldCellSize(World *world, int cellSize)
+{
+    WorldConverter converter;
+    return converter.convertWorld(world, world->cellSize(), cellSize);
+}
 
 class InGameMapWriterBinaryPrivate
 {
@@ -737,10 +747,9 @@ bool InGameMapWriterBinary::writeWorld(World *world, const QString &filePath)
     if (!d->openFile(&tempFile))
         return false;
 
-    WorldConverter converter;
     World *worldForExport = world;
     if (world->cellSize() != 256)
-        worldForExport = converter.convertWorld(world, world->cellSize(), 256);
+        worldForExport = convertInGameMapWorldCellSize(world, 256);
     d->writeWorld(worldForExport, &tempFile, QFileInfo(filePath).absolutePath());
     if (worldForExport != world)
         delete worldForExport;
@@ -808,10 +817,9 @@ void InGameMapWriterBinary::writeWorld(World *world, QIODevice *device, const QS
 {
     d->mError.clear();
     d->mOutputPath = QStringLiteral("<device>");
-    WorldConverter converter;
     World *worldForExport = world;
     if (world->cellSize() != 256)
-        worldForExport = converter.convertWorld(world, world->cellSize(), 256);
+        worldForExport = convertInGameMapWorldCellSize(world, 256);
     d->writeWorld(worldForExport, device, absDirPath);
     if (worldForExport != world)
         delete worldForExport;

@@ -26,6 +26,8 @@ enum class InGameMapFeatureScope;
 
 class QIODevice;
 
+World *convertInGameMapWorldCellSize(World *world, int cellSize);
+
 class InGameMapWriterBinary
 {
 public:

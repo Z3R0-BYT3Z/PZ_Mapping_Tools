@@ -526,7 +526,7 @@ MapsView::MapsView(MainWindow *mainWindow, QWidget *parent)
     hHeader->showSection(3); // Last modified
 
     setRootIndex(model->index(mapsDir.absolutePath()));
-    
+
     header()->setStretchLastSection(false);
 #if QT_VERSION >= 0x050000
     header()->setSectionResizeMode(0, QHeaderView::Stretch);

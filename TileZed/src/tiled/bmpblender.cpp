@@ -45,13 +45,23 @@ using namespace Tiled::Internal;
 
 static QString STR_0Floor = QLatin1String("0_Floor");
 
+static QRegion expandedRegion(const QRegion &region, int margin)
+{
+    QRegion expanded;
+    for (const QRect &rect : region)
+        expanded += rect.adjusted(-margin, -margin, margin, margin);
+    return expanded;
+}
+
 BmpBlender::BmpBlender(QObject *parent) :
     QObject(parent),
     mMap(nullptr),
     mFakeTileGrid(nullptr),
     mInitTilesLater(true),
     mHack(false),
-    mBlendEdgesEverywhere(false)
+    mBlendEdgesEverywhere(false),
+    mUseBlendCandidateIndex(true),
+    mUseSparseWorkRegions(true)
 {
 }
 
@@ -61,7 +71,9 @@ BmpBlender::BmpBlender(Map *map, QObject *parent) :
     mFakeTileGrid(nullptr),
     mInitTilesLater(true),
     mHack(false),
-    mBlendEdgesEverywhere(false)
+    mBlendEdgesEverywhere(false),
+    mUseBlendCandidateIndex(true),
+    mUseSparseWorkRegions(true)
 {
     fromMap();
 }
@@ -150,21 +162,37 @@ void BmpBlender::flush(const MapRenderer *renderer, const QRect &rect, const QPo
     QElapsedTimer timer;
     timer.start();
     const int dirtyRectCount = dirty.rectCount();
-    const QRect work = dirty.boundingRect().adjusted(-2, -2, 2, 2);
-    imagesToTileGrids(work.left(), work.top(), work.right(), work.bottom());
-    addEdgeTiles(work.left(), work.top(), work.right(), work.bottom());
-    tileGridsToLayers(work.left(), work.top(), work.right(), work.bottom());
-
+    const QRegion work = (mUseSparseWorkRegions
+                          ? expandedRegion(dirty, 2)
+                          : QRegion(dirty.boundingRect().adjusted(
+                                        -2, -2, 2, 2)))
+            & QRect(QPoint(), mMap->size());
+    for (const QRect &workRect : work)
+        imagesToTileGrids(workRect.left(), workRect.top(),
+                          workRect.right(), workRect.bottom());
+    for (const QRect &workRect : work)
+        addEdgeTiles(workRect.left(), workRect.top(),
+                     workRect.right(), workRect.bottom());
+    bool layersRecreated = false;
+    for (const QRect &workRect : work) {
+        layersRecreated |= tileGridsToLayers(
+                    workRect.left(), workRect.top(),
+                    workRect.right(), workRect.bottom(), false);
+    }
+    if (layersRecreated)
+        emit this->layersRecreated();
+    emit regionAltered(work);
     const qint64 redrawMs = timer.elapsed();
     const qint64 totalMs = totalTimer.elapsed();
-    if (totalMs >= 250) {
+    if (totalMs >= 250 && !mHack) {
         qWarning() << "BMP-rule redraw was slow:"
                    << totalMs << "ms total,"
                    << initTilesMs << "ms tile initialization,"
                    << redrawMs << "ms region redraw,"
                    << "dirty rects" << dirtyRectCount
                    << "dirty bounds" << dirty.boundingRect()
-                   << "work bounds" << work
+                   << "work rects" << work.rectCount()
+                   << "work bounds" << work.boundingRect()
                    << "active rules"
                    << mRules.size() - mInactiveRuleCount
                    << "of" << mRules.size()
@@ -202,14 +230,29 @@ void BmpBlender::flush(const QRect &rect)
     QElapsedTimer timer;
     timer.start();
     const int dirtyRectCount = dirty.rectCount();
-    const QRect work = dirty.boundingRect().adjusted(-2, -2, 2, 2);
-    imagesToTileGrids(work.left(), work.top(), work.right(), work.bottom());
-    addEdgeTiles(work.left(), work.top(), work.right(), work.bottom());
-    tileGridsToLayers(work.left(), work.top(), work.right(), work.bottom());
-
+    const QRegion work = (mUseSparseWorkRegions
+                          ? expandedRegion(dirty, 2)
+                          : QRegion(dirty.boundingRect().adjusted(
+                                        -2, -2, 2, 2)))
+            & QRect(QPoint(), mMap->size());
+    for (const QRect &workRect : work)
+        imagesToTileGrids(workRect.left(), workRect.top(),
+                          workRect.right(), workRect.bottom());
+    for (const QRect &workRect : work)
+        addEdgeTiles(workRect.left(), workRect.top(),
+                     workRect.right(), workRect.bottom());
+    bool layersRecreated = false;
+    for (const QRect &workRect : work) {
+        layersRecreated |= tileGridsToLayers(
+                    workRect.left(), workRect.top(),
+                    workRect.right(), workRect.bottom(), false);
+    }
+    if (layersRecreated)
+        emit this->layersRecreated();
+    emit regionAltered(work);
     const qint64 redrawMs = timer.elapsed();
     const qint64 totalMs = totalTimer.elapsed();
-    if (totalMs >= 250) {
+    if (totalMs >= 250 && !mHack) {
         qWarning() << "BMP-rule whole-map redraw was slow:"
                    << totalMs << "ms total,"
                    << initTilesMs << "ms tile initialization,"
@@ -217,7 +260,8 @@ void BmpBlender::flush(const QRect &rect)
                    << "requested" << rect
                    << "dirty rects" << dirtyRectCount
                    << "dirty bounds" << dirty.boundingRect()
-                   << "work bounds" << work
+                   << "work rects" << work.rectCount()
+                   << "work bounds" << work.boundingRect()
                    << "active rules"
                    << mRules.size() - mInactiveRuleCount
                    << "of" << mRules.size()
@@ -229,18 +273,88 @@ void BmpBlender::flush(const QRect &rect)
 
 void BmpBlender::tilesetAdded(Tileset *ts)
 {
-    if (mTilesetNames.contains(ts->name())) {
-        mInitTilesLater = true;
-        mDirtyRegion = QRegion(0, 0, mMap->width(), mMap->height());
-    }
+    Q_UNUSED(ts)
+    tilesetCollectionChanged();
 }
 
 void BmpBlender::tilesetRemoved(const QString &tilesetName)
 {
-    if (mTilesetNames.contains(tilesetName)) {
-        mInitTilesLater = true;
-        mDirtyRegion = QRegion(0, 0, mMap->width(), mMap->height());
+    Q_UNUSED(tilesetName)
+    tilesetCollectionChanged();
+}
+
+bool BmpBlender::referencesTileset(const QString &tilesetName) const
+{
+    if (!mMap || tilesetName.isEmpty())
+        return false;
+
+    QSet<QString> aliasNames;
+    for (BmpAlias *alias : mMap->bmpSettings()->aliases()) {
+        if (!alias)
+            continue;
+        aliasNames += alias->name;
+        for (const QString &tileName : alias->tiles) {
+            QString referencedTileset;
+            int tileID;
+            if (BuildingEditor::BuildingTilesMgr::parseTileName(
+                        tileName, referencedTileset, tileID)
+                    && referencedTileset.compare(
+                        tilesetName, Qt::CaseInsensitive) == 0) {
+                return true;
+            }
+        }
     }
+
+    const auto references = [&aliasNames, &tilesetName](
+            const QString &tileName) {
+        if (tileName.isEmpty() || aliasNames.contains(tileName))
+            return false;
+        if (tileName.compare(tilesetName, Qt::CaseInsensitive) == 0)
+            return true;
+        QString referencedTileset;
+        int tileID;
+        return BuildingEditor::BuildingTilesMgr::parseTileName(
+                    tileName, referencedTileset, tileID)
+                && referencedTileset.compare(
+                    tilesetName, Qt::CaseInsensitive) == 0;
+    };
+
+    for (BmpRule *rule : mMap->bmpSettings()->rules()) {
+        if (!rule)
+            continue;
+        for (const QString &tileName : rule->tileChoices) {
+            if (references(tileName))
+                return true;
+        }
+    }
+
+    for (BmpBlend *blend : mMap->bmpSettings()->blends()) {
+        if (!blend)
+            continue;
+        if (references(blend->mainTile) || references(blend->blendTile))
+            return true;
+        for (const QString &tileName : blend->ExclusionList) {
+            if (references(tileName))
+                return true;
+        }
+        for (int index = 0; index < blend->exclude2.size(); index += 2) {
+            if (references(blend->exclude2.at(index)))
+                return true;
+        }
+    }
+    return false;
+}
+
+void BmpBlender::tilesetCollectionChanged()
+{
+    mTilesetByName.clear();
+    mTileByName.clear();
+    mKnownBlendTiles.clear();
+    mFloorTileToRule.clear();
+    mBlendCandidatesByLayer.clear();
+    mBlendExclude2Layers.clear();
+    fromMap();
+    recreate();
 }
 
 void BmpBlender::tilesToPixels(int x1, int y1, int x2, int y2)
@@ -283,7 +397,7 @@ bool BmpBlender::expectTile(const QString &layerName, int x, int y, Tile *tile)
         int index = x + y * mMap->width();
         if (mBlendGrids[layerName].contains(index)) {
             BlendWrapper *blendW = mBlendGrids[layerName][index];
-            return blendW->mBlendTiles.contains(tile);
+            return blendW->mBlendTileSet.contains(tile);
         }
     }
     return false;
@@ -369,6 +483,14 @@ static QStringList normalizeTileNames(const QStringList &tileNames)
 void BmpBlender::fromMap()
 {
     QSet<QString> tileNames;
+    QHash<QString,Tileset*> tilesetsByNormalizedName;
+    for (Tileset *tileset : TileMetaInfoMgr::instance()->tilesets()) {
+        if (tileset) {
+            tilesetsByNormalizedName.insert(
+                        BuildingEditor::BuildingTilesMgr::normalizeTileName(
+                            tileset->name()).toCaseFolded(), tileset);
+        }
+    }
 
     // We have to take care that any alias references exist, because when
     // loading or clearing Rules.txt the aliases are changed before the rules.
@@ -422,8 +544,9 @@ void BmpBlender::fromMap()
     mBlendsByLayer.clear();
     mBlendLayers.clear();
     mInactiveBlendCount = 0;
+    int blendOrder = 0;
     foreach (BmpBlend *blend, mMap->bmpSettings()->blends()) {
-        BlendWrapper *blendW = new BlendWrapper(blend);
+        BlendWrapper *blendW = new BlendWrapper(blend, blendOrder++);
         QStringList excludes;
         foreach (QString tileName, blend->ExclusionList) {
             if (!BuildingEditor::BuildingTilesMgr::legalTileName(tileName)) {
@@ -438,17 +561,9 @@ void BmpBlender::fromMap()
             QString tileName = blend->exclude2[i];
             Tileset *wholeSheet =
                     TileMetaInfoMgr::instance()->tileset(tileName);
-            if (!wholeSheet) {
-                for (Tileset *tileset :
-                     TileMetaInfoMgr::instance()->tilesets()) {
-                    if (tileset && BuildingEditor::BuildingTilesMgr::
-                            normalizeTileName(tileset->name()).compare(
-                                tileName, Qt::CaseInsensitive) == 0) {
-                        wholeSheet = tileset;
-                        break;
-                    }
-                }
-            }
+            if (!wholeSheet)
+                wholeSheet = tilesetsByNormalizedName.value(
+                            tileName.toCaseFolded(), nullptr);
             if (wholeSheet) {
                 // This selector represents every tile in the named sheet.
                 // Keep the numeric sheet suffix out of tile-name
@@ -484,17 +599,13 @@ QList<Tile *>& BmpBlender::tileNameToTiles(const QString &name, QList<Tile *>& t
         tiles += nullptr;
     else if (mAliasByName.contains(name))
         tiles += tileNamesToTiles(mAliasByName[name]->mTiles);
+    else if (mTileByName.contains(name)) {
+        if (Tile *tile = mTileByName[name])
+            tiles += tile;
+    }
     else {
-        Tileset *selectedTileset = nullptr;
-        if (mMap) {
-            for (Tileset *tileset : mMap->tilesets()) {
-                if (tileset && tileset->name().compare(
-                            name, Qt::CaseInsensitive) == 0) {
-                    selectedTileset = tileset;
-                    break;
-                }
-            }
-        }
+        Tileset *selectedTileset = mTilesetByName.value(
+                    name.toCaseFolded(), nullptr);
         if (selectedTileset) {
             if (selectedTileset->isMissing())
                 return tiles;
@@ -502,25 +613,6 @@ QList<Tile *>& BmpBlender::tileNameToTiles(const QString &name, QList<Tile *>& t
                  index < selectedTileset->tileCount(); ++index) {
                 if (Tile *tile = selectedTileset->tileAt(index))
                     tiles += tile;
-            }
-        } else if (mTileByName.contains(name)) {
-            if (Tile *tile = mTileByName[name])
-                tiles += tile;
-        } else {
-            for (Tileset *tileset : mMap->tilesets()) {
-                if (tileset && BuildingEditor::BuildingTilesMgr::
-                        normalizeTileName(tileset->name()).compare(
-                            name, Qt::CaseInsensitive) == 0) {
-                    selectedTileset = tileset;
-                    break;
-                }
-            }
-            if (selectedTileset && !selectedTileset->isMissing()) {
-                for (int index = 0;
-                     index < selectedTileset->tileCount(); ++index) {
-                    if (Tile *tile = selectedTileset->tileAt(index))
-                        tiles += tile;
-                }
             }
         }
     }
@@ -545,8 +637,14 @@ QList<Tile*> BmpBlender::tileNamesToTiles(const QStringList &names)
 void BmpBlender::initTiles()
 {
     QMap<QString,Tileset*> tilesets;
-    foreach (Tileset *ts, mMap->tilesets())
+    mTilesetByName.clear();
+    foreach (Tileset *ts, mMap->tilesets()) {
         tilesets[ts->name()] = ts;
+        mTilesetByName.insert(ts->name().toCaseFolded(), ts);
+        mTilesetByName.insert(
+                    BuildingEditor::BuildingTilesMgr::normalizeTileName(
+                        ts->name()).toCaseFolded(), ts);
+    }
 
     mTilesetNames.clear();
     mTileByName.clear();
@@ -585,17 +683,31 @@ void BmpBlender::initTiles()
     }
 
     mBlendsByLayer.clear();
+    mBlendCandidatesByLayer.clear();
+    mBlendCandidateSerial = 0;
     mBlendLayers.clear();
     mInactiveBlendCount = 0;
     mBlendExclude2Layers.clear();
     foreach (BlendWrapper *blendW, mBlendList) {
+        blendW->mCandidateMark = 0;
         blendW->mMainTiles = tileNameToTiles(blendW->mBlend->mainTile).toVector();
         blendW->mBlendTiles = tileNameToTiles(blendW->mBlend->blendTile).toVector();
         blendW->mExcludeTiles = tileNamesToTiles(blendW->mBlend->ExclusionList).toVector();
         blendW->mExclude2Tiles.clear();
+        blendW->mMainTileSet = QSet<Tile*>(blendW->mMainTiles.begin(),
+                                          blendW->mMainTiles.end());
+        blendW->mBlendTileSet = QSet<Tile*>(blendW->mBlendTiles.begin(),
+                                           blendW->mBlendTiles.end());
+        blendW->mExcludeTileSet = QSet<Tile*>(blendW->mExcludeTiles.begin(),
+                                             blendW->mExcludeTiles.end());
+        blendW->mExclude2TileSets.clear();
         QStringList exclude2Layers;
         for (int i = 0; i < blendW->mBlend->exclude2.size(); i += 2) {
-            blendW->mExclude2Tiles += tileNameToTiles(blendW->mBlend->exclude2[i]).toVector();
+            const QVector<Tile*> exclude2Tiles =
+                    tileNameToTiles(blendW->mBlend->exclude2[i]).toVector();
+            blendW->mExclude2Tiles += exclude2Tiles;
+            blendW->mExclude2TileSets += QSet<Tile*>(exclude2Tiles.begin(),
+                                                    exclude2Tiles.end());
             exclude2Layers += blendW->mBlend->exclude2[i + 1];
         }
         if (blendW->mMainTiles.isEmpty()
@@ -606,6 +718,12 @@ void BmpBlender::initTiles()
         for (const QString &layerName : exclude2Layers)
             mBlendExclude2Layers += layerName;
         mBlendsByLayer[blendW->mBlend->targetLayer] += blendW;
+        if (mUseBlendCandidateIndex) {
+            for (Tile *mainTile : blendW->mMainTileSet) {
+                mBlendCandidatesByLayer[blendW->mBlend->targetLayer]
+                        [mainTile] += blendW;
+            }
+        }
         if (!mBlendLayers.contains(blendW->mBlend->targetLayer))
             mBlendLayers += blendW->mBlend->targetLayer;
     }
@@ -617,7 +735,8 @@ void BmpBlender::initTiles()
                 << mBlendList.size() << "blends";
     }
 
-    updateWarnings();
+    if (!mHack)
+        updateWarnings();
 
     // This list is for the benefit of PaintBMP().
     // It is a list of all known blend tiles.
@@ -628,7 +747,7 @@ void BmpBlender::initTiles()
                     || blendW->mBlendTiles.isEmpty()) {
                 continue;
             }
-            mKnownBlendTiles += QSet<Tile*>(blendW->mBlendTiles.begin(), blendW->mBlendTiles.end());
+            mKnownBlendTiles += blendW->mBlendTileSet;
         }
     }
 }
@@ -903,7 +1022,7 @@ void BmpBlender::addEdgeTiles(int x1, int y1, int x2, int y2)
                         if (mapLayers.contains(blendW->mBlend->exclude2[i + 1])) {
                             TileLayer *mapLayer = mapLayers[blendW->mBlend->exclude2[i + 1]];
                             if (Tile *tile = mapLayer->cellAt(x, y).tile) {
-                                if (blendW->mExclude2Tiles[i/2].contains(tile)) {
+                                if (blendW->mExclude2TileSets[i/2].contains(tile)) {
                                     blendW = nullptr;
                                     break;
                                 }
@@ -933,7 +1052,8 @@ void BmpBlender::addEdgeTiles(int x1, int y1, int x2, int y2)
     }
 }
 
-void BmpBlender::tileGridsToLayers(int x1, int y1, int x2, int y2)
+bool BmpBlender::tileGridsToLayers(int x1, int y1, int x2, int y2,
+                                   bool notify)
 {
     bool recreated = false;
     if (mTileLayers.isEmpty()) {
@@ -974,7 +1094,7 @@ void BmpBlender::tileGridsToLayers(int x1, int y1, int x2, int y2)
                     if (blendGrid.contains(index)) {
                         BlendWrapper *blendW = blendGrid[index];
                         Tile *tile = mapLayer->cellAt(x, y).tile;
-                        if (blendW->mBlendTiles.contains(tile)) {
+                        if (blendW->mBlendTileSet.contains(tile)) {
                             tl->setCell(x, y, emptyCell);
                             continue;
                         }
@@ -985,13 +1105,15 @@ void BmpBlender::tileGridsToLayers(int x1, int y1, int x2, int y2)
         }
     }
 
-    if (recreated) {
+    if (recreated && notify) {
         emit layersRecreated();
-        updateWarnings();
     }
 
-    QRect r(x1, y1, x2 - x1 + 1, y2 - y1 + 1);
-    emit regionAltered(r);
+    if (notify) {
+        QRect r(x1, y1, x2 - x1 + 1, y2 - y1 + 1);
+        emit regionAltered(r);
+    }
+    return recreated;
 }
 
 QString BmpBlender::resolveAlias(const QString &tileName, int randForPos) const
@@ -1163,66 +1285,93 @@ Tile *BmpBlender::getNeighbouringTile(int x, int y)
     return tile;
 }
 
-BmpBlender::BlendWrapper *BmpBlender::getBlendRule(int x, int y, Tile *tile,
+BmpBlender::BlendWrapper *BmpBlender::getBlendRule(int, int, Tile *tile,
                                    const QString &layer,
                                    const QVector<Tile*> &neighbors)
 {
     if ((mBlendEdgesEverywhere == false) && (tile == nullptr))
         return nullptr;
 
-    BlendWrapper *lastBlend = nullptr;
-
-#define NEIGHBOR(X,Y) neighbors[((X) - x + 1) + ((Y) - y + 1) * 3]
-
-    foreach (BlendWrapper *blendW, mBlendsByLayer[layer]) {
-        QVector<Tile*> &mainTiles = blendW->mMainTiles;
-        if (mainTiles.contains(tile))
-            continue;
-        if (blendW->mExcludeTiles.contains(tile))
-            continue;
-        bool bPass = false;
+    const auto neighborAt = [&neighbors](int dx, int dy) {
+        return neighbors[(dx + 1) + (dy + 1) * 3];
+    };
+    const auto passes = [&neighborAt, tile](BlendWrapper *blendW) {
+        const QSet<Tile*> &mainTiles = blendW->mMainTileSet;
+        if (mainTiles.contains(tile)
+                || blendW->mExcludeTileSet.contains(tile)) {
+            return false;
+        }
         switch (blendW->mBlend->dir) {
         case BmpBlend::N:
-            bPass = mainTiles.contains(NEIGHBOR(x, y - 1)) &&
-                    !mainTiles.contains(NEIGHBOR(x - 1, y)) &&
-                    !mainTiles.contains(NEIGHBOR(x + 1, y));
-            break;
+            return mainTiles.contains(neighborAt(0, -1))
+                    && !mainTiles.contains(neighborAt(-1, 0))
+                    && !mainTiles.contains(neighborAt(1, 0));
         case BmpBlend::S:
-            bPass = mainTiles.contains(NEIGHBOR(x, y + 1)) &&
-                    !mainTiles.contains(NEIGHBOR(x - 1, y)) &&
-                    !mainTiles.contains(NEIGHBOR(x + 1, y));
-            break;
+            return mainTiles.contains(neighborAt(0, 1))
+                    && !mainTiles.contains(neighborAt(-1, 0))
+                    && !mainTiles.contains(neighborAt(1, 0));
         case BmpBlend::E:
-            bPass = mainTiles.contains(NEIGHBOR(x + 1, y)) &&
-                    !mainTiles.contains(NEIGHBOR(x, y - 1)) &&
-                    !mainTiles.contains(NEIGHBOR(x, y + 1));
-            break;
+            return mainTiles.contains(neighborAt(1, 0))
+                    && !mainTiles.contains(neighborAt(0, -1))
+                    && !mainTiles.contains(neighborAt(0, 1));
         case BmpBlend::W:
-            bPass = mainTiles.contains(NEIGHBOR(x - 1, y)) &&
-                    !mainTiles.contains(NEIGHBOR(x, y - 1)) &&
-                    !mainTiles.contains(NEIGHBOR(x, y + 1));
-            break;
+            return mainTiles.contains(neighborAt(-1, 0))
+                    && !mainTiles.contains(neighborAt(0, -1))
+                    && !mainTiles.contains(neighborAt(0, 1));
         case BmpBlend::NE:
-            bPass = mainTiles.contains(NEIGHBOR(x, y - 1)) &&
-                    mainTiles.contains(NEIGHBOR(x + 1, y));
-            break;
+            return mainTiles.contains(neighborAt(0, -1))
+                    && mainTiles.contains(neighborAt(1, 0));
         case BmpBlend::SE:
-            bPass = mainTiles.contains(NEIGHBOR(x, y + 1)) &&
-                    mainTiles.contains(NEIGHBOR(x + 1, y));
-            break;
+            return mainTiles.contains(neighborAt(0, 1))
+                    && mainTiles.contains(neighborAt(1, 0));
         case BmpBlend::NW:
-            bPass = mainTiles.contains(NEIGHBOR(x, y - 1)) &&
-                    mainTiles.contains(NEIGHBOR(x - 1, y));
-            break;
+            return mainTiles.contains(neighborAt(0, -1))
+                    && mainTiles.contains(neighborAt(-1, 0));
         case BmpBlend::SW:
-            bPass = mainTiles.contains(NEIGHBOR(x, y + 1)) &&
-                    mainTiles.contains(NEIGHBOR(x - 1, y));
-            break;
+            return mainTiles.contains(neighborAt(0, 1))
+                    && mainTiles.contains(neighborAt(-1, 0));
         default:
-            break;
+            return false;
         }
-        if (bPass)
-            lastBlend = blendW;
+    };
+
+    if (!mUseBlendCandidateIndex) {
+        BlendWrapper *lastBlend = nullptr;
+        for (BlendWrapper *blendW : mBlendsByLayer[layer]) {
+            if (passes(blendW))
+                lastBlend = blendW;
+        }
+        return lastBlend;
+    }
+
+    const auto layerIt = mBlendCandidatesByLayer.constFind(layer);
+    if (layerIt == mBlendCandidatesByLayer.constEnd())
+        return nullptr;
+
+    if (++mBlendCandidateSerial == 0) {
+        for (BlendWrapper *blendW : mBlendList)
+            blendW->mCandidateMark = 0;
+        ++mBlendCandidateSerial;
+    }
+
+    BlendWrapper *lastBlend = nullptr;
+    int lastOrder = -1;
+    const QHash<Tile*,QVector<BlendWrapper*> > &byMainTile = layerIt.value();
+    for (Tile *neighbor : neighbors) {
+        const auto candidatesIt = byMainTile.constFind(neighbor);
+        if (candidatesIt == byMainTile.constEnd())
+            continue;
+        for (BlendWrapper *blendW : candidatesIt.value()) {
+            if (blendW->mCandidateMark == mBlendCandidateSerial)
+                continue;
+            blendW->mCandidateMark = mBlendCandidateSerial;
+            if (blendW->mOrder <= lastOrder)
+                continue;
+            if (passes(blendW)) {
+                lastBlend = blendW;
+                lastOrder = blendW->mOrder;
+            }
+        }
     }
 
     return lastBlend;

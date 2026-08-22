@@ -387,6 +387,7 @@ signals:
 #endif
 
     void tilesetAdded(int index, Tiled::Tileset *tileset);
+    void tilesetAboutToBeRemoved(Tiled::Tileset *tileset);
     void tilesetRemoved(Tiled::Tileset *tileset);
     void tilesetMoved(int from, int to);
     void tilesetFileNameChanged(Tiled::Tileset *tileset);

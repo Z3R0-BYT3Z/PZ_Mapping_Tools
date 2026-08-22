@@ -1095,8 +1095,8 @@ QString BuildingTilesDialog::changeFurnitureTile(FurnitureTile *ftile,
     QSize oldSize = ftile->size();
     BuildingTile *btile = tileName.isEmpty() ? 0 : BuildingTilesMgr::instance()->get(tileName);
     if (btile) {
-        Tiled::Tile *tile = BuildingTilesMgr::instance()->tileFor(btile);
-        if (BuildingTilesMgr::isUnavailableTile(tile))
+        Tile *tile = BuildingTilesMgr::instance()->tileFor(btile);
+        if (!tile || !tile->hasResolvedSource())
             btile = 0;
     }
     ftile->setTile(x, y, btile);
@@ -1190,7 +1190,7 @@ void BuildingTilesDialog::setCategoryList()
 }
 
 void BuildingTilesDialog::setCategoryTiles()
-{ 
+{
     bool expertMode = mExpertMode && mCategory && !mCategory->shadowImage().isNull();
 #if 1
     QList<BuildingTileEntry*> entries;
@@ -2004,8 +2004,12 @@ void BuildingTilesDialog::tilesetChanged(Tileset *tileset)
     }
 
     int row = TileMetaInfoMgr::instance()->indexOf(tileset);
-    if (QListWidgetItem *item = ui->tilesetList->item(row))
-        item->setForeground(tileset->isMissing() ? Qt::red : QBrush());
+    if (QListWidgetItem *item = ui->tilesetList->item(row)) {
+        if (tileset->isMissing())
+            item->setForeground(Qt::red);
+        else
+            item->setData(Qt::ForegroundRole, QVariant());
+    }
 }
 
 void BuildingTilesDialog::undoTextChanged(const QString &text)

@@ -137,16 +137,13 @@ QString BuildingMap::buildingTileAt(int x, int y, const QList<bool> visibleLevel
                         test = tlBlend->cellAt(tx, ty).tile; // building tile
                     if (test) {
                         Tile *realTile = test;
-                        if (test->properties().contains(QLatin1String("invisible"))) {
+                        if (test->properties().contains(QLatin1String("invisible"))
+                                || (test->image().isNull()
+                                    && test->hasResolvedSource())) {
                             test = TilesetManager::instance()->invisibleTile();
                         }
-                        if (test->image().isNull()) {
-                            Tileset *tileset = test->tileset();
-                            if (!tileset || tileset->isMissing()
-                                    || !tileset->isLoaded())
-                                test = TilesetManager::instance()->missingTile();
-                            else
-                                continue;
+                        if (test->image().isNull() && !test->hasResolvedSource()) {
+                            test = TilesetManager::instance()->missingTile();
                         }
                         QRect imageBox(test->offset(), test->image().size());
                         QPoint p = QPoint(x, y) - (tileBox.bottomLeft().toPoint() - QPoint(0, test->height()));
@@ -673,7 +670,8 @@ int BuildingMap::defaultOrientation()
 
 bool BuildingMap::isTilesetUsed(Tileset *tileset)
 {
-    return mMap->isTilesetUsed(tileset) || mBlendMap->isTilesetUsed(tileset);
+    return (mMap && mMap->isTilesetUsed(tileset)) ||
+            (mBlendMap && mBlendMap->isTilesetUsed(tileset));
 }
 
 void BuildingMap::buildingRotated()

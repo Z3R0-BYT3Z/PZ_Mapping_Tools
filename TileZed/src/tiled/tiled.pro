@@ -36,6 +36,8 @@ greaterThan(QT_MAJOR_VERSION, 5) {
 # For 'breeze' style using SVG icons
 QT += svg
 
+INCLUDEPATH += $$top_srcdir/../shared
+
 DEFINES += QT_NO_CAST_FROM_ASCII \
     QT_NO_CAST_TO_ASCII
 DEFINES += ZOMBOID
@@ -63,8 +65,8 @@ macx {
 #RCC_DIR = .rcc
 #OBJECTS_DIR = .obj
 
-SOURCES += aboutdialog.cpp \
-    nightpreviewitem.cpp \
+SOURCES += ../../../shared/partialchunkselection.cpp \
+    aboutdialog.cpp \
     BuildingEditor/attributeeditmode.cpp \
     BuildingEditor/attributeeditmode_p.cpp \
     BuildingEditor/buildingattributesdock.cpp \

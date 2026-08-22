@@ -34,12 +34,15 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QSettings>
 #include <QSlider>
 #include <QToolButton>
 #include <QToolBar>
 
 using namespace Tiled;
 using namespace Tiled::Internal;
+
+static const char *KEY_LAYER_VISIBILITY = "LayerDocks/Visibility";
 
 ZLevelsDock::ZLevelsDock(QWidget *parent) :
     QDockWidget(parent),
@@ -150,6 +153,13 @@ void ZLevelsDock::setMapDocument(MapDocument *mapDoc)
                 this, &ZLevelsDock::updateOpacitySlider);
         connect(mMapDocument, &MapDocument::currentLayerIndexChanged,
                 this, &ZLevelsDock::updateVisibilitySlider);
+        const int savedVisibility = qBound(
+                    0,
+                    QSettings().value(
+                        QLatin1String(KEY_LAYER_VISIBILITY),
+                        mMapDocument->map()->layerCount()).toInt(),
+                    mMapDocument->map()->layerCount());
+        setTopmostVisibleLayer(savedVisibility);
     }
 
     updateOpacitySlider();
@@ -231,6 +241,8 @@ void ZLevelsDock::setTopmostVisibleLayer(int layerIndex)
 {
     if (!mMapDocument)
         return;
+
+    QSettings().setValue(QLatin1String(KEY_LAYER_VISIBILITY), layerIndex);
 
     int index = 0;
     foreach (Layer *layer, mMapDocument->map()->layers()) {

@@ -425,7 +425,8 @@ CopyPasteDialog::~CopyPasteDialog()
 
 World *CopyPasteDialog::toWorld() const
 {
-    World *world = new World(mWorld->width(), mWorld->height());
+    World *world = new World(mWorld->width(), mWorld->height(),
+                             mWorld->gridFormat());
 
     if (ui->worldCat->item(PropertyEnums)->checkState() == Qt::Checked) {
         Item *root = mWorldRootItem[PropertyEnums];
@@ -580,12 +581,30 @@ World *CopyPasteDialog::toWorld() const
                         ObjectItem *objItem = item3->asObjectItem();
                         if (!objItem->mChecked)
                             continue;
-                        // FIXME: Objects have Properties/Templates too
                         WorldCellObject *obj = new WorldCellObject(cell,
                                                                    objItem->mObject);
                         cell->insertObject(0, obj);
                     }
                 }
+            }
+        }
+    }
+
+    if (ui->cellCat->item(InGameMapFeatures)->checkState() == Qt::Checked) {
+        Item *root = mCellRootItem[InGameMapFeatures];
+        foreach (Item *item0, root->children()) {
+            CellItem *cellItem = item0->asCellItem();
+            if (!cellItem->mChecked)
+                continue;
+            WorldCell *cell = world->cellAt(cellItem->mCell->x(),
+                                            cellItem->mCell->y());
+            for (InGameMapFeature *source :
+                 cellItem->mCell->inGameMap().features()) {
+                InGameMapFeature *feature = new InGameMapFeature(
+                            &cell->inGameMap());
+                feature->mGeometry = source->mGeometry;
+                feature->mProperties = source->mProperties;
+                cell->inGameMap().features().append(feature);
             }
         }
     }
@@ -685,6 +704,7 @@ void CopyPasteDialog::setup()
     mCellRootItem[Lots] = new Item();
     mCellRootItem[Map] = new Item();
     mCellRootItem[Objects] = new Item();
+    mCellRootItem[InGameMapFeatures] = new Item();
     mCellRootItem[Properties] = new Item();
 
     foreach (WorldCell *cell, mCells) {
@@ -717,6 +737,9 @@ void CopyPasteDialog::setup()
         mCellRootItem[Lots]->insertChild(-1, cellItem);
         foreach (WorldCellLot *lot, cell->lots())
             cellItem->itemForLevel(lot->level())->insertChild(0, new LotItem(lot));
+
+        cellItem = new CellItem(cell);
+        mCellRootItem[InGameMapFeatures]->insertChild(-1, cellItem);
     }
 }
 
@@ -1004,6 +1027,27 @@ void CopyPasteDialog::showCellObjects()
     v->expandAll();
 }
 
+void CopyPasteDialog::showCellInGameMapFeatures()
+{
+    QTreeWidget *v = ui->cellTree;
+    v->clear();
+    Item *root = mCellRootItem[InGameMapFeatures];
+    root->setViewItem(0);
+    foreach (Item *item, root->children()) {
+        CellItem *cellItem = item->asCellItem();
+        WorldCell *cell = cellItem->mCell;
+        const int count = cell->inGameMap().features().size();
+        if (!count)
+            continue;
+        addToTree(v, 0, -1, cellItem,
+                  tr("Cell %1,%2 (%3 feature%4)")
+                  .arg(cell->displayPos().x())
+                  .arg(cell->displayPos().y())
+                  .arg(count)
+                  .arg(count == 1 ? QString() : QLatin1String("s")));
+    }
+}
+
 void CopyPasteDialog::showCellMap()
 {
     QTreeWidget *v = ui->cellTree;
@@ -1041,6 +1085,9 @@ void CopyPasteDialog::cellCategoryChanged(int index)
         break;
     case Objects:
         showCellObjects();
+        break;
+    case InGameMapFeatures:
+        showCellInGameMapFeatures();
         break;
     case Map:
         showCellMap();

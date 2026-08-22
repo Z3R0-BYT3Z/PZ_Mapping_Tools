@@ -292,6 +292,7 @@ class SelectMoveObjectTool : public BaseCellSceneTool
 public:
     static SelectMoveObjectTool *instance();
     static void deleteInstance();
+    static bool validateContextMenuDispatch(QString *error);
 
     void deactivate() override;
 
@@ -727,7 +728,7 @@ public:
     CreatePointObjectTool()
         : AbstractCreatePolygonObjectTool(ObjectGeometryType::Point)
     {
-        setIcon(QIcon(QStringLiteral(":/images/22x22/road-tool-edit.png")));
+        setIcon(QIcon(QStringLiteral(":/images/24x24/object-point-tool.svg")));
     }
 };
 
@@ -739,7 +740,7 @@ public:
     CreatePolygonObjectTool()
         : AbstractCreatePolygonObjectTool(ObjectGeometryType::Polygon)
     {
-        setIcon(QIcon(QStringLiteral(":/images/24x24/insert-polygon.png")));
+        setIcon(QIcon(QStringLiteral(":/images/24x24/object-polygon-tool.svg")));
     }
 };
 
@@ -751,7 +752,7 @@ public:
     CreatePolylineObjectTool()
         : AbstractCreatePolygonObjectTool(ObjectGeometryType::Polyline)
     {
-        setIcon(QIcon(QStringLiteral(":/images/24x24/insert-polyline.png")));
+        setIcon(QIcon(QStringLiteral(":/images/24x24/object-polyline-tool.svg")));
     }
 };
 
@@ -1023,8 +1024,11 @@ public:
     explicit PasteCellsTool();
     ~PasteCellsTool();
 
+    static bool validateCellPastePlacement(QString *summary, QString *error);
+
     void activate();
     void deactivate();
+    void restart();
 
     void keyPressEvent(QKeyEvent *event);
     void mousePressEvent(QGraphicsSceneMouseEvent *event);
@@ -1044,12 +1048,24 @@ public slots:
 
 private:
     void startMoving();
-    void updateMovingItems(const QPointF &pos, Qt::KeyboardModifiers modifiers);
-    void pasteCells(const QPointF &pos);
+    bool updateDropPosition(const QPointF &pos);
+    bool confirmOccupiedTargets() const;
+    bool pasteCells();
     void cancelMoving();
+    static QPoint topLeftCell(const QVector<QPoint> &cellPositions,
+                              const QPoint &fallback);
+    static QPoint boundedDropCell(const QVector<QPoint> &cellPositions,
+                                  const QPoint &sourceCell,
+                                  const QPoint &requestedDrop,
+                                  const QRect &worldBounds);
+    static QPoint pastedCellPosition(const QPoint &cellPosition,
+                                     const QPoint &sourceCell,
+                                     const QPoint &dropCell);
 
+    QPoint mSourceCellPos;
     QPointF mStartScenePos;
     QPoint mDropTilePos;
+    QVector<QPoint> mSourceCellPositions;
     QList<PasteCellItem*> mDnDItems;
     static PasteCellsTool *mInstance;
 };

@@ -18,6 +18,7 @@
 #include "newbuildingdialog.h"
 #include "ui_newbuildingdialog.h"
 
+#include "building.h"
 #include "buildingeditorwindow.h"
 #include "buildingpreferences.h"
 #include "buildingtemplates.h"
@@ -33,6 +34,9 @@ NewBuildingDialog::NewBuildingDialog(QWidget *parent) :
     ui(new Ui::NewBuildingDialog)
 {
     ui->setupUi(this);
+
+    ui->width->setMaximum(MAX_BUILDING_DIMENSION);
+    ui->height->setMaximum(MAX_BUILDING_DIMENSION);
 
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
 

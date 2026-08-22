@@ -56,7 +56,7 @@ class FurnitureTiles;
 class BuildingTilesDialog : public QDialog
 {
     Q_OBJECT
-    
+
 public:
     static BuildingTilesDialog *instance();
     static void deleteInstance();

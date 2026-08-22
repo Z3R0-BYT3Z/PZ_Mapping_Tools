@@ -60,7 +60,7 @@ class CategoryDock : public QDockWidget
     Q_OBJECT
 public:
     CategoryDock(QWidget *parent = 0);
-    
+
     Building *currentBuilding() const;
     Room *currentRoom() const;
 
@@ -69,7 +69,7 @@ public:
     bool validateAllTileCategories();
 
 signals:
-    
+
 private slots:
     void currentDocumentChanged(BuildingEditor::BuildingDocument *doc);
     void catalogLoaded();

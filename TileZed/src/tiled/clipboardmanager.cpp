@@ -70,11 +70,12 @@ void ClipboardManager::setMap(const Map *map)
     mClipboard->setMimeData(mimeData);
 }
 
-void ClipboardManager::copySelection(const MapDocument *mapDocument)
+bool ClipboardManager::copySelection(const MapDocument *mapDocument,
+                                     const TileSelectionScope *scope)
 {
     const Layer *currentLayer = mapDocument->currentLayer();
     if (!currentLayer)
-        return;
+        return false;
 
     const Map *map = mapDocument->map();
     const QRegion &tileSelection = mapDocument->tileSelection();
@@ -83,9 +84,56 @@ void ClipboardManager::copySelection(const MapDocument *mapDocument)
     Layer *copyLayer = 0;
 
     if (!tileSelection.isEmpty() && tileLayer) {
-        // Copy the selected part of the layer
-        copyLayer = tileLayer->copy(tileSelection.translated(-tileLayer->x(),
-                                                             -tileLayer->y()));
+        QList<TileLayer*> sourceLayers;
+        const QList<TileLayer*> mapTileLayers = map->tileLayers();
+        for (TileLayer *candidate : mapTileLayers) {
+            const bool sameLevel = candidate->level() == tileLayer->level();
+            if (scope && scope->levelMode() == TileSelectionScope::CurrentLevel &&
+                    !sameLevel) {
+                continue;
+            }
+            if (!scope && candidate != tileLayer)
+                continue;
+            const bool currentLayer = candidate == tileLayer ||
+                    (scope && scope->levelMode() ==
+                     TileSelectionScope::AllLevels &&
+                     candidate->name() == tileLayer->name());
+            if (scope && !scope->includesLayer(candidate->name(),
+                                               candidate->isVisible(),
+                                               currentLayer)) {
+                continue;
+            }
+            sourceLayers.append(candidate);
+        }
+        if (sourceLayers.isEmpty())
+            return false;
+
+        QRect bounds = tileSelection.boundingRect();
+        Map copyMap(map->orientation(),
+                    bounds.width(), bounds.height(),
+                    map->tileWidth(), map->tileHeight());
+        copyMap.setProperty(QStringLiteral("pz.selection.kind"),
+                            QStringLiteral("multi-layer"));
+        copyMap.setProperty(QStringLiteral("pz.selection.anchorLevel"),
+                            QString::number(tileLayer->level()));
+
+        for (TileLayer *source : sourceLayers) {
+            QRegion localSelection = tileSelection.translated(-source->x(),
+                                                              -source->y());
+            TileLayer *copy = source->copy(localSelection);
+            copy->setName(source->name());
+            copy->setLevel(source->level());
+            copy->setVisible(source->isVisible());
+            copy->setOpacity(source->opacity());
+            for (Tileset *tileset : copy->usedTilesets()) {
+                if (!copyMap.tilesets().contains(tileset))
+                    copyMap.addTileset(tileset);
+            }
+            copyMap.addLayer(copy);
+        }
+
+        setMap(&copyMap);
+        return true;
     } else if (!selectedObjects.isEmpty()) {
         // Create a new object group with clones of the selected objects
         ObjectGroup *objectGroup = new ObjectGroup;
@@ -93,7 +141,7 @@ void ClipboardManager::copySelection(const MapDocument *mapDocument)
             objectGroup->addObject(mapObject->clone());
         copyLayer = objectGroup;
     } else {
-        return;
+        return false;
     }
 
     // Create a temporary map to write to the clipboard
@@ -108,6 +156,7 @@ void ClipboardManager::copySelection(const MapDocument *mapDocument)
     copyMap.addLayer(copyLayer);
 
     setMap(&copyMap);
+    return false;
 }
 
 void ClipboardManager::updateHasMap()

@@ -34,21 +34,33 @@
 #include "document.h"
 #include "bmptotmx.h"
 #include "biomemapimageprocessor.h"
+#include "biomemapitem.h"
+#include "osmterrainimportdialog.h"
+#include "osmterrainimporter.h"
+#include "otherworldsdialog.h"
 #include "cellscene.h"
 #include "defaultsfile.h"
+#include "expectedpropertiesdialog.h"
+#include "scenetools.h"
 #include "toolmanager.h"
 #include "preferences.h"
 #include "mapimagemanager.h"
 #include "mapmanager.h"
 #include "lotfilesmanager256.h"
+#include "luawriter.h"
 #include "progress.h"
 #include "tilemetainfomgr.h"
 #include "tilesetmanager.h"
+#include "vehiclemeshpreview.h"
 #include "streetnamesdock.h"
 #include "InGameMap/ingamemapreader.h"
+#include "InGameMap/ingamemapfeaturegenerator.h"
 #include "InGameMap/ingamemapwriterbinary.h"
 #include "world.h"
 #include "worlddocument.h"
+#include "worldobjectvalidation.h"
+#include "worldscene.h"
+#include "worldview.h"
 #include "zlevelrenderer.h"
 #include "worldgenpreviewdialog.h"
 #include "tilesetcleanupdialog.h"
@@ -88,8 +100,104 @@ int main(int argc, char *argv[])
     QString renderWorldGenPreviewOutput;
     QString auditTilesetCleanupPath;
     QString rebuildTilesetCatalogPath;
+    QString validateNative256RoomDefsTmx;
+    QString validateInGameMapBuildingGeneration;
+    QString validateWorldMapOverlays;
     bool validateTilesetCleanup = false;
+    bool validateCellMoveCoordinates = false;
     for (const QString &argument : commandLineArguments) {
+        if (argument == QLatin1String(
+                    "--validate-spawnpoint-export")) {
+            QString summary;
+            QString error;
+            if (!LuaWriter::validateSpawnPointExport(&summary, &error)) {
+                qCritical().noquote()
+                        << "SpawnPoint export validation failed:" << error;
+                return 55;
+            }
+            qInfo().noquote()
+                    << "SpawnPoint export validation passed:" << summary;
+            return 0;
+        }
+        if (argument == QLatin1String(
+                    "--validate-zone-export")) {
+            QString summary;
+            QString error;
+            if (!LuaWriter::validateZoneExport(&summary, &error)) {
+                qCritical().noquote()
+                        << "Zone export validation failed:" << error;
+                return 56;
+            }
+            qInfo().noquote()
+                    << "Zone export validation passed:" << summary;
+            return 0;
+        }
+        if (argument == QLatin1String(
+                    "--validate-linked-world-projects")) {
+            QString summary;
+            QString error;
+            if (!OtherWorldsDialog::validateWorkflow(&summary, &error)) {
+                qCritical().noquote()
+                        << "Linked-world validation failed:" << error;
+                return 53;
+            }
+            qInfo().noquote()
+                    << "Linked-world validation passed:" << summary;
+            return 0;
+        }
+        if (argument == QLatin1String(
+                    "--validate-bmp-metadata-only")) {
+            QString summary;
+            QString error;
+            if (!BMPToTMX::validateMetadataOnly(&summary, &error)) {
+                qCritical().noquote()
+                        << "BMP to TMX metadata-only validation failed:"
+                        << error;
+                return 41;
+            }
+            qInfo().noquote()
+                    << "BMP to TMX metadata-only validation passed:"
+                    << summary;
+            return 0;
+        }
+        const QString nativeRoomDefsPrefix =
+                QLatin1String("--validate-native-256-roomdefs=");
+        if (argument.startsWith(nativeRoomDefsPrefix)) {
+            validateNative256RoomDefsTmx =
+                    argument.mid(nativeRoomDefsPrefix.size());
+            continue;
+        }
+        const QString buildingGenerationPrefix =
+                QLatin1String("--validate-ingamemap-building-generation=");
+        if (argument.startsWith(buildingGenerationPrefix)) {
+            validateInGameMapBuildingGeneration =
+                    argument.mid(buildingGenerationPrefix.size());
+            continue;
+        }
+        const QString worldMapOverlaysPrefix =
+                QLatin1String("--validate-worldmap-overlays=");
+        if (argument.startsWith(worldMapOverlaysPrefix)) {
+            validateWorldMapOverlays =
+                    argument.mid(worldMapOverlaysPrefix.size());
+            continue;
+        }
+        const QString osmWizardRenderPrefix =
+                QLatin1String("--render-osm-project-wizard=");
+        if (argument.startsWith(osmWizardRenderPrefix)) {
+            const QString output =
+                    argument.mid(osmWizardRenderPrefix.size());
+            OsmTerrainImportDialog dialog(nullptr);
+            dialog.show();
+            a.processEvents();
+            if (!dialog.grab().save(output)) {
+                qCritical() << "Could not save OSM project-wizard render:"
+                            << output;
+                return 36;
+            }
+            qInfo() << "OSM project-wizard render saved:"
+                    << output << dialog.size();
+            return 0;
+        }
         if (argument == QLatin1String(
                     "--validate-biomemap-config")) {
             QString error;
@@ -101,6 +209,38 @@ int main(int argc, char *argv[])
             qInfo() << "BiomeMapConfig validation passed:"
                     << BiomeMapImageProcessor::palette().size()
                     << "entries including the map-override ID";
+            return 0;
+        }
+        if (argument == QLatin1String(
+                    "--validate-cell-move-coordinates")) {
+            validateCellMoveCoordinates = true;
+            continue;
+        }
+        if (argument == QLatin1String(
+                    "--validate-ingamemap-road-generation")) {
+            QString summary;
+            QString error;
+            if (!InGameMapFeatureGenerator::validateRoadMaskProcessing(
+                        &summary, &error)) {
+                qCritical().noquote()
+                        << "InGameMap road-generation validation failed:"
+                        << error;
+                return 55;
+            }
+            qInfo().noquote()
+                    << "InGameMap road-generation validation passed:"
+                    << summary;
+            return 0;
+        }
+        if (argument == QLatin1String(
+                    "--validate-preferences-noop")) {
+            Preferences *preferences = Preferences::instance();
+            if (TileMetaInfoMgr::instance()->changeTilesDirectory(
+                        preferences->tilesDirectory())) {
+                qCritical() << "Preferences no-op validation failed: unchanged Tiles directory triggered a reload";
+                return 56;
+            }
+            qInfo() << "Preferences no-op validation passed: unchanged Tiles directory did not reload tilesets";
             return 0;
         }
         if (argument == QLatin1String(
@@ -131,6 +271,17 @@ int main(int argc, char *argv[])
             qInfo() << "Native-256 lot geometry validation passed";
             return 0;
         }
+        if (argument == QLatin1String(
+                    "--validate-partial-chunks")) {
+            QString error;
+            if (!PZTools::PartialChunkSelection::validate(&error)) {
+                qCritical().noquote()
+                        << "Partial Chunks validation failed:" << error;
+                return 42;
+            }
+            qInfo() << "Partial Chunks validation passed";
+            return 0;
+        }
         if (argument == QLatin1String("--validate-hole-repair")) {
             QString error;
             if (!CellScene::validateHoleRepair(&error)) {
@@ -154,12 +305,48 @@ int main(int argc, char *argv[])
                         << defaults.errorString();
                 return 25;
             }
+            for (const QString &typeName :
+                 WorldObjectValidation::expectedObjectTypes()) {
+                const QStringList propertyNames =
+                        WorldObjectValidation::expectedPropertyNames(typeName);
+                for (const QString &propertyName : propertyNames) {
+                    if (!defaults.mPropertyDefs.findPropertyDef(propertyName)) {
+                        qCritical().noquote()
+                                << "WorldDefaults.txt guided-property validation failed:"
+                                << typeName << "requires" << propertyName;
+                        return 25;
+                    }
+                }
+            }
+            QString guidedSummary;
+            QString guidedError;
+            if (!ExpectedPropertiesDialog::validate(
+                    path, &guidedSummary, &guidedError)) {
+                qCritical().noquote()
+                        << "WorldDefaults.txt guided-property dialog validation failed:"
+                        << guidedError;
+                return 25;
+            }
+            QString contextMenuError;
+            if (!SelectMoveObjectTool::validateContextMenuDispatch(
+                    &contextMenuError)) {
+                qCritical().noquote()
+                        << "WorldDefaults.txt object context-menu validation failed:"
+                        << contextMenuError;
+                return 25;
+            }
             qInfo() << "WorldDefaults.txt validation passed:"
                     << defaults.mEnums.size() << "enum(s),"
                     << defaults.mPropertyDefs.size() << "property definition(s),"
                     << defaults.mTemplates.size() << "template(s),"
                     << defaults.mObjectTypes.size() << "object type(s),"
-                    << defaults.mObjectGroups.size() << "object group(s)";
+                    << defaults.mObjectGroups.size() << "object group(s),"
+                    << WorldObjectValidation::expectedObjectTypes().size()
+                    << "guided property type(s)";
+            qInfo().noquote()
+                    << "Guided-property dialog validation passed:"
+                    << guidedSummary;
+            qInfo() << "Object context-menu dispatch validation passed";
             return 0;
         }
         if (argument == QLatin1String("--validate-tileset-cleanup")) {
@@ -352,6 +539,77 @@ int main(int argc, char *argv[])
             qInfo() << "Environment-preview overlay validation passed";
             return 0;
         }
+        const QString vehicleMeshPreviewPrefix =
+                QLatin1String("--validate-vehicle-mesh-preview=");
+        if (argument.startsWith(vehicleMeshPreviewPrefix)) {
+            QString summary;
+            QString error;
+            const QString gameDirectory =
+                    argument.mid(vehicleMeshPreviewPrefix.size());
+            if (!VehicleMeshPreview::validate(
+                        gameDirectory, &summary, &error)) {
+                qCritical().noquote()
+                        << "Vehicle mesh preview validation failed:"
+                        << error;
+                return 55;
+            }
+            qInfo().noquote()
+                    << "Vehicle mesh preview validation passed:"
+                    << summary;
+            return 0;
+        }
+        const QString renderVehicleMeshPreviewPrefix =
+                QLatin1String("--render-vehicle-mesh-preview=");
+        if (argument.startsWith(renderVehicleMeshPreviewPrefix)) {
+            const QString payload = argument.mid(
+                        renderVehicleMeshPreviewPrefix.size());
+            const int separator = payload.lastIndexOf(QLatin1Char('|'));
+            if (separator <= 0 || separator >= payload.size() - 1) {
+                qCritical() << "Vehicle mesh preview render requires a game directory and output path";
+                return 56;
+            }
+            QString error;
+            const QImage image = VehicleMeshPreview::validationImage(
+                        payload.left(separator), &error);
+            if (image.isNull()
+                    || !image.save(payload.mid(separator + 1))) {
+                qCritical().noquote()
+                        << "Vehicle mesh preview render failed:"
+                        << error;
+                return 57;
+            }
+            qInfo().noquote()
+                    << "Vehicle mesh preview image written to"
+                    << payload.mid(separator + 1);
+            return 0;
+        }
+        if (argument == QLatin1String("--validate-regions-editor")) {
+            QString summary;
+            QString error;
+            if (!RegionsDock::validateEditor(&summary, &error)) {
+                qCritical().noquote()
+                        << "regions.lua editor validation failed:" << error;
+                return 38;
+            }
+            qInfo().noquote()
+                    << "regions.lua editor validation passed:" << summary;
+            return 0;
+        }
+        if (argument.startsWith(QLatin1String("--validate-regions="))) {
+            const QString fileName = argument.mid(19);
+            RegionsDock validator;
+            QString error;
+            int regionCount = 0;
+            if (!validator.validateRegionFile(
+                        fileName, &regionCount, &error)) {
+                qCritical().noquote()
+                        << "regions.lua validation failed:" << error;
+                return 39;
+            }
+            qInfo().noquote() << "regions.lua validation passed:"
+                              << regionCount << "region(s)";
+            return 0;
+        }
         if (!argument.startsWith(QLatin1String("--validate-streets=")))
             continue;
         const QString fileName = argument.mid(19);
@@ -391,10 +649,33 @@ int main(int argc, char *argv[])
             || !validateBmpGenerationProject.isEmpty()
             || !auditTilesetCleanupPath.isEmpty()
             || !rebuildTilesetCatalogPath.isEmpty()
+            || !validateNative256RoomDefsTmx.isEmpty()
+            || !validateInGameMapBuildingGeneration.isEmpty()
+            || !validateWorldMapOverlays.isEmpty()
             || !renderTilesetCleanupRoot.isEmpty()
-            || validateTilesetCleanup;
+            || validateTilesetCleanup
+            || validateCellMoveCoordinates;
     if (configuredCommand && !w.InitConfigFiles())
         return 0;
+
+    if (validateCellMoveCoordinates) {
+        QString dataSummary;
+        QString interactionSummary;
+        QString error;
+        if (!MainWindow::validateCellMoveCoordinateData(
+                    &dataSummary, &error)
+                || !w.validateCellPasteInteraction(
+                    &interactionSummary, &error)) {
+            qCritical().noquote()
+                    << "Cell move coordinate validation failed:"
+                    << error;
+            return 54;
+        }
+        qInfo().noquote()
+                << "Cell move coordinate validation passed:"
+                << dataSummary << interactionSummary;
+        return 0;
+    }
 
     if (validateTilesetCleanup) {
         QString summary;
@@ -408,7 +689,149 @@ int main(int argc, char *argv[])
                 << "Tileset cleanup validation passed:" << summary;
         return 0;
     }
-
+    if (!validateInGameMapBuildingGeneration.isEmpty()) {
+        const int separator =
+                validateInGameMapBuildingGeneration.lastIndexOf(
+                    QLatin1String("::"));
+        const QString coordinates = separator > 0
+                ? validateInGameMapBuildingGeneration.mid(separator + 2)
+                : QString();
+        const QStringList coordinateParts =
+                coordinates.split(QLatin1Char(','));
+        bool xOk = false;
+        bool yOk = false;
+        const int x = coordinateParts.size() == 2
+                ? coordinateParts.at(0).toInt(&xOk) : -1;
+        const int y = coordinateParts.size() == 2
+                ? coordinateParts.at(1).toInt(&yOk) : -1;
+        if (separator <= 0 || !xOk || !yOk) {
+            qCritical() << "InGameMap building-generation validation expects "
+                           "<project.pzw>::<cell-x>,<cell-y>";
+            return 43;
+        }
+        const QString projectFile =
+                validateInGameMapBuildingGeneration.left(separator);
+        if (!w.openFile(projectFile)) {
+            qCritical() << "InGameMap building-generation validation could "
+                           "not open:" << projectFile;
+            return 44;
+        }
+        Document *document =
+                DocumentManager::instance()->currentDocument();
+        WorldDocument *worldDocument =
+                document ? document->asWorldDocument() : nullptr;
+        WorldCell *cell = worldDocument
+                ? worldDocument->world()->cellAt(x, y) : nullptr;
+        if (!cell || cell->mapFilePath().isEmpty()) {
+            qCritical() << "InGameMap building-generation validation could "
+                           "not find a mapped cell:" << x << y;
+            return 45;
+        }
+        worldDocument->setSelectedCells(QList<WorldCell*>() << cell);
+        InGameMapFeatureGenerator generator;
+        if (!generator.generateWorld(
+                    worldDocument,
+                    InGameMapFeatureGenerator::GenerateSelected,
+                    InGameMapFeatureGenerator::FeatureBuilding)) {
+            qCritical().noquote()
+                    << "InGameMap building-generation validation failed:"
+                    << generator.errorString();
+            return 46;
+        }
+        int buildingFeatureCount = 0;
+        for (InGameMapFeature *feature : cell->inGameMap().features()) {
+            if (feature->properties().containsKey(
+                        QStringLiteral("building"))) {
+                ++buildingFeatureCount;
+            }
+        }
+        if (buildingFeatureCount == 0) {
+            qCritical() << "InGameMap building-generation validation failed: "
+                           "no building feature was generated for cell"
+                        << x << y;
+            return 47;
+        }
+        qInfo() << "InGameMap building-generation validation passed: cell"
+                << x << y << "lots" << cell->lots().size()
+                << "building features" << buildingFeatureCount;
+        return 0;
+    }
+    if (!validateWorldMapOverlays.isEmpty()) {
+        const QStringList paths = validateWorldMapOverlays.split(
+                    QLatin1String("::"));
+        if (paths.size() != 3) {
+            qCritical() << "World-map overlay validation expects "
+                           "<project.pzw>::<worldmap.xml>::"
+                           "<worldmap-forest.xml>";
+            return 48;
+        }
+        if (!w.openFile(paths.at(0))) {
+            qCritical() << "World-map overlay validation could not open:"
+                        << paths.at(0);
+            return 49;
+        }
+        Document *document =
+                DocumentManager::instance()->currentDocument();
+        WorldDocument *worldDocument =
+                document ? document->asWorldDocument() : nullptr;
+        WorldView *view = worldDocument
+                ? dynamic_cast<WorldView *>(worldDocument->view()) : nullptr;
+        QString error;
+        if (!view
+                || !view->scene()->loadWorldMapOverlay(
+                    paths.at(1), false, &error)
+                || !view->scene()->loadWorldMapOverlay(
+                    paths.at(2), true, &error)) {
+            qCritical().noquote()
+                    << "World-map overlay validation failed:" << error;
+            return 50;
+        }
+        const int worldFeatureCount =
+                view->scene()->worldMapOverlayFeatureCount(false);
+        const int forestFeatureCount =
+                view->scene()->worldMapOverlayFeatureCount(true);
+        if (worldFeatureCount == 0 || forestFeatureCount == 0) {
+            qCritical() << "World-map overlay validation failed: "
+                           "one loaded overlay contained no visible features";
+            return 51;
+        }
+        view->scene()->setWorldMapOverlayVisible(false, false);
+        if (view->scene()->worldMapOverlayVisible(false)
+                || !view->scene()->worldMapOverlayVisible(true)) {
+            qCritical() << "World-map overlay validation failed: "
+                           "independent visibility state was not retained";
+            return 52;
+        }
+        view->scene()->setWorldMapOverlayVisible(false, true);
+        view->scene()->clearWorldMapOverlays();
+        if (view->scene()->hasWorldMapOverlay(false)
+                || view->scene()->hasWorldMapOverlay(true)) {
+            qCritical() << "World-map overlay validation failed: "
+                           "clear did not remove both overlays";
+            return 53;
+        }
+        qInfo() << "World-map overlay validation passed:"
+                << QFileInfo(paths.at(1)).fileName()
+                << worldFeatureCount
+                << QFileInfo(paths.at(2)).fileName()
+                << forestFeatureCount;
+        return 0;
+    }
+    if (!validateNative256RoomDefsTmx.isEmpty()) {
+        QString summary;
+        QString error;
+        if (!LotFilesManager256::validateReferencedRoomDefs(
+                    validateNative256RoomDefsTmx, &summary, &error)) {
+            qCritical().noquote()
+                    << "Native-256 referenced RoomDefs validation failed:"
+                    << error;
+            return 40;
+        }
+        qInfo().noquote()
+                << "Native-256 referenced RoomDefs validation passed:"
+                << summary;
+        return 0;
+    }
     if (!rebuildTilesetCatalogPath.isEmpty()) {
         int added = 0;
         int updated = 0;

@@ -29,7 +29,7 @@ class BMPToTMXDialog;
 class BMPToTMXDialog : public QDialog
 {
     Q_OBJECT
-    
+
 public:
     explicit BMPToTMXDialog(WorldDocument *worldDoc, QWidget *parent = 0);
     ~BMPToTMXDialog();
@@ -40,6 +40,7 @@ private slots:
     void blendsBrowse();
     void mapbaseBrowse();
     void repairUnknownColorsToggled(bool enabled);
+    void operationChanged();
     void accept();
     void apply();
 

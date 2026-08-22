@@ -106,8 +106,18 @@ BMPToTMXDialog::BMPToTMXDialog(WorldDocument *worldDoc, QWidget *parent) :
             this, &BMPToTMXDialog::repairUnknownColorsToggled);
 //    ui->compress->setChecked(settings.compress);
 //    ui->copyPixels->setChecked(settings.copyPixels);
-    ui->replaceExisting->setChecked(!settings.updateExisting);
-    ui->updateExisting->setChecked(settings.updateExisting);
+    ui->replaceExisting->setChecked(!settings.updateExisting &&
+                                    !settings.metadataOnly);
+    ui->updateExisting->setChecked(settings.updateExisting &&
+                                   !settings.metadataOnly);
+    ui->metadataOnly->setChecked(settings.metadataOnly);
+    connect(ui->replaceExisting, &QRadioButton::toggled,
+            this, &BMPToTMXDialog::operationChanged);
+    connect(ui->updateExisting, &QRadioButton::toggled,
+            this, &BMPToTMXDialog::operationChanged);
+    connect(ui->metadataOnly, &QRadioButton::toggled,
+            this, &BMPToTMXDialog::operationChanged);
+    operationChanged();
 
     connect(ui->buttonBox->button(QDialogButtonBox::Apply), &QAbstractButton::clicked,
             this, &BMPToTMXDialog::apply);
@@ -168,7 +178,14 @@ void BMPToTMXDialog::repairUnknownColorsToggled(bool enabled)
     ui->vegetationFallbackLabel->setEnabled(enabled);
     ui->vegetationFallback->setEnabled(enabled);
 }
-
+void BMPToTMXDialog::operationChanged()
+{
+    const bool conversionEnabled = !ui->metadataOnly->isChecked();
+    ui->groupBox->setEnabled(conversionEnabled);
+    ui->groupBox_4->setEnabled(conversionEnabled);
+    ui->assignMapCheckBox->setEnabled(conversionEnabled);
+    ui->validationRepairGroup->setEnabled(conversionEnabled);
+}
 void BMPToTMXDialog::populateFallbackColors(
         quint32 groundColor, quint32 vegetationColor)
 {
@@ -276,11 +293,8 @@ bool BMPToTMXDialog::validate()
                 ui->blendsEdit->text().trimmed());
     mMapBaseFile = QDir::fromNativeSeparators(
                 ui->mapbaseEdit->text().trimmed());
-
-    QDir dir(mExportDir);
-    if (mExportDir.isEmpty() || !dir.exists()) {
-        QMessageBox::warning(this, tr("Map Generation Error"),
-                             tr("Please choose a valid directory to save the .tmx files in."));
+    const bool metadataOnly = ui->metadataOnly->isChecked();
+    if (!metadataOnly && !ensureExportDirectory())
         return false;
     }
 
@@ -299,7 +313,7 @@ bool BMPToTMXDialog::validate()
     }
 
     info.setFile(mMapBaseFile);
-    if (!info.exists()) {
+    if (!metadataOnly && !info.exists()) {
         QMessageBox::warning(this, tr("Map Generation Error"),
                              tr("Please choose a map template file."));
         return false;
@@ -331,6 +345,7 @@ void BMPToTMXDialog::toSettings()
 //    settings.compress = ui->compress->isChecked();
 //    settings.copyPixels = ui->copyPixels->isChecked();
     settings.updateExisting = ui->updateExisting->isChecked();
+    settings.metadataOnly = ui->metadataOnly->isChecked();
     if (settings != mWorldDoc->world()->getBMPToTMXSettings())
         mWorldDoc->changeBMPToTMXSettings(settings);
 }

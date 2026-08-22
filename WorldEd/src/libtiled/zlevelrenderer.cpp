@@ -250,8 +250,8 @@ static Tile *placeholderTile(bool invisible)
                           : QLatin1String("MISSING"),
                 64, 128);
     const QString imagePath = invisible
-            ? QLatin1String(":/images/invisible-tile.png")
-            : QLatin1String(":/images/missing-tile.png");
+            ? QLatin1String(":/images/invisible-tile.svg")
+            : QLatin1String(":/images/missing-tile.svg");
     if (tileset->loadFromImage(QImage(imagePath), imagePath))
         tile = tileset->tileAt(0);
     return tile;
@@ -616,20 +616,19 @@ void ZLevelRenderer::drawTileLayerGroup(QPainter *painter, ZTileLayerGroup *laye
                                 ? mPreviewOverlayResolver(
                                       sourceTile, columnItr)
                                 : nullptr;
-                        if (tile->properties().contains(QLatin1String("invisible"))) {
+                        const bool transparentTile = tile->image().isNull()
+                                && tile->hasResolvedSource();
+                        if (tile->properties().contains(QLatin1String("invisible"))
+                                || transparentTile) {
                             if (isShowInvisibleTiles() == false)
                                 continue;
                             if (Tile *placeholder = placeholderTile(true))
                                 tile = placeholder;
 
                         }
-                        if (tile->image().isNull()) {
-                            Tileset *tileset = tile->tileset();
-                            if (!tileset || tileset->isMissing()
-                                    || !tileset->isLoaded()) {
-                                if (Tile *placeholder = placeholderTile(false))
-                                    tile = placeholder;
-                            }
+                        if (tile->image().isNull() && !tile->hasResolvedSource()) {
+                            if (Tile *placeholder = placeholderTile(false))
+                                tile = placeholder;
                         }
                         QImage img = tile->image();
                         const QPoint offset = tile->tileset()->tileOffset() + tile->offset();

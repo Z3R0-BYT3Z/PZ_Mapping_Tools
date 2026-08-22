@@ -6,36 +6,26 @@ under `docs/index.html`.
 
 ## Start here
 
-- [PZTools user guide](docs/TileZed/PZToolsGuide.html): installation,
-  shared paths, projects, major workflows, and troubleshooting.
-- [Logs, diagnostics, and issue reports](docs/Diagnostics-and-Logs.md):
-  log names and retention, reading severity and thread fields, regression
-  commands, and the information needed for a useful report.
-- [User-facing feature reference](docs/Feature-Reference.md): menu/location,
-  prerequisites, inputs, output ownership, and current scope for each major
-  function.
-- [Configuration files](docs/PZTools-Configuration-Files.md): which catalogue
-  each tool uses, the audited Build 42.20 state, and safe customization rules.
-- [Current release changes](RELEASE_CHANGELOG.md): user-facing release notes.
-- [Complete unofficial changelog](CHANGELOG-PZTOOLS.md): detailed differences
-  from the maintained Tim Baker baselines.
-- [How to build PZ Mapping Tools](BUILDING.md): source layout, Windows,
-  Linux, and macOS compilation, packaging, hash verification, and validation.
-- [GitHub release updater design](docs/PZTools-Auto-Updater-Design.md):
-  version discovery, signed manifests, staging, rollback, managed files, and
-  the separate Tiles synchronization policy.
-- [Upstream history](UPSTREAM-HISTORY.md): source provenance and selectively
-  ported upstream work.
+- [PZTools user guide](docs/TileZed/PZToolsGuide.html)
+- [Feature reference](docs/Feature-Reference.md)
+- [Troubleshooting FAQ](docs/FAQ.md)
+- [Logs and useful issue reports](docs/Diagnostics-and-Logs.md)
+- [Configuration files](docs/PZTools-Configuration-Files.md)
+- [Current release changes](RELEASE_CHANGELOG.md)
+- [Build instructions](BUILDING.md)
+- [Feature-level provenance](FEATURE_PROVENANCE.md)
+- [Upstream history and source provenance](UPSTREAM-HISTORY.md)
 
 ## WorldEd
 
 | Subject | Reference |
 |---|---|
-| Guided PZW/TMX/TBX health check, stale tilesets, path repair, backups, and TBX ID remapping | [Project Doctor: tiles and paths](docs/PZ-Project-Doctor-Tiles-and-Paths.md) |
-| Shared configuration catalogues, Tiles resolution, audited counts, and safe customization | [PZTools configuration files](docs/PZTools-Configuration-Files.md) |
-| WorldGen biomes, 2x2-chunk preview, biome features, static prefabs, TMX/TBX conversion, and staging | [Build 42.20 WorldGen editor](docs/PZ-B42.20-WorldGen-Editor-and-Prefabs.md) |
-| Jumbo, XL, and XXL tree behavior | [Deterministic Jumbo trees](docs/PZ-B42.20-Jumbo-Trees.md) |
-| Terrain/vegetation image editor, project grids, thumbnails, Biomemap, Zombie Heatmap, InGameMap, and export | [PZTools user guide](docs/TileZed/PZToolsGuide.html) |
+| Project health, missing tilesets, paths, backups, and TBX IDs | [Project Doctor](docs/PZ-Project-Doctor-Tiles-and-Paths.md) |
+| WorldGen biomes, previews, features, and static prefabs | [WorldGen editor](docs/PZ-B42.20-WorldGen-Editor-and-Prefabs.md) |
+| Jumbo, XL, and XXL trees | [Jumbo trees](docs/PZ-B42.20-Jumbo-Trees.md) |
+| Build 42.20 Biomemap values and channels | [BiomeMapConfig](docs/PZ-B42.20-BiomeMapConfig.md) |
+| Read-only adjacent PZW projects and `otherworld` compatibility | [Linked World Projects](docs/PZWorldEd-Linked-World-Projects.md) |
+| Terrain images, Biomemap, Zombie Heatmap, InGameMap, and export | [PZTools user guide](docs/TileZed/PZToolsGuide.html) |
 
 ## TileZed
 
@@ -60,11 +50,11 @@ The maintained manual lives under
 `TileZed/src/tiled/BuildingEditor/manual` and is installed as
 `docs/BuildingEd` in the portable release.
 
-- [BuildingEd manual index](TileZed/src/tiled/BuildingEditor/manual/index.html)
-- [BuildingEd Lua scripting](TileZed/src/tiled/BuildingEditor/manual/LuaScripting.html)
-- [BuildingEd tools](TileZed/src/tiled/BuildingEditor/manual/Tools.html)
-- [Tile mode](TileZed/src/tiled/BuildingEditor/manual/TileEditingMode.html)
-- [Tiles dialog](TileZed/src/tiled/BuildingEditor/manual/TilesDialog.html)
+- [BuildingEd manual](docs/BuildingEd/index.html)
+- [Lua scripting](docs/BuildingEd/LuaScripting.html)
+- [Tools](docs/BuildingEd/Tools.html)
+- [Tile mode](docs/BuildingEd/TileEditingMode.html)
+- [Tiles dialog](docs/BuildingEd/TilesDialog.html)
 
 The procedural-loot editor is shared with TileZed and uses the same loader,
 project-output format, validation rules, and documentation.

@@ -22,6 +22,7 @@
 #include "threads.h"
 #include "worldcell.h"
 #include "worldgeometry.h"
+#include "partialchunkselection.h"
 
 #include <QTimer>
 
@@ -42,6 +43,7 @@ public:
     MapInfo* getCombinedMap();
     void moveToThread(MapComposite *mapComposite, QThread *thread);
     bool lotOverlaps(WorldCellLot *lot, int cell256X, int cell256Y, const QPoint &worldOrigin);
+    bool reportVerticalPlacements();
 
     static QRect outputCellRect(WorldGridFormat format, const QRect &sourceCellRect);
     static QRect sourceCellRect(WorldGridFormat format, const QRect &outputCellRect);
@@ -62,6 +64,8 @@ public:
     DelayedMapLoader mLoader;
     MapComposite* mMapComposite = nullptr;
     QList<MapComposite*> mCellMaps;
+    bool mLoggedPendingSubMaps = false;
+    bool mLoggedVerticalPlacements = false;
     QString mError;
 };
 
@@ -98,6 +102,8 @@ public:
     void resolveProperties(PropertyHolder *ph, PropertyList &result);
     QString missingTilesetsString(Tiled::Map *map);
     void checkHolesOnLevelZero();
+    int fillHolesInGeneratedLot();
+    bool partialSquareSelected(int localX, int localY) const;
 
 public slots:
     void addJob();
@@ -128,6 +134,7 @@ private:
     LotFile::Stats mStats;
     QVector<QPoint> mHoleInFloor;
     QString mError;
+    PZTools::PartialChunkSelection mPartialChunks;
 
     friend class LotFilesManager256;
 };

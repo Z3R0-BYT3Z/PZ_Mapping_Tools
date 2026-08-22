@@ -209,6 +209,10 @@ TilesetDock::TilesetDock(QWidget *parent):
             SLOT(renameTileset()));
 
     mToolBar->setIconSize(QSize(16, 16));
+    mToolBar->setMovable(false);
+    mToolBar->setFloatable(false);
+    mToolBar->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    mZoomComboBox->setMaximumWidth(86);
     mToolBar->addAction(mImportTileset);
     mToolBar->addAction(mExportTileset);
     mToolBar->addAction(mPropertiesTileset);
@@ -692,6 +696,7 @@ void TilesetDock::refreshTilesetMenu()
 
 #include "addremovemapobject.h"
 #include "addremovetileset.h"
+#include "bmpblender.h"
 #include "colorbutton.h"
 #include "documentmanager.h"
 #include "erasetiles.h"
@@ -731,6 +736,7 @@ void TilesetDock::refreshTilesetMenu()
 #include <QMessageBox>
 #include <QMimeData>
 #include <QScrollBar>
+#include <QSizePolicy>
 #include <QSplitter>
 #include <QTimer>
 #include <QToolBar>
@@ -1040,6 +1046,9 @@ TilesetDock::TilesetDock(QWidget *parent):
     tilesetNamesLayout->setContentsMargins(0, 0, 0, 0);
     QToolBar *toolbar = new QToolBar();
     toolbar->setIconSize(QSize(16, 16));
+    toolbar->setMovable(false);
+    toolbar->setFloatable(false);
+    toolbar->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     toolbar->addAction(mActionTilesetUp);
     toolbar->addAction(mActionTilesetDown);
     toolbar->addAction(mActionSortByName);
@@ -1421,20 +1430,51 @@ void TilesetDock::removeTileset()
  */
 void TilesetDock::removeTileset(int index)
 {
-    Tileset *tileset = mMapDocument->map()->tilesets()[index];
+    if (!mMapDocument || !mMapDocument->map()
+            || index < 0
+            || index >= mMapDocument->map()->tilesets().size()) {
+        qWarning() << "Cannot remove tileset at invalid index" << index;
+        return;
+    }
+
+    Tileset *tileset = mMapDocument->map()->tilesets().at(index);
+    if (!tileset)
+        return;
     const bool inUse = mMapDocument->map()->isTilesetUsed(tileset);
+    const bool usedByBmp = mMapDocument->mapComposite()->bmpBlender()
+            ->referencesTileset(tileset->name());
 
     // If the tileset is in use, warn the user and confirm removal
-    if (inUse) {
+    if (inUse || usedByBmp) {
+        QString warningText;
+        QString detailText;
+        if (inUse && usedByBmp) {
+            warningText = tr("The tileset \"%1\" is used by stored map "
+                             "content and by BMP Rules or Blends.")
+                    .arg(tileset->name());
+            detailText = tr("Remove the stored map references and this "
+                            "tileset? Rules and Blends metadata will be kept "
+                            "and will become active again if the tileset is "
+                            "restored.");
+        } else if (inUse) {
+            warningText = tr("The tileset \"%1\" is still in use by the "
+                             "map!").arg(tileset->name());
+            detailText = tr("Remove this tileset and all stored references "
+                            "to its tiles?");
+        } else {
+            warningText = tr("The tileset \"%1\" is referenced by BMP "
+                             "Rules or Blends.").arg(tileset->name());
+            detailText = tr("Remove this tileset? Rules and Blends metadata "
+                            "will be kept and will become active again if "
+                            "the tileset is restored.");
+        }
         QMessageBox warning(QMessageBox::Warning,
                             tr("Remove Tileset"),
-                            tr("The tileset \"%1\" is still in use by the "
-                               "map!").arg(tileset->name()),
+                            warningText,
                             QMessageBox::Yes | QMessageBox::No,
                             this);
-        warning.setDefaultButton(QMessageBox::Yes);
-        warning.setInformativeText(tr("Remove this tileset and all references "
-                                      "to the tiles in this tileset?"));
+        warning.setDefaultButton(QMessageBox::No);
+        warning.setInformativeText(detailText);
 
         if (warning.exec() != QMessageBox::Yes)
             return;

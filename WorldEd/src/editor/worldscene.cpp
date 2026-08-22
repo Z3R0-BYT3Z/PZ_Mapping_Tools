@@ -36,6 +36,7 @@
 #include "world.h"
 #include "worlddocument.h"
 #include "worldreader.h"
+#include "InGameMap/ingamemapreader.h"
 #include "zoomable.h"
 
 #include <qmath.h>
@@ -45,6 +46,7 @@
 #include <QFileInfo>
 #include <QGraphicsSceneMouseEvent>
 #include <QImageWriter>
+#include <QMap>
 #include <QKeyEvent>
 #include <QMessageBox>
 #include <QMimeData>
@@ -54,6 +56,8 @@
 #include <QStyleOptionGraphicsItem>
 #include <QThread>
 #include <QUrl>
+#include <QXmlStreamReader>
+#include <limits>
 
 const int WorldScene::ZVALUE_CELLITEM = 1;
 const int WorldScene::ZVALUE_ROADITEM_UNSELECTED = 2;
@@ -63,6 +67,263 @@ const int WorldScene::ZVALUE_GRIDITEM = 5;
 const int WorldScene::ZVALUE_SELECTIONITEM = 6;
 const int WorldScene::ZVALUE_COORDITEM = 7;
 const int WorldScene::ZVALUE_DNDITEM = 100;
+
+namespace
+{
+QColor worldMapOverlayColor(const InGameMapFeature *feature, bool forest)
+{
+    if (forest || feature->mProperties.contains(
+                QStringLiteral("natural"), QStringLiteral("forest")))
+        return QColor(76, 201, 103);
+    if (feature->mProperties.containsKey(QStringLiteral("building")))
+        return QColor(255, 145, 92);
+    if (feature->mProperties.containsKey(QStringLiteral("water")))
+        return QColor(70, 160, 255);
+    if (feature->mProperties.containsKey(QStringLiteral("highway"))
+            || feature->mProperties.containsKey(QStringLiteral("railway")))
+        return QColor(255, 202, 79);
+    return QColor(90, 210, 255);
+}
+}
+
+WorldMapOverlayItem::WorldMapOverlayItem(WorldScene *scene, bool forest)
+    : mScene(scene)
+    , mForest(forest)
+{
+    setZValue(WorldScene::ZVALUE_GRIDITEM - 0.5);
+}
+
+QRectF WorldMapOverlayItem::boundingRect() const
+{
+    return mBoundingRect;
+}
+
+void WorldMapOverlayItem::paint(QPainter *painter,
+                                const QStyleOptionGraphicsItem *option,
+                                QWidget *)
+{
+    for (const Batch &batch : mBatches) {
+        if (!option || batch.bounds.intersects(option->exposedRect))
+            painter->drawPicture(QPointF(), batch.picture);
+    }
+}
+
+bool WorldMapOverlayItem::load(const QString &fileName, QString *error)
+{
+    QFile scanFile(fileName);
+    if (!scanFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        if (error)
+            *error = scanFile.errorString();
+        return false;
+    }
+
+    int minX = std::numeric_limits<int>::max();
+    int minY = std::numeric_limits<int>::max();
+    int maxX = std::numeric_limits<int>::min();
+    int maxY = std::numeric_limits<int>::min();
+    int sourceCellSize = 256;
+    bool explicitCellSize = false;
+    double maximumLocalCoordinate = 0.0;
+    QXmlStreamReader scanner(&scanFile);
+    while (!scanner.atEnd()) {
+        scanner.readNext();
+        if (!scanner.isStartElement())
+            continue;
+        if (scanner.name() == QLatin1String("world")) {
+            bool cellSizeOk = false;
+            const int declaredCellSize = scanner.attributes().value(
+                        QLatin1String("cellSize")).toInt(&cellSizeOk);
+            if (cellSizeOk && (declaredCellSize == 256
+                               || declaredCellSize == 300)) {
+                sourceCellSize = declaredCellSize;
+                explicitCellSize = true;
+            }
+            continue;
+        }
+        if (scanner.name() == QLatin1String("point")) {
+            bool xOk = false;
+            bool yOk = false;
+            const double x = scanner.attributes().value(
+                        QLatin1String("x")).toDouble(&xOk);
+            const double y = scanner.attributes().value(
+                        QLatin1String("y")).toDouble(&yOk);
+            if (xOk)
+                maximumLocalCoordinate = qMax(maximumLocalCoordinate, x);
+            if (yOk)
+                maximumLocalCoordinate = qMax(maximumLocalCoordinate, y);
+            continue;
+        }
+        if (scanner.name() != QLatin1String("cell"))
+            continue;
+        bool xOk = false;
+        bool yOk = false;
+        const int x = scanner.attributes().value(
+                    QLatin1String("x")).toInt(&xOk);
+        const int y = scanner.attributes().value(
+                    QLatin1String("y")).toInt(&yOk);
+        if (!xOk || !yOk)
+            continue;
+        minX = qMin(minX, x);
+        minY = qMin(minY, y);
+        maxX = qMax(maxX, x);
+        maxY = qMax(maxY, y);
+    }
+    if (scanner.hasError()) {
+        if (error)
+            *error = scanner.errorString();
+        return false;
+    }
+    if (!explicitCellSize && maximumLocalCoordinate > 256.0)
+        sourceCellSize = 300;
+    if (minX > maxX || minY > maxY) {
+        const GenerateLotsSettings &settings =
+                mScene->world()->getGenerateLotsSettings();
+        minX = settings.worldOrigin.x();
+        minY = settings.worldOrigin.y();
+        maxX = minX + mScene->world()->width() - 1;
+        maxY = minY + mScene->world()->height() - 1;
+    }
+
+    const WorldGridFormat sourceFormat = sourceCellSize == 256
+            ? WorldGridFormat::Native256
+            : WorldGridFormat::Legacy300;
+    World overlayWorld(maxX - minX + 1, maxY - minY + 1,
+                       sourceFormat);
+    GenerateLotsSettings overlaySettings =
+            mScene->world()->getGenerateLotsSettings();
+    overlaySettings.worldOrigin = QPoint(minX, minY);
+    overlayWorld.setGenerateLotsSettings(overlaySettings);
+    InGameMapReader reader;
+    if (!reader.readWorld(fileName, &overlayWorld)) {
+        if (error)
+            *error = reader.errorString();
+        return false;
+    }
+
+    const QPoint currentOrigin =
+            mScene->world()->getGenerateLotsSettings().worldOrigin;
+    const int currentCellSize = mScene->world()->cellSize();
+    const qreal sourceCellSpan = sourceCellSize
+            / qreal(currentCellSize);
+    const int batchSize = 4;
+    QMap<QPair<int, int>, QList<WorldCell *> > cellsByBatch;
+    int featureCount = 0;
+    for (WorldCell *cell : overlayWorld.cells()) {
+        if (cell->inGameMap().features().isEmpty())
+            continue;
+        const QPoint sourceCell = overlaySettings.worldOrigin
+                + cell->pos();
+        const QPointF localCell(
+                    sourceCell.x() * sourceCellSpan - currentOrigin.x(),
+                    sourceCell.y() * sourceCellSpan - currentOrigin.y());
+        const QPair<int, int> batch(
+                    qFloor(localCell.x() / qreal(batchSize)),
+                    qFloor(localCell.y() / qreal(batchSize)));
+        cellsByBatch[batch].append(cell);
+        featureCount += cell->inGameMap().features().size();
+    }
+
+    QVector<Batch> batches;
+    batches.reserve(cellsByBatch.size());
+    for (auto batchIt = cellsByBatch.cbegin();
+         batchIt != cellsByBatch.cend(); ++batchIt) {
+        Batch batch;
+        QPainter picturePainter(&batch.picture);
+        picturePainter.setRenderHint(QPainter::Antialiasing, true);
+        for (WorldCell *cell : batchIt.value()) {
+            const QPoint sourceCell = overlaySettings.worldOrigin
+                    + cell->pos();
+            const QPointF localCell(
+                        sourceCell.x() * sourceCellSpan - currentOrigin.x(),
+                        sourceCell.y() * sourceCellSpan - currentOrigin.y());
+            batch.bounds = batch.bounds.united(
+                        mScene->cellRectToPolygon(QRectF(
+                            localCell,
+                            QSizeF(sourceCellSpan, sourceCellSpan)))
+                        .boundingRect().adjusted(-16, -16, 16, 16));
+            for (InGameMapFeature *feature :
+                 cell->inGameMap().features()) {
+                const QColor color = worldMapOverlayColor(feature, mForest);
+                QPen pen(color);
+                pen.setJoinStyle(Qt::RoundJoin);
+                pen.setCapStyle(Qt::RoundCap);
+                pen.setWidth(2);
+                pen.setCosmetic(true);
+                picturePainter.setPen(pen);
+
+                QPainterPath path;
+                path.setFillRule(Qt::OddEvenFill);
+                for (const InGameMapCoordinates &coordinates :
+                     feature->mGeometry.mCoordinates) {
+                    if (coordinates.isEmpty())
+                        continue;
+                    QPolygonF polygon;
+                    polygon.reserve(coordinates.size() + 1);
+                    for (const InGameMapPoint &point : coordinates) {
+                        const QPointF cellPoint(
+                                    localCell.x()
+                                    + point.x / currentCellSize,
+                                    localCell.y()
+                                    + point.y / currentCellSize);
+                        polygon += mScene->cellToPixelCoords(cellPoint);
+                    }
+                    if (feature->mGeometry.isPolygon()) {
+                        if (!polygon.isClosed())
+                            polygon += polygon.first();
+                        path.addPolygon(polygon);
+                    } else if (feature->mGeometry.isLineString()) {
+                        path.moveTo(polygon.first());
+                        for (int i = 1; i < polygon.size(); ++i)
+                            path.lineTo(polygon.at(i));
+                    } else if (feature->mGeometry.isPoint()) {
+                        picturePainter.setBrush(color);
+                        picturePainter.drawEllipse(
+                                    polygon.first(), 4.0, 4.0);
+                    }
+                }
+
+                if (feature->mGeometry.isPolygon()) {
+                    QColor fill = color;
+                    fill.setAlpha(55);
+                    picturePainter.setBrush(fill);
+                    picturePainter.drawPath(path);
+                } else if (feature->mGeometry.isLineString()) {
+                    const int width = feature->mProperties.getInt(
+                                QStringLiteral("width"), 0);
+                    if (width > 0) {
+                        pen.setCosmetic(false);
+                        pen.setWidthF(qMax(
+                            1.0, width * qreal(GRID_HEIGHT)
+                            / currentCellSize));
+                        QColor wideColor = color;
+                        wideColor.setAlpha(125);
+                        pen.setColor(wideColor);
+                        picturePainter.setPen(pen);
+                    }
+                    picturePainter.setBrush(Qt::NoBrush);
+                    picturePainter.drawPath(path);
+                }
+            }
+        }
+        picturePainter.end();
+        batches.append(batch);
+    }
+
+    prepareGeometryChange();
+    mBatches = batches;
+    mBoundingRect = mScene->boundingRect(mScene->world()->bounds())
+            .adjusted(-8, -8, 8, 8);
+    mFileName = QFileInfo(fileName).absoluteFilePath();
+    mFeatureCount = featureCount;
+    qInfo() << "World-map overlay loaded:" << mFileName
+            << "features" << mFeatureCount
+            << "batches" << mBatches.size()
+            << "forest" << mForest
+            << "source-cell-size" << sourceCellSize
+            << "project-cell-size" << currentCellSize;
+    update();
+    return true;
+}
 
 WorldScene::WorldScene(WorldDocument *worldDoc, QObject *parent)
     : BaseGraphicsScene(WorldSceneType, parent)
@@ -116,6 +377,8 @@ WorldScene::WorldScene(WorldDocument *worldDoc, QObject *parent)
 
     connect(mWorldDoc, &WorldDocument::generateLotSettingsChanged,
             this, &WorldScene::generateLotsSettingsChanged);
+    connect(mWorldDoc, &WorldDocument::otherWorldsChanged,
+            this, &WorldScene::reloadOtherWorlds);
 
     connect(mWorldDoc, SIGNAL(selectedRoadsChanged()),
             SLOT(selectedRoadsChanged()));
@@ -146,49 +409,7 @@ WorldScene::WorldScene(WorldDocument *worldDoc, QObject *parent)
     mCoordItem->updateBoundingRect();
 
     Preferences *prefs = Preferences::instance();
-    foreach (QString path, world()->otherWorlds()) {
-        WorldReader reader;
-        World *otherWorld = reader.readWorld(path);
-        if (otherWorld) {
-            OtherWorld *_otherWorld = new OtherWorld();
-            _otherWorld->mWorld = otherWorld;
-            _otherWorld->mFileName = path;
-            _otherWorld->mCellItems.resize(otherWorld->width() * otherWorld->height());
-            mOtherWorlds += _otherWorld;
-
-            foreach (WorldBMP *bmp, otherWorld->bmps()) {
-                WorldBMPItem *item = new WorldBMPItem(this, bmp);
-                item->setVisible(prefs->showOtherWorlds());
-                addItem(item);
-                _otherWorld->mBMPItems += item;
-            }
-
-            QSet<ThumbnailCell> visibleCells;
-            ThumbnailSettingsMgr::instance().visibleCells(path, visibleCells);
-
-            for (int y = 0; y < otherWorld->height(); y++) {
-                for (int x = 0; x < otherWorld->width(); x++) {
-                    WorldCell *cell = otherWorld->cellAt(x, y);
-                    OtherWorldCellItem *item = new OtherWorldCellItem(cell, this);
-                    item->setVisible(prefs->showOtherWorlds());
-                    addItem(item);
-                    item->setZValue(ZVALUE_CELLITEM); // below mGridItem
-                    _otherWorld->mCellItems[y * otherWorld->width() + x] = item;
-                    if (prefs->showWorldThumbnails()
-                            && prefs->loadAllWorldThumbnails()) {
-                        _otherWorld->mPendingThumbnails += item;
-                    } else if (prefs->showWorldThumbnails()
-                               && visibleCells.contains(
-                                   ThumbnailCell(cell->x(), cell->y()))) {
-                        _otherWorld->mPendingThumbnails += item;
-                    }
-                }
-            }
-
-            if (prefs->showOtherWorlds())
-                setSceneRect(sceneRect().united(boundingRect(_otherWorld->adjustedBounds(world()))));
-        }
-    }
+    loadOtherWorlds();
 
     QSet<ThumbnailCell> visibleCells;
     ThumbnailSettingsMgr::instance().visibleCells(worldDocument()->fileName(), visibleCells);
@@ -408,8 +629,11 @@ QList<WorldBMP *> WorldScene::bmpsInRect(const QRectF &cellRect)
 
 void WorldScene::pasteCellsFromClipboard()
 {
+    if (mActiveTool == mPasteCellsTool) {
+        mPasteCellsTool->restart();
+        return;
+    }
     ToolManager::instance()->selectTool(mPasteCellsTool);
-    //    mActiveTool = mPasteCellsTool;
 }
 
 void WorldScene::cancelLoadingThumbnails()
@@ -420,6 +644,63 @@ void WorldScene::cancelLoadingThumbnails()
     if (mLoadThumbnailsDialog)
         mLoadThumbnailsDialog->close();
     mThumbnailLoadTotal = 0;
+}
+
+bool WorldScene::loadWorldMapOverlay(const QString &fileName, bool forest,
+                                     QString *error)
+{
+    WorldMapOverlayItem *&item = forest
+            ? mWorldMapForestOverlayItem : mWorldMapOverlayItem;
+    const bool created = item == nullptr;
+    if (created) {
+        item = new WorldMapOverlayItem(this, forest);
+        addItem(item);
+    }
+    if (!item->load(fileName, error)) {
+        if (created) {
+            delete item;
+            item = nullptr;
+        }
+        return false;
+    }
+    item->setVisible(true);
+    return true;
+}
+
+bool WorldScene::hasWorldMapOverlay(bool forest) const
+{
+    return forest ? mWorldMapForestOverlayItem != nullptr
+                  : mWorldMapOverlayItem != nullptr;
+}
+
+bool WorldScene::worldMapOverlayVisible(bool forest) const
+{
+    WorldMapOverlayItem *item = forest
+            ? mWorldMapForestOverlayItem : mWorldMapOverlayItem;
+    return item && item->isVisible();
+}
+
+int WorldScene::worldMapOverlayFeatureCount(bool forest) const
+{
+    WorldMapOverlayItem *item = forest
+            ? mWorldMapForestOverlayItem : mWorldMapOverlayItem;
+    return item ? item->featureCount() : 0;
+}
+
+void WorldScene::setWorldMapOverlayVisible(bool forest, bool visible)
+{
+    WorldMapOverlayItem *item = forest
+            ? mWorldMapForestOverlayItem : mWorldMapOverlayItem;
+    if (item)
+        item->setVisible(visible);
+}
+
+void WorldScene::clearWorldMapOverlays()
+{
+    delete mWorldMapOverlayItem;
+    mWorldMapOverlayItem = nullptr;
+    delete mWorldMapForestOverlayItem;
+    mWorldMapForestOverlayItem = nullptr;
 }
 
 void WorldScene::worldAboutToResize(const QSize &newSize)
@@ -471,17 +752,125 @@ void WorldScene::worldResized(const QSize &oldSize)
         item->synchWithBMP();
     foreach (WorldRoadItem *item, mRoadItems)
         item->synchWithRoad();
+    QString error;
+    if (mWorldMapOverlayItem)
+        mWorldMapOverlayItem->load(mWorldMapOverlayItem->fileName(), &error);
+    if (mWorldMapForestOverlayItem)
+        mWorldMapForestOverlayItem->load(
+                    mWorldMapForestOverlayItem->fileName(), &error);
 }
 
 void WorldScene::generateLotsSettingsChanged()
 {
+    reloadOtherWorlds();
     mCoordItem->update();
     if (mZombieSpawnImageItem)
         mZombieSpawnImageItem->reloadFromSettings();
     if (mBiomeMapItem)
         mBiomeMapItem->reloadFromSettings();
+    QString error;
+    if (mWorldMapOverlayItem)
+        mWorldMapOverlayItem->load(mWorldMapOverlayItem->fileName(), &error);
+    if (mWorldMapForestOverlayItem)
+        mWorldMapForestOverlayItem->load(
+                    mWorldMapForestOverlayItem->fileName(), &error);
     ZombieHeatMapTool::instance()->updateEnabledState();
     BiomeMapTool::instance()->updateEnabledState();
+}
+
+void WorldScene::loadOtherWorlds()
+{
+    Preferences *prefs = Preferences::instance();
+    QString ownerIdentity = QFileInfo(worldDocument()->fileName())
+            .canonicalFilePath();
+    if (ownerIdentity.isEmpty())
+        ownerIdentity = QFileInfo(worldDocument()->fileName())
+                .absoluteFilePath();
+#ifdef Q_OS_WIN
+    ownerIdentity = ownerIdentity.toLower();
+#endif
+    ownerIdentity = QDir::cleanPath(ownerIdentity);
+    QSet<QString> loadedPaths;
+    for (const QString &path : world()->otherWorlds()) {
+        QString identity = QFileInfo(path).canonicalFilePath();
+        if (identity.isEmpty())
+            identity = QFileInfo(path).absoluteFilePath();
+#ifdef Q_OS_WIN
+        identity = identity.toLower();
+#endif
+        identity = QDir::cleanPath(identity);
+        if (identity == ownerIdentity || loadedPaths.contains(identity)) {
+            qWarning() << "Linked world skipped because it is the current "
+                          "project or a duplicate:" << path;
+            continue;
+        }
+        WorldReader reader;
+        World *linkedWorld = reader.readWorld(path);
+        if (!linkedWorld) {
+            qWarning().noquote() << "Linked world could not be read:"
+                                 << path << reader.errorString();
+            continue;
+        }
+        if (linkedWorld->gridFormat() != world()->gridFormat()) {
+            qWarning() << "Linked world skipped because its grid differs "
+                          "from the current project:" << path;
+            delete linkedWorld;
+            continue;
+        }
+        loadedPaths.insert(identity);
+
+        OtherWorld *otherWorld = new OtherWorld();
+        otherWorld->mWorld = linkedWorld;
+        otherWorld->mFileName = path;
+        otherWorld->mCellItems.resize(
+                    linkedWorld->width() * linkedWorld->height());
+        mOtherWorlds += otherWorld;
+
+        for (WorldBMP *bmp : linkedWorld->bmps()) {
+            WorldBMPItem *item = new WorldBMPItem(this, bmp);
+            item->setVisible(prefs->showOtherWorlds()
+                             && prefs->showBMPs());
+            addItem(item);
+            otherWorld->mBMPItems += item;
+        }
+
+        QSet<ThumbnailCell> visibleCells;
+        ThumbnailSettingsMgr::instance().visibleCells(path, visibleCells);
+        for (int y = 0; y < linkedWorld->height(); ++y) {
+            for (int x = 0; x < linkedWorld->width(); ++x) {
+                WorldCell *cell = linkedWorld->cellAt(x, y);
+                OtherWorldCellItem *item = new OtherWorldCellItem(cell, this);
+                item->setVisible(prefs->showOtherWorlds() && !mBMPToolActive);
+                addItem(item);
+                item->setZValue(ZVALUE_CELLITEM);
+                otherWorld->mCellItems[y * linkedWorld->width() + x] = item;
+                if (prefs->showWorldThumbnails()
+                        && (prefs->loadAllWorldThumbnails()
+                            || visibleCells.contains(
+                                ThumbnailCell(cell->x(), cell->y())))) {
+                    otherWorld->mPendingThumbnails += item;
+                }
+            }
+        }
+    }
+    setShowOtherWorlds(prefs->showOtherWorlds());
+}
+
+void WorldScene::reloadOtherWorlds()
+{
+    if (mLoadThumbnailsDialog)
+        mLoadThumbnailsDialog->close();
+    mThumbnailLoadTotal = 0;
+    qDeleteAll(mOtherWorlds);
+    mOtherWorlds.clear();
+    loadOtherWorlds();
+    if (Preferences::instance()->showWorldThumbnails()
+            && Preferences::instance()->loadAllWorldThumbnails()) {
+        startThumbnailProgress();
+    } else {
+        handlePendingThumbnails();
+    }
+    update();
 }
 
 QPointF WorldScene::pixelToCellCoords(qreal x, qreal y) const
@@ -1013,6 +1402,10 @@ void WorldScene::updateThumbnailProgress()
 
 void WorldScene::keyPressEvent(QKeyEvent *event)
 {
+    if (mActiveTool == mPasteCellsTool) {
+        mActiveTool->keyPressEvent(event);
+        return;
+    }
     QGraphicsScene::keyPressEvent(event);
     if (event->isAccepted())
         return;
@@ -1023,6 +1416,11 @@ void WorldScene::keyPressEvent(QKeyEvent *event)
 
 void WorldScene::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
+    if (mActiveTool == mPasteCellsTool) {
+        mActiveTool->setEventView(mEventView);
+        mActiveTool->mousePressEvent(event);
+        return;
+    }
     QGraphicsScene::mousePressEvent(event);
     if (event->isAccepted())
         return;
@@ -1036,6 +1434,11 @@ void WorldScene::mousePressEvent(QGraphicsSceneMouseEvent *event)
 
 void WorldScene::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 {
+    if (mActiveTool == mPasteCellsTool) {
+        mActiveTool->setEventView(mEventView);
+        mActiveTool->mouseMoveEvent(event);
+        return;
+    }
     QGraphicsScene::mouseMoveEvent(event);
     if (event->isAccepted())
         return;
@@ -1048,6 +1451,11 @@ void WorldScene::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 
 void WorldScene::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
 {
+    if (mActiveTool == mPasteCellsTool) {
+        mActiveTool->setEventView(mEventView);
+        mActiveTool->mouseReleaseEvent(event);
+        return;
+    }
     QGraphicsScene::mouseReleaseEvent(event);
     if (event->isAccepted())
         return;
@@ -1293,10 +1701,9 @@ void BaseCellItem::paint(QPainter *painter,
     painter->drawRect(mBoundingRect);
 #endif
 }
-
-void BaseCellItem::paintThumbnails(QPainter *painter)
+void BaseCellItem::paintThumbnails(QPainter *painter, bool force)
 {
-    if (Preferences::instance()->showWorldThumbnails()) {
+    if (force || Preferences::instance()->showWorldThumbnails()) {
         if (mLotImagesRenderOrder.size() != mLotImages.size())
             sortLotImages();
 
@@ -1754,12 +2161,20 @@ PasteCellItem::PasteCellItem(WorldCellContents *contents, WorldScene *scene, QGr
 
 void PasteCellItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
 {
-    BaseCellItem::paint(painter, option, widget);
+    Q_UNUSED(option)
+    Q_UNUSED(widget)
+    painter->save();
+    painter->setOpacity(0.72);
+    paintThumbnails(painter, true);
+    painter->restore();
 
-    QPen pen(Qt::blue);
-//    pen.setWidth(2);
+    QPen pen(mTargetOccupied ? QColor(255, 128, 32) : QColor(48, 220, 120));
+    pen.setWidth(3);
+    pen.setCosmetic(true);
     painter->setPen(pen);
-    painter->setBrush(QBrush(QColor(0x33,0x99,0xff,255/8)));
+    painter->setBrush(QBrush(mTargetOccupied
+                             ? QColor(255, 96, 32, 64)
+                             : QColor(48, 220, 120, 52)));
     QPolygonF poly = mScene->cellRectToPolygon(QRectF(cellPos(), QSize(1, 1))).translated(mDrawOffset);
     painter->drawPolygon(poly);
 }
@@ -1768,6 +2183,14 @@ void PasteCellItem::setDragOffset(const QPointF &offset)
 {
     mDrawOffset = offset;
     updateBoundingRect();
+}
+
+void PasteCellItem::setTargetOccupied(bool occupied)
+{
+    if (mTargetOccupied == occupied)
+        return;
+    mTargetOccupied = occupied;
+    update();
 }
 
 /////
@@ -2666,6 +3089,8 @@ void ZombieSpawnImageItem::rebuildPreview()
 
 OtherWorld::~OtherWorld()
 {
+    qDeleteAll(mBMPItems);
+    qDeleteAll(mCellItems);
     delete mWorld;
 }
 

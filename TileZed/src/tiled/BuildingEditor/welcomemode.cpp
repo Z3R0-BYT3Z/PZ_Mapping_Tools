@@ -59,34 +59,38 @@ namespace WelcomeModeNS {
 
 LinkItem::LinkItem(const QString &text1, const QString &text2, QGraphicsItem *parent) :
     QGraphicsItem(parent),
-    mRemoveItem(0)
+    mBackgroundItem(0),
+    mPrimaryTextItem(0),
+    mSecondaryTextItem(0),
+    mRemoveItem(0),
+    mRemoveBGItem(0)
 {
     const QPalette palette = QApplication::palette();
-    QGraphicsRectItem *bg = new QGraphicsRectItem(this);
-    bg->setBrush(palette.brush(QPalette::AlternateBase));
-    bg->setPen(Qt::NoPen);
-    bg->setVisible(false);
+    mBackgroundItem = new QGraphicsRectItem(this);
+    mBackgroundItem->setBrush(palette.brush(QPalette::AlternateBase));
+    mBackgroundItem->setPen(Qt::NoPen);
+    mBackgroundItem->setVisible(false);
 
-    QGraphicsTextItem *item1 = new QGraphicsTextItem(this);
-    item1->setPlainText(text1);
-    item1->setDefaultTextColor(palette.color(QPalette::Link));
+    mPrimaryTextItem = new QGraphicsTextItem(this);
+    mPrimaryTextItem->setPlainText(text1);
+    mPrimaryTextItem->setDefaultTextColor(palette.color(QPalette::Link));
 
-    mBoundingRect = sceneRectOfItem(item1);
+    mBoundingRect = sceneRectOfItem(mPrimaryTextItem);
 
     if (!text2.isEmpty()) {
-        QGraphicsTextItem *item2 = new QGraphicsTextItem(this);
-        QString s = QFontMetrics(item2->font()).elidedText(text2, Qt::ElideRight, 400 - 40);
-        item2->setPlainText(s);
-        item2->setDefaultTextColor(palette.color(QPalette::Mid));
-        item2->setPos(0, item1->boundingRect().height());
+        mSecondaryTextItem = new QGraphicsTextItem(this);
+        QString s = QFontMetrics(mSecondaryTextItem->font()).elidedText(text2, Qt::ElideRight, 400 - 40);
+        mSecondaryTextItem->setPlainText(s);
+        mSecondaryTextItem->setDefaultTextColor(palette.color(QPalette::Mid));
+        mSecondaryTextItem->setPos(0, mPrimaryTextItem->boundingRect().height());
 
         mFilePath = text2;
-        mBoundingRect |= sceneRectOfItem(item2);
+        mBoundingRect |= sceneRectOfItem(mSecondaryTextItem);
     }
 
     mBoundingRect.translate(-mBoundingRect.topLeft());
     mBoundingRect.setRight(400);
-    bg->setRect(mBoundingRect);
+    mBackgroundItem->setRect(mBoundingRect);
 
 //    setFlag(ItemHasNoContents);
     setAcceptHoverEvents(true);
@@ -157,6 +161,19 @@ void LinkItem::allowRemove()
     mRemoveItem = item;
 }
 
+void LinkItem::applyTheme()
+{
+    const QPalette palette = QApplication::palette();
+    mBackgroundItem->setBrush(palette.brush(QPalette::AlternateBase));
+    mPrimaryTextItem->setDefaultTextColor(palette.color(QPalette::Link));
+    if (mSecondaryTextItem)
+        mSecondaryTextItem->setDefaultTextColor(palette.color(QPalette::Mid));
+    if (QGraphicsRectItem *removeBackground =
+            qgraphicsitem_cast<QGraphicsRectItem *>(mRemoveBGItem)) {
+        removeBackground->setBrush(palette.brush(QPalette::Midlight));
+    }
+}
+
 }
 
 WelcomeMode::WelcomeMode(QObject *parent) :
@@ -170,7 +187,8 @@ WelcomeMode::WelcomeMode(QObject *parent) :
     mWidget->setObjectName(QLatin1String("WelcomeModeWidget"));
     ui->setupUi(mWidget);
 
-    const QPalette palette = ui->graphicsView->palette();
+    const QPalette palette = QApplication::palette();
+    ui->graphicsView->setPalette(palette);
     ui->graphicsView->setBackgroundBrush(palette.brush(QPalette::Base));
 
     QGraphicsScene *scene = new QGraphicsScene(ui->graphicsView);
@@ -237,6 +255,9 @@ WelcomeMode::WelcomeMode(QObject *parent) :
 
     BuildingPreferences *prefs = BuildingPreferences::instance();
     connect(prefs, &BuildingPreferences::mapsDirectoryChanged, this, &WelcomeMode::onMapsDirectoryChanged);
+    connect(Tiled::Internal::Preferences::instance(),
+            &Tiled::Internal::Preferences::themeChanged,
+            this, &WelcomeMode::applyTheme);
 
     QDir mapsDir(prefs->mapsDirectory());
     if (!mapsDir.exists())
@@ -384,6 +405,32 @@ void WelcomeMode::onActivated(const QModelIndex &index)
     qInfo() << "Building browser opening" << path;
     if (!editor->openFile(path))
         qWarning() << "Building browser failed to open" << path;
+}
+
+void WelcomeMode::applyTheme()
+{
+    const QPalette palette = QApplication::palette();
+    ui->graphicsView->setPalette(palette);
+    ui->graphicsView->setBackgroundBrush(palette.brush(QPalette::Base));
+    const QList<QGraphicsItem *> items = ui->graphicsView->scene()->items();
+    for (QGraphicsItem *item : items) {
+        if (item->parentItem())
+            continue;
+        if (QGraphicsTextItem *textItem =
+                qgraphicsitem_cast<QGraphicsTextItem *>(item)) {
+            textItem->setDefaultTextColor(palette.color(QPalette::WindowText));
+        } else if (QGraphicsLineItem *lineItem =
+                   qgraphicsitem_cast<QGraphicsLineItem *>(item)) {
+            lineItem->setPen(QPen(palette.color(QPalette::Mid)));
+        }
+    }
+    mNewItem->applyTheme();
+    mOpenItem->applyTheme();
+    for (WelcomeModeNS::LinkItem *link : mRecentItems)
+        link->applyTheme();
+    for (WelcomeModeNS::LinkItem *link : mAutoSaveItems)
+        link->applyTheme();
+    ui->graphicsView->viewport()->update();
 }
 
 void WelcomeMode::browse()

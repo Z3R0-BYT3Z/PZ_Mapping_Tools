@@ -105,8 +105,8 @@ public:
     void setHighlightLabelledItems(bool highlight) { mHighlightLabelledItems = highlight; }
     bool highlightLabelledItems() const { return mHighlightLabelledItems; }
 
-    void setShowEmptyTilesAsMissig(bool show);
-    bool showEmptyTilesAsMissing() const { return mShowEmptyTilesAsMissing; }
+    void setShowTransparentTiles(bool show);
+    bool showTransparentTiles() const { return mShowTransparentTiles; }
 
     void setToolTip(int tileIndex, const QString &text);
 
@@ -190,7 +190,7 @@ private:
     bool mShowHeaders;
     bool mShowLabels;
     bool mHighlightLabelledItems;
-    bool mShowEmptyTilesAsMissing;
+    bool mShowTransparentTiles;
     int mColumnCount;
     QModelIndex mDropIndex;
 };
@@ -252,6 +252,7 @@ signals:
 public slots:
     void scaleChanged(qreal scale);
     void tilesetBackgroundColorChanged(const QColor& color);
+    void themeChanged();
 
 private:
     void init();

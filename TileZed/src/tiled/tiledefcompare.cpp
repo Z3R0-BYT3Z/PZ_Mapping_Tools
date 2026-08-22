@@ -1165,4 +1165,3 @@ bool TileDefCompare::renderValidation(
     }
     return true;
 }
-

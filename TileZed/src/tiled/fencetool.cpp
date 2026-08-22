@@ -43,7 +43,7 @@ SINGLETON_IMPL(FenceTool)
 
 FenceTool::FenceTool(QObject *parent) :
     AbstractTileTool(tr("Draw Fence"),
-                     QIcon(QLatin1String(":/images/22x22/fence-tool.png")),
+                     QIcon(QLatin1String(":/images/22x22/fence-tool.svg")),
                      QKeySequence(/*tr("E")*/),
                      parent),
     mScene(0),

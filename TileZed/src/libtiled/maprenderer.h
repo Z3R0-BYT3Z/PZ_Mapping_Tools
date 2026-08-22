@@ -32,6 +32,7 @@
 #include "tiled_global.h"
 
 #include <QPainter>
+#include <atomic>
 
 namespace Tiled {
 
@@ -239,7 +240,7 @@ public:
 
     int totalLevels() const { return maxLevel() - minLevel() + 1; }
 
-    bool *mAbortDrawing;
+    std::atomic_bool *mAbortDrawing;
 
 #else
     /**

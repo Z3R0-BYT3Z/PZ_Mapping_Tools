@@ -922,7 +922,7 @@ void TileDefDialog::openRecentFile()
 }
 
 bool TileDefDialog::fileSave()
-{    
+{
     if (mTileDefFile->fileName().length())
         return fileSave(mTileDefFile->fileName());
     else

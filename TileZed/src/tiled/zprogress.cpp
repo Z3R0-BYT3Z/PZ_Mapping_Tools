@@ -117,8 +117,8 @@ void ZProgressManager::end(bool cancellable)
     }
     mCancelButton->setVisible(mCancellableDepth > 0);
 //    mDialog->setValue(mDialog->maximum()); // hides dialog!
+    qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
     if (--mDepth == 0)
         mDialog->hide();
-    qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 }
 

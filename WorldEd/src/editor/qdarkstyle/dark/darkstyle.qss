@@ -1248,7 +1248,13 @@ QComboBox QAbstractItemView:hover {
 
 QComboBox QAbstractItemView:selected {
   background: #346792;
-  color: #455364;
+  color: #DFE1E2;
+}
+
+QComboBox:editable QLineEdit {
+  background-color: #19232D;
+  border: none;
+  color: #DFE1E2;
 }
 
 QComboBox QAbstractItemView:alternate {

@@ -25,8 +25,10 @@
 #include <QGraphicsItem>
 #include <QImage>
 #include <QPair>
+#include <QPicture>
 #include <QPointer>
 #include <QPolygonF>
+#include <QVector>
 
 class BaseWorldSceneTool;
 class MapImage;
@@ -40,6 +42,34 @@ class WorldBMP;
 class WorldCellTool;
 class WorldDocument;
 class WorldScene;
+
+class WorldMapOverlayItem : public QGraphicsItem
+{
+public:
+    WorldMapOverlayItem(WorldScene *scene, bool forest);
+
+    QRectF boundingRect() const override;
+    void paint(QPainter *painter,
+               const QStyleOptionGraphicsItem *option,
+               QWidget *widget = nullptr) override;
+
+    bool load(const QString &fileName, QString *error);
+    QString fileName() const { return mFileName; }
+    int featureCount() const { return mFeatureCount; }
+
+private:
+    struct Batch {
+        QRectF bounds;
+        QPicture picture;
+    };
+
+    WorldScene *mScene;
+    bool mForest;
+    QRectF mBoundingRect;
+    QVector<Batch> mBatches;
+    QString mFileName;
+    int mFeatureCount = 0;
+};
 
 #define GRID_WIDTH (512)
 #define GRID_HEIGHT (256)
@@ -135,7 +165,7 @@ public:
                const QStyleOptionGraphicsItem *option,
                QWidget *widget = 0);
 
-    void paintThumbnails(QPainter *painter);
+    void paintThumbnails(QPainter *painter, bool force = false);
 
     virtual QPoint cellPos() const = 0;
     virtual QString mapFilePath() const = 0;
@@ -265,11 +295,13 @@ public:
     const QList<WorldCellLot*> &lots() const { return mContents->lots(); }
 
     void setDragOffset(const QPointF &offset);
+    void setTargetOccupied(bool occupied);
 
     WorldCellContents *contents() const { return mContents; }
 
 private:
     WorldCellContents *mContents;
+    bool mTargetOccupied = false;
 };
 
 /**
@@ -475,7 +507,7 @@ class WorldScene : public BaseGraphicsScene
 public:
     explicit WorldScene(WorldDocument *worldDoc, QObject *parent = 0);
     ~WorldScene();
-    
+
     static const int ZVALUE_CELLITEM;
     static const int ZVALUE_ROADITEM_UNSELECTED;
     static const int ZVALUE_ROADITEM_SELECTED;
@@ -540,13 +572,22 @@ public:
     void cancelLoadingThumbnails();
     void setNightPreviewEnabled(bool enabled);
 
+    bool loadWorldMapOverlay(const QString &fileName, bool forest,
+                             QString *error);
+    bool hasWorldMapOverlay(bool forest) const;
+    bool worldMapOverlayVisible(bool forest) const;
+    int worldMapOverlayFeatureCount(bool forest) const;
+    void setWorldMapOverlayVisible(bool forest, bool visible);
+    void clearWorldMapOverlays();
+
 signals:
-    
+
 public slots:
     void worldAboutToResize(const QSize &newSize);
     void worldResized(const QSize &oldSize);
 
     void generateLotsSettingsChanged();
+    void reloadOtherWorlds();
 
     void selectedCellsChanged();
     void cellMapFileChanged(WorldCell *cell);
@@ -622,6 +663,8 @@ private:
     QString mDragBMPError;
     ZombieSpawnImageItem *mZombieSpawnImageItem;
     BiomeMapItem *mBiomeMapItem;
+    WorldMapOverlayItem *mWorldMapOverlayItem = nullptr;
+    WorldMapOverlayItem *mWorldMapForestOverlayItem = nullptr;
     bool mBMPToolActive;
     bool mDoubleClick;
     NightPreviewItem *mNightPreviewItem;
@@ -629,6 +672,7 @@ private:
     int pendingThumbnailCount() const;
     void startThumbnailProgress();
     void updateThumbnailProgress();
+    void loadOtherWorlds();
 
     QList<OtherWorld*> mOtherWorlds;
 };

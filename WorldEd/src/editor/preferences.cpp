@@ -22,6 +22,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QPalette>
 #include <QSaveFile>
 #include <QSettings>
 #include <QTextStream>
@@ -139,7 +140,70 @@ QString builtInThemeStyleSheet(const QString &displayName)
     }
     return QString();
 }
-
+QPalette defaultApplicationPalette()
+{
+    static const QPalette palette = qApp->palette();
+    return palette;
+}
+QPalette applicationPaletteForTheme(const QString &themeName)
+{
+    QPalette palette = defaultApplicationPalette();
+    QColor window;
+    QColor base;
+    QColor alternate;
+    QColor text;
+    QColor muted;
+    QColor highlight;
+    QColor highlightedText;
+    if (themeName == QLatin1String("Breeze (Dark)")
+            || themeName == QLatin1String("Breeze (Dark Blue)")) {
+        window = QColor(QStringLiteral("#31363b"));
+        base = QColor(QStringLiteral("#1d2023"));
+        alternate = QColor(QStringLiteral("#2c3034"));
+        text = QColor(QStringLiteral("#eff0f1"));
+        muted = QColor(QStringLiteral("#76797c"));
+        highlight = QColor(QStringLiteral("#3daee9"));
+        highlightedText = text;
+    } else if (themeName == QLatin1String("QDarkStyle (Dark)")) {
+        window = QColor(QStringLiteral("#19232d"));
+        base = QColor(QStringLiteral("#37414f"));
+        alternate = QColor(QStringLiteral("#455364"));
+        text = QColor(QStringLiteral("#dfe1e2"));
+        muted = QColor(QStringLiteral("#788d9c"));
+        highlight = QColor(QStringLiteral("#1a72bb"));
+        highlightedText = text;
+    } else if (themeName == QLatin1String("Mapping Discord (B42)")) {
+        window = QColor(QStringLiteral("#141c17"));
+        base = QColor(QStringLiteral("#101712"));
+        alternate = QColor(QStringLiteral("#19231c"));
+        text = QColor(QStringLiteral("#eef2ef"));
+        muted = QColor(QStringLiteral("#9da9a1"));
+        highlight = QColor(QStringLiteral("#4e8f61"));
+        highlightedText = text;
+    } else {
+        return palette;
+    }
+    const QPalette::ColorGroup groups[] = {
+        QPalette::Active, QPalette::Inactive, QPalette::Disabled
+    };
+    for (QPalette::ColorGroup group : groups) {
+        const QColor groupText = group == QPalette::Disabled ? muted : text;
+        palette.setColor(group, QPalette::Window, window);
+        palette.setColor(group, QPalette::WindowText, groupText);
+        palette.setColor(group, QPalette::Base, base);
+        palette.setColor(group, QPalette::AlternateBase, alternate);
+        palette.setColor(group, QPalette::ToolTipBase, base);
+        palette.setColor(group, QPalette::ToolTipText, groupText);
+        palette.setColor(group, QPalette::Text, groupText);
+        palette.setColor(group, QPalette::Button, window);
+        palette.setColor(group, QPalette::ButtonText, groupText);
+        palette.setColor(group, QPalette::BrightText, QColor(QStringLiteral("#ffffff")));
+        palette.setColor(group, QPalette::Link, highlight);
+        palette.setColor(group, QPalette::Highlight, highlight);
+        palette.setColor(group, QPalette::HighlightedText, highlightedText);
+    }
+    return palette;
+}
 void ensureBuiltInThemesExtracted()
 {
     const QString directoryPath = themesDirectoryPath();
@@ -149,13 +213,15 @@ void ensureBuiltInThemesExtracted()
     const QDir directory(directoryPath);
     for (const BuiltInTheme &theme : builtInThemes) {
         const QString destinationPath = directory.filePath(QLatin1String(theme.fileName));
-        if (QFileInfo::exists(destinationPath))
-            continue;
-
         const QString styleSheet = builtInThemeStyleSheet(QLatin1String(theme.displayName));
         if (styleSheet.isEmpty())
             continue;
-
+        QFile existing(destinationPath);
+        if (existing.open(QIODevice::ReadOnly)
+                && existing.readAll() == styleSheet.toUtf8()) {
+            continue;
+        }
+        existing.close();
         QSaveFile destination(destinationPath);
         if (!destination.open(QIODevice::WriteOnly))
             continue;
@@ -164,9 +230,100 @@ void ensureBuiltInThemesExtracted()
     }
 }
 
-} // anonymous namespace
+QString normalizedFeatureTile(QString tile)
+{
+    tile = tile.trimmed();
+    const int separator = tile.lastIndexOf(QLatin1Char('_'));
+    bool validId = false;
+    const int tileId = tile.mid(separator + 1).toInt(&validId);
+    if (separator > 0 && validId && tileId >= 0)
+        tile = tile.left(separator + 1) + QString::number(tileId);
+    return tile;
+}
 
+QStringList normalizedFeatureTiles(const QStringList &tiles)
+{
+    QStringList normalized;
+    for (const QString &sourceTile : tiles) {
+        const QString tile = normalizedFeatureTile(sourceTile);
+        if (!tile.isEmpty() && !normalized.contains(tile))
+            normalized.append(tile);
+    }
+    normalized.sort(Qt::CaseInsensitive);
+    return normalized;
+}
+}
 Preferences *Preferences::mInstance = 0;
+
+QStringList Preferences::defaultTreeFeatureTiles()
+{
+    QStringList tiles;
+    for (int id = 8; id <= 15; ++id)
+        tiles.append(QStringLiteral("vegetation_trees_01_%1").arg(id));
+    tiles.append(QStringLiteral("jumbo_tree_01_0"));
+    const QStringList species = {
+        QStringLiteral("americanholly"),
+        QStringLiteral("americanlinden"),
+        QStringLiteral("canadianhemlock"),
+        QStringLiteral("carolinasilverbell"),
+        QStringLiteral("cockspurhawthorn"),
+        QStringLiteral("dogwood"),
+        QStringLiteral("easternredbud"),
+        QStringLiteral("redmaple"),
+        QStringLiteral("riverbirch"),
+        QStringLiteral("virginiapine"),
+        QStringLiteral("yellowwood")
+    };
+    for (const QString &name : species) {
+        const QString regular = QStringLiteral("e_%1JUMBO_1_").arg(name);
+        tiles.append(regular + QStringLiteral("0"));
+        tiles.append(regular + QStringLiteral("1"));
+        tiles.append(QStringLiteral("e_%1JUMBOXL_1_0").arg(name));
+        tiles.append(QStringLiteral("e_%1JUMBOXXL_1_0").arg(name));
+    }
+    return normalizedFeatureTiles(tiles);
+}
+
+QString Preferences::canonicalFeatureTileName(const QString &tile)
+{
+    return normalizedFeatureTile(tile);
+}
+
+QStringList Preferences::defaultPrimaryRoadFeatureTiles()
+{
+    return normalizedFeatureTiles({
+        QStringLiteral("blends_street_01_32"),
+        QStringLiteral("blends_street_01_37"),
+        QStringLiteral("blends_street_01_38"),
+        QStringLiteral("blends_street_01_39"),
+        QStringLiteral("blends_street_01_80"),
+        QStringLiteral("blends_street_01_85"),
+        QStringLiteral("blends_street_01_86"),
+        QStringLiteral("blends_street_01_87")
+    });
+}
+
+QStringList Preferences::defaultSecondaryRoadFeatureTiles()
+{
+    return normalizedFeatureTiles({
+        QStringLiteral("blends_street_01_96"),
+        QStringLiteral("blends_street_01_101"),
+        QStringLiteral("blends_street_01_102"),
+        QStringLiteral("blends_street_01_103")
+    });
+}
+
+QStringList Preferences::defaultTertiaryRoadFeatureTiles()
+{
+    return normalizedFeatureTiles({
+        QStringLiteral("blends_street_01_16"),
+        QStringLiteral("blends_street_01_21"),
+        QStringLiteral("blends_street_01_48"),
+        QStringLiteral("blends_street_01_53"),
+        QStringLiteral("blends_street_01_54"),
+        QStringLiteral("blends_street_01_55")
+    });
+}
 
 Preferences *Preferences::instance()
 {
@@ -252,12 +409,49 @@ Preferences::Preferences()
             QLatin1String("RoadSimplificationTrail"), 2.0).toDouble(), 32.0);
     mRoadPointSpacingTrail = qBound(1, mSettings->value(
             QLatin1String("RoadPointSpacingTrail"), 40).toInt(), 300);
+    mGenerateTrailFeatures = mSettings->value(
+                QLatin1String("GenerateTrailFeatures"), false).toBool();
     mRoadSimplificationRailway = qBound(0.0, mSettings->value(
             QLatin1String("RoadSimplificationRailway"), 2.0).toDouble(), 32.0);
     mRoadPointSpacingRailway = qBound(1, mSettings->value(
             QLatin1String("RoadPointSpacingRailway"), 40).toInt(), 300);
+    mTreeFeatureTiles = normalizedFeatureTiles(
+                mSettings->contains(QLatin1String("TreeFeatureTiles"))
+                ? mSettings->value(QLatin1String("TreeFeatureTiles")).toStringList()
+                : defaultTreeFeatureTiles());
+    mPrimaryRoadFeatureTiles = normalizedFeatureTiles(
+                mSettings->contains(QLatin1String("PrimaryRoadFeatureTiles"))
+                ? mSettings->value(QLatin1String("PrimaryRoadFeatureTiles")).toStringList()
+                : defaultPrimaryRoadFeatureTiles());
+    mSecondaryRoadFeatureTiles = normalizedFeatureTiles(
+                mSettings->contains(QLatin1String("SecondaryRoadFeatureTiles"))
+                ? mSettings->value(QLatin1String("SecondaryRoadFeatureTiles")).toStringList()
+                : defaultSecondaryRoadFeatureTiles());
+    mTertiaryRoadFeatureTiles = normalizedFeatureTiles(
+                mSettings->contains(QLatin1String("TertiaryRoadFeatureTiles"))
+                ? mSettings->value(QLatin1String("TertiaryRoadFeatureTiles")).toStringList()
+                : defaultTertiaryRoadFeatureTiles());
     mShowObjects = mSettings->value(QLatin1String("ShowObjects"), true).toBool();
     mShowObjectNames = mSettings->value(QLatin1String("ShowObjectNames"), true).toBool();
+    mShowVehicleMeshPreviews = mSettings->value(
+                QLatin1String("ShowVehicleMeshPreviews"), true).toBool();
+    const int vehiclePreviewGeometryVersion = mSettings->value(
+                QLatin1String("VehicleMeshPreviewGeometryVersion"), 0)
+            .toInt();
+    if (vehiclePreviewGeometryVersion < 2) {
+        mVehicleMeshPreviewScale = 1.0;
+        mSettings->setValue(QLatin1String("VehicleMeshPreviewScale"),
+                            mVehicleMeshPreviewScale);
+        mSettings->setValue(
+                    QLatin1String("VehicleMeshPreviewGeometryVersion"), 2);
+    } else {
+        mVehicleMeshPreviewScale = qBound(0.25, mSettings->value(
+                    QLatin1String("VehicleMeshPreviewScale"), 1.0)
+                .toDouble(), 4.0);
+    }
+    mVehicleMeshPreviewQuality = qBound(0.25, mSettings->value(
+                QLatin1String("VehicleMeshPreviewQuality"), 2.5).toDouble(),
+                4.0);
     mShowBMPs = mSettings->value(QLatin1String("ShowBMPs"), true).toBool();
     mShowMiniMap = mSettings->value(QLatin1String("ShowMiniMap"), true).toBool();
     mShowZombieSpawnImage = mSettings->value(QLatin1String("ShowZombieSpawnImage"), false).toBool();
@@ -527,6 +721,12 @@ void Preferences::setRoadPointSpacingTrail(int spacing)
                         mRoadPointSpacingTrail);
 }
 
+void Preferences::setGenerateTrailFeatures(bool enabled)
+{
+    mGenerateTrailFeatures = enabled;
+    mSettings->setValue(QLatin1String("Interface/GenerateTrailFeatures"),
+                        enabled);
+}
 void Preferences::setRoadSimplificationRailway(qreal tolerance)
 {
     mRoadSimplificationRailway = qBound(0.0, double(tolerance), 32.0);
@@ -539,6 +739,34 @@ void Preferences::setRoadPointSpacingRailway(int spacing)
     mRoadPointSpacingRailway = qBound(1, spacing, 300);
     mSettings->setValue(QLatin1String("Interface/RoadPointSpacingRailway"),
                         mRoadPointSpacingRailway);
+}
+
+void Preferences::setTreeFeatureTiles(const QStringList &tiles)
+{
+    mTreeFeatureTiles = normalizedFeatureTiles(tiles);
+    mSettings->setValue(QLatin1String("Interface/TreeFeatureTiles"),
+                        mTreeFeatureTiles);
+}
+
+void Preferences::setPrimaryRoadFeatureTiles(const QStringList &tiles)
+{
+    mPrimaryRoadFeatureTiles = normalizedFeatureTiles(tiles);
+    mSettings->setValue(QLatin1String("Interface/PrimaryRoadFeatureTiles"),
+                        mPrimaryRoadFeatureTiles);
+}
+
+void Preferences::setSecondaryRoadFeatureTiles(const QStringList &tiles)
+{
+    mSecondaryRoadFeatureTiles = normalizedFeatureTiles(tiles);
+    mSettings->setValue(QLatin1String("Interface/SecondaryRoadFeatureTiles"),
+                        mSecondaryRoadFeatureTiles);
+}
+
+void Preferences::setTertiaryRoadFeatureTiles(const QStringList &tiles)
+{
+    mTertiaryRoadFeatureTiles = normalizedFeatureTiles(tiles);
+    mSettings->setValue(QLatin1String("Interface/TertiaryRoadFeatureTiles"),
+                        mTertiaryRoadFeatureTiles);
 }
 
 void Preferences::setUseOpenGL(bool useOpenGL)
@@ -631,6 +859,49 @@ void Preferences::setShowObjectNames(bool show)
     mSettings->setValue(QLatin1String("Interface/ShowObjectNames"), mShowObjectNames);
 
     emit showObjectNamesChanged(mShowObjectNames);
+}
+
+void Preferences::setShowVehicleMeshPreviews(bool show)
+{
+    if (mShowVehicleMeshPreviews == show)
+        return;
+
+    mShowVehicleMeshPreviews = show;
+    mSettings->setValue(QLatin1String("Interface/ShowVehicleMeshPreviews"),
+                        mShowVehicleMeshPreviews);
+
+    emit showVehicleMeshPreviewsChanged(mShowVehicleMeshPreviews);
+}
+
+void Preferences::setVehicleMeshPreviewScale(qreal scale)
+{
+    scale = qBound(0.25, scale, 4.0);
+    if (qFuzzyCompare(mVehicleMeshPreviewScale, scale))
+        return;
+
+    mVehicleMeshPreviewScale = scale;
+    mSettings->setValue(QLatin1String("Interface/VehicleMeshPreviewScale"),
+                        mVehicleMeshPreviewScale);
+
+    emit vehicleMeshPreviewScaleChanged(mVehicleMeshPreviewScale);
+}
+
+void Preferences::setVehicleMeshPreviewQuality(qreal quality)
+{
+    quality = qBound(0.25, quality, 4.0);
+    if (qFuzzyCompare(mVehicleMeshPreviewQuality, quality))
+        return;
+
+    mVehicleMeshPreviewQuality = quality;
+    mSettings->setValue(QLatin1String("Interface/VehicleMeshPreviewQuality"),
+                        mVehicleMeshPreviewQuality);
+
+    emit vehicleMeshPreviewQualityChanged(mVehicleMeshPreviewQuality);
+}
+
+void Preferences::notifyVehicleMeshPreviewAtlasChanged()
+{
+    emit vehicleMeshPreviewAtlasChanged();
 }
 
 void Preferences::setShowBMPs(bool show)
@@ -871,8 +1142,9 @@ void Preferences::applyTheme() const
     ensureBuiltInThemesExtracted();
 
     mSettings->setValue(QLatin1String("Interface/Theme"), mTheme);
+    qApp->setStyleSheet(QString());
+    qApp->setPalette(applicationPaletteForTheme(mTheme));
     if (mTheme == QStringLiteral("Default")) {
-        qApp->setStyleSheet(QString());
         return;
     }
     QString styleSheet;
@@ -908,7 +1180,6 @@ void Preferences::applyTheme() const
         }
     }
     if (resource.isEmpty() && !styleSheetLoaded) {
-        qApp->setStyleSheet(QString());
         return;
     }
 
