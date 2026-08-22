@@ -1,7 +1,8 @@
-# PZTools documentation
+# PZTools documentation index
 
-This index covers the public documentation shipped with PZWorldEd, TileZed,
-and BuildingEd.
+This is the source-tree index for the maintained WorldEd, TileZed, and
+BuildingEd documentation. A compiled release contains the same entry points
+under `docs/index.html`.
 
 ## Start here
 
@@ -30,22 +31,24 @@ and BuildingEd.
 
 | Subject | Reference |
 |---|---|
-| Automapper rules and interactive mode | [Automapper](docs/TileZed/Automapper.html) |
-| Procedural loot | [Procedural loot editor](docs/PZ-B42.20-Procedural-Loot-Editor.md) |
-| Texture packs and extraction | [Pack comparator and extractor](docs/PZ-Pack-Comparator-and-Extractor.md) |
-| TileDefs, snow, burnt tiles, and replacements | [TileDef tools](docs/PZ-TileDef-Comparator-and-Snow-Editor.md) |
-| Tile property meanings | [Tile properties](docs/TileZed/TileProperties/index.html) |
-| Terrain BMP tools | [BMP tools](docs/TileZed/BMPTools.html) |
-| Lua mapping API | [Lua scripting](docs/TileZed/LuaScripting.html) |
+| Automapper concepts, manifest, layer rules, examples, interactive mode, and troubleshooting | [Automapper](docs/TileZed/Automapper.html) |
+| Build 42 procedural loot viewer/editor shared with BuildingEd | [Procedural loot editor](docs/PZ-B42.20-Procedural-Loot-Editor.md) |
+| Advanced `.pack` comparison, hashes, previews, extraction, and JSON provenance | [Pack comparator and extractor](docs/PZ-Pack-Comparator-and-Extractor.md) |
+| `.tiles` comparison and Snow/Burnt/custom replacement editing | [TileDef comparator and Snow editor](docs/PZ-TileDef-Comparator-and-Snow-Editor.md) |
+| TileDef property meanings | [Tile properties](docs/TileZed/TileProperties/index.html) |
+| Terrain BMP tools inside TileZed | [BMP tools](docs/TileZed/BMPTools.html) |
+| Lua batch/interactive mapping API and examples | [Lua scripting](docs/TileZed/LuaScripting.html) |
 | RoomDef tools | [RoomDefecator](docs/TileZed/RoomDefecator.html) |
-| Mapping-controlled spawns | [Mapping spawn control](docs/TileZed/MappingSpawnControl.html) |
+| Mapping-controlled spawn data | [Mapping spawn control](docs/TileZed/MappingSpawnControl.html) |
 
-The complete Automapper example is under `TileZed/examples/sewer_automap`.
+The complete Automapper example is under
+`TileZed/examples/sewer_automap`.
 
 ## BuildingEd
 
-The BuildingEd manual is installed under `docs/BuildingEd` in the portable
-release.
+The maintained manual lives under
+`TileZed/src/tiled/BuildingEditor/manual` and is installed as
+`docs/BuildingEd` in the portable release.
 
 - [BuildingEd manual](docs/BuildingEd/index.html)
 - [Lua scripting](docs/BuildingEd/LuaScripting.html)
@@ -53,12 +56,36 @@ release.
 - [Tile mode](docs/BuildingEd/TileEditingMode.html)
 - [Tiles dialog](docs/BuildingEd/TilesDialog.html)
 
-## Terminology
+The procedural-loot editor is shared with TileZed and uses the same loader,
+project-output format, validation rules, and documentation.
 
-- **Game-confirmed** describes behavior checked against Project Zomboid data
-  or runtime code.
-- **Tool-enforced** describes an editor validation or safety policy.
-- **Representative preview** describes an authoring aid that does not claim
-  to reproduce a particular game save exactly.
-- **Out of scope** identifies data the current release does not read, write,
-  package, or simulate.
+## Documentation evidence labels
+
+The maintained documents use these distinctions:
+
+- **Game-confirmed** means the behavior or structure was checked against the
+  local Project Zomboid 42.20 Lua/Java/data reference.
+- **Tool-enforced** means it is an editor validation or safety policy and is
+  not presented as an engine limit.
+- **Representative preview** means the display is useful for authoring but is
+  not claimed to reproduce a particular game save exactly.
+- **Out of scope** identifies data that the current editor deliberately does
+  not read, write, package, or simulate.
+
+When one of these distinctions affects a workflow, the relevant document
+states it next to the feature or limit.
+
+## Documentation maintenance
+
+User-visible behavior changes are not complete until all applicable locations
+are updated:
+
+1. the dedicated feature reference;
+2. the user guide or documentation index;
+3. `README.md`;
+4. `RELEASE_CHANGELOG.md`;
+5. `CHANGELOG-PZTOOLS.md`;
+6. the copies installed in the portable distribution.
+
+Before a release, internal links are checked and duplicate packaged/source
+copies are compared by SHA-256.

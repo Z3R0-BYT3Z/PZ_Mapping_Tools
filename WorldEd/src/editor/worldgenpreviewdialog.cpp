@@ -8,11 +8,14 @@
  * Software Foundation; either version 2 of the License, or (at your option)
  * any later version.
  */
+
 #include "worldgenpreviewdialog.h"
+
 #include "preferences.h"
 #include "tilemetainfomgr.h"
 #include "tilesetmanager.h"
 #include "worlddocument.h"
+
 #include "BuildingEditor/building.h"
 #include "BuildingEditor/buildingmap.h"
 #include "BuildingEditor/buildingreader.h"
@@ -23,6 +26,7 @@
 #include "tile.h"
 #include "tilelayer.h"
 #include "tileset.h"
+
 #include <QApplication>
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -60,22 +64,28 @@
 #include <QTableWidget>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
 #include <random>
+
 extern "C" {
 #include "lua.h"
 #include "lauxlib.h"
 }
+
 using namespace Tiled;
 using namespace Tiled::Internal;
+
 namespace {
+
 const int PreviewSize = 16;
 const int ChunkSize = 8;
 const int TileWidth = 64;
 const int TileHeight = 32;
 const qreal PreviewScale = 0.7;
+
 const QStringList FeatureCategories = {
     QStringLiteral("GROUND"),
     QStringLiteral("PLANT"),
@@ -83,30 +93,37 @@ const QStringList FeatureCategories = {
     QStringLiteral("TREE"),
     QStringLiteral("ORE")
 };
+
 const QStringList FeatureRegistries =
         FeatureCategories + (QStringList() << QStringLiteral("NONE"));
+
 const QStringList PrefabCategories = {
     QStringLiteral("Floor"),
     QStringLiteral("FloorFurniture"),
     QStringLiteral("FloorOverlay"),
     QStringLiteral("Furniture")
 };
+
 struct WorldGenPattern
 {
     QVector<QVector<QString> > rows;
+
     int width() const
     {
         return rows.isEmpty() ? 0 : rows.first().size();
     }
+
     int height() const
     {
         return rows.size();
     }
+
     int minimumDimension() const
     {
         return qMin(width(), height());
     }
 };
+
 struct WorldGenFeature
 {
     QString name;
@@ -115,6 +132,7 @@ struct WorldGenFeature
     int minimumSize = 1;
     bool projectOwned = false;
 };
+
 struct WorldGenPrefab
 {
     QString name;
@@ -124,6 +142,7 @@ struct WorldGenPrefab
     QStringList tiles;
     QMap<QString, QVector<int> > schematic;
     bool projectOwned = false;
+
     int tileRef(const QString &category, int x, int y) const
     {
         const QVector<int> refs = schematic.value(category);
@@ -131,12 +150,14 @@ struct WorldGenPrefab
         return index >= 0 && index < refs.size() ? refs.at(index) : 0;
     }
 };
+
 struct WeightedFeature
 {
     QString featureName;
     double probability = 0.0;
     QString probabilityText;
 };
+
 struct WorldGenBiome
 {
     QString name;
@@ -158,6 +179,7 @@ struct WorldGenBiome
     int replacementRules = 0;
     bool projectOwned = false;
 };
+
 struct WorldGenDefinitions
 {
     QMap<QString, WorldGenFeature> features;
@@ -168,6 +190,7 @@ struct WorldGenDefinitions
     QString rootPath;
     QString projectRootPath;
 };
+
 struct PreviewTile
 {
     QString sprite;
@@ -175,35 +198,42 @@ struct PreviewTile
     QString feature;
     double probability = 0.0;
 };
+
 struct PreviewGrid
 {
     QVector<QVector<PreviewTile> > squares;
     int concreteTileCount = 0;
     int markerCount = 0;
+
     PreviewGrid()
         : squares(PreviewSize * PreviewSize)
     {
     }
+
     QVector<PreviewTile> &at(int x, int y)
     {
         return squares[y * PreviewSize + x];
     }
+
     const QVector<PreviewTile> &at(int x, int y) const
     {
         return squares[y * PreviewSize + x];
     }
 };
+
 struct PendingTile
 {
     QString sprite;
     QString feature;
     double probability = 0.0;
 };
+
 QString luaString(lua_State *state, int index)
 {
     const char *value = lua_tostring(state, index);
     return value ? QString::fromUtf8(value) : QString();
 }
+
 QString stringField(lua_State *state, int tableIndex, const char *name)
 {
     tableIndex = lua_absindex(state, tableIndex);
@@ -213,6 +243,7 @@ QString stringField(lua_State *state, int tableIndex, const char *name)
     lua_pop(state, 1);
     return value;
 }
+
 bool boolField(lua_State *state, int tableIndex, const char *name,
                bool *present)
 {
@@ -225,6 +256,7 @@ bool boolField(lua_State *state, int tableIndex, const char *name,
         *present = hasValue;
     return value;
 }
+
 QStringList stringSequence(lua_State *state, int tableIndex)
 {
     QStringList result;
@@ -238,6 +270,7 @@ QStringList stringSequence(lua_State *state, int tableIndex)
     }
     return result;
 }
+
 int nestedSequenceEntryCount(lua_State *state, int tableIndex, int depth = 0)
 {
     if (depth > 5 || !lua_istable(state, tableIndex))
@@ -246,6 +279,7 @@ int nestedSequenceEntryCount(lua_State *state, int tableIndex, int depth = 0)
     const int sequenceLength = int(lua_rawlen(state, tableIndex));
     if (sequenceLength > 0)
         return sequenceLength;
+
     int count = 0;
     lua_pushnil(state);
     while (lua_next(state, tableIndex) != 0) {
@@ -255,10 +289,12 @@ int nestedSequenceEntryCount(lua_State *state, int tableIndex, int depth = 0)
     }
     return count;
 }
+
 QString normalizedWorldGenRoot(const QString &path)
 {
     if (path.trimmed().isEmpty())
         return QString();
+
     const QString cleanPath = QDir::cleanPath(
                 QDir::fromNativeSeparators(path.trimmed()));
     const QStringList candidates = {
@@ -268,6 +304,7 @@ QString normalizedWorldGenRoot(const QString &path)
         QDir(cleanPath).filePath(
             QStringLiteral("lua/server/WorldGen"))
     };
+
     for (const QString &candidate : candidates) {
         const QDir directory(candidate);
         if (directory.exists(QStringLiteral("features"))
@@ -277,9 +314,11 @@ QString normalizedWorldGenRoot(const QString &path)
     }
     return QString();
 }
+
 QString ownerRootForWorldGen(const QString &worldGenRoot)
 {
     QDir owner(QDir::cleanPath(worldGenRoot));
+    // WorldGen -> server -> lua -> either the owner root or "media".
     for (int level = 0; level < 3; ++level) {
         if (!owner.cdUp())
             return QString();
@@ -291,6 +330,7 @@ QString ownerRootForWorldGen(const QString &worldGenRoot)
     }
     return owner.absolutePath();
 }
+
 QStringList luaFiles(const QString &directory)
 {
     QStringList result;
@@ -304,6 +344,7 @@ QStringList luaFiles(const QString &directory)
     });
     return result;
 }
+
 bool executeLuaFile(lua_State *state, const QString &fileName, QString *error)
 {
     const QByteArray encodedName = QFile::encodeName(fileName);
@@ -312,6 +353,7 @@ bool executeLuaFile(lua_State *state, const QString &fileName, QString *error)
         status = lua_pcall(state, 0, 0, 0);
     if (status == LUA_OK)
         return true;
+
     if (error) {
         *error = QObject::tr("%1\n\n%2")
                 .arg(QDir::toNativeSeparators(fileName),
@@ -320,11 +362,13 @@ bool executeLuaFile(lua_State *state, const QString &fileName, QString *error)
     lua_pop(state, 1);
     return false;
 }
+
 void luaInstructionLimit(lua_State *state, lua_Debug *)
 {
     luaL_error(state, "WorldGen definition exceeded the preview "
                "instruction limit");
 }
+
 WorldGenPattern readPattern(lua_State *state, int index)
 {
     WorldGenPattern pattern;
@@ -332,13 +376,16 @@ WorldGenPattern readPattern(lua_State *state, int index)
     const int outerLength = int(lua_rawlen(state, index));
     if (outerLength <= 0)
         return pattern;
+
     lua_rawgeti(state, index, 1);
     const bool containsRows = lua_istable(state, -1);
     lua_pop(state, 1);
+
     if (!containsRows) {
         pattern.rows.append(stringSequence(state, index).toVector());
         return pattern;
     }
+
     for (int row = 1; row <= outerLength; ++row) {
         lua_rawgeti(state, index, row);
         if (lua_istable(state, -1))
@@ -347,6 +394,7 @@ WorldGenPattern readPattern(lua_State *state, int index)
     }
     return pattern;
 }
+
 WorldGenFeature readFeature(lua_State *state, int index,
                             const QString &category,
                             const QString &name)
@@ -356,6 +404,7 @@ WorldGenFeature readFeature(lua_State *state, int index,
     feature.name = name;
     feature.minimumSize = 8;
     index = lua_absindex(state, index);
+
     lua_getfield(state, index, "main");
     if (lua_istable(state, -1)) {
         const int length = int(lua_rawlen(state, -1));
@@ -381,6 +430,7 @@ WorldGenFeature readFeature(lua_State *state, int index,
         feature.minimumSize = 1;
     return feature;
 }
+
 QHash<QString, quintptr> featureRegistryPointers(lua_State *state)
 {
     QHash<QString, quintptr> pointers;
@@ -410,6 +460,7 @@ QHash<QString, quintptr> featureRegistryPointers(lua_State *state)
     lua_pop(state, 2);
     return pointers;
 }
+
 QHash<QString, quintptr> biomeRegistryPointers(lua_State *state,
                                                const char *registryName)
 {
@@ -432,6 +483,7 @@ QHash<QString, quintptr> biomeRegistryPointers(lua_State *state,
     lua_pop(state, 2);
     return pointers;
 }
+
 QVector<int> prefabRow(const QString &row, int width)
 {
     QVector<int> result(width, 0);
@@ -443,11 +495,13 @@ QVector<int> prefabRow(const QString &row, int width)
     }
     return result;
 }
+
 WorldGenPrefab readPrefab(lua_State *state, int index, const QString &name)
 {
     WorldGenPrefab prefab;
     prefab.name = name;
     index = lua_absindex(state, index);
+
     lua_getfield(state, index, "dimensions");
     if (lua_istable(state, -1)) {
         lua_rawgeti(state, -1, 1);
@@ -460,14 +514,17 @@ WorldGenPrefab readPrefab(lua_State *state, int index, const QString &name)
         lua_pop(state, 1);
     }
     lua_pop(state, 1);
+
     lua_getfield(state, index, "zombies");
     if (lua_isnumber(state, -1))
         prefab.zombies = lua_tonumber(state, -1);
     lua_pop(state, 1);
+
     lua_getfield(state, index, "tiles");
     if (lua_istable(state, -1))
         prefab.tiles = stringSequence(state, -1);
     lua_pop(state, 1);
+
     lua_getfield(state, index, "schematic");
     if (lua_istable(state, -1)) {
         const int schematicIndex = lua_gettop(state);
@@ -496,6 +553,7 @@ WorldGenPrefab readPrefab(lua_State *state, int index, const QString &name)
     lua_pop(state, 1);
     return prefab;
 }
+
 void readPrefabRegistry(lua_State *state, WorldGenDefinitions *definitions,
                         const QSet<QString> &projectEntries)
 {
@@ -516,6 +574,7 @@ void readPrefabRegistry(lua_State *state, WorldGenDefinitions *definitions,
     }
     lua_pop(state, 2);
 }
+
 QSet<QString> changedRegistryEntries(
         const QHash<QString, quintptr> &before,
         const QHash<QString, quintptr> &after)
@@ -530,6 +589,7 @@ QSet<QString> changedRegistryEntries(
     }
     return changed;
 }
+
 bool executeLuaFiles(lua_State *state, const QStringList &files,
                      QString *error)
 {
@@ -539,6 +599,7 @@ bool executeLuaFiles(lua_State *state, const QStringList &files,
     }
     return true;
 }
+
 void readFeatureRegistry(lua_State *state, WorldGenDefinitions *definitions,
                          QHash<quintptr, QString> *featureNames,
                          const QSet<QString> &projectEntries)
@@ -573,6 +634,7 @@ void readFeatureRegistry(lua_State *state, WorldGenDefinitions *definitions,
     }
     lua_pop(state, 2);
 }
+
 QList<WeightedFeature> readWeightedFeatures(
         lua_State *state, int index,
         const QHash<quintptr, QString> &featureNames)
@@ -586,6 +648,7 @@ QList<WeightedFeature> readWeightedFeatures(
             lua_pop(state, 1);
             continue;
         }
+
         WeightedFeature weighted;
         lua_getfield(state, -1, "f");
         if (lua_istable(state, -1)) {
@@ -594,6 +657,7 @@ QList<WeightedFeature> readWeightedFeatures(
             weighted.featureName = featureNames.value(pointer);
         }
         lua_pop(state, 1);
+
         lua_getfield(state, -1, "p");
         if (lua_isnumber(state, -1)) {
             weighted.probability = lua_tonumber(state, -1);
@@ -604,11 +668,13 @@ QList<WeightedFeature> readWeightedFeatures(
         }
         lua_pop(state, 1);
         lua_pop(state, 1);
+
         if (!weighted.featureName.isEmpty())
             result.append(weighted);
     }
     return result;
 }
+
 WorldGenBiome readBiome(lua_State *state, int index, const QString &name,
                         bool mapBiome,
                         const QHash<quintptr, QString> &featureNames)
@@ -618,6 +684,7 @@ WorldGenBiome readBiome(lua_State *state, int index, const QString &name,
     biome.mapBiome = mapBiome;
     index = lua_absindex(state, index);
     biome.parent = stringField(state, index, "parent");
+
     lua_getfield(state, index, "features");
     if (lua_istable(state, -1)) {
         for (const QString &category : FeatureCategories) {
@@ -632,6 +699,7 @@ WorldGenBiome readBiome(lua_State *state, int index, const QString &name,
         }
     }
     lua_pop(state, 1);
+
     lua_getfield(state, index, "params");
     if (lua_istable(state, -1)) {
         const int paramsIndex = lua_gettop(state);
@@ -651,6 +719,7 @@ WorldGenBiome readBiome(lua_State *state, int index, const QString &name,
                             field, stringSequence(state, -1));
             lua_pop(state, 1);
         }
+
         lua_getfield(state, paramsIndex, "zombies");
         if (lua_isnumber(state, -1)) {
             biome.declaredParameters.insert(
@@ -659,10 +728,12 @@ WorldGenBiome readBiome(lua_State *state, int index, const QString &name,
                             lua_tonumber(state, -1), 'g', 8));
         }
         lua_pop(state, 1);
+
         const bool generateValue =
                 boolField(state, paramsIndex, "generate",
                           &biome.hasGenerate);
         biome.generate = biome.hasGenerate ? generateValue : true;
+
         const char *countFields[] = {
             "subbiomes", "placements", "protected", "replacements"
         };
@@ -683,6 +754,7 @@ WorldGenBiome readBiome(lua_State *state, int index, const QString &name,
     lua_pop(state, 1);
     return biome;
 }
+
 QMap<QString, WorldGenBiome> readBiomeRegistry(
         lua_State *state, const char *registryName, bool mapBiome,
         const QHash<quintptr, QString> &featureNames,
@@ -708,6 +780,7 @@ QMap<QString, WorldGenBiome> readBiomeRegistry(
     lua_pop(state, 2);
     return rawBiomes;
 }
+
 WorldGenBiome resolveBiome(
         const QString &name,
         const QMap<QString, WorldGenBiome> &rawBiomes,
@@ -720,9 +793,11 @@ WorldGenBiome resolveBiome(
     if (resolving->contains(name))
         return raw;
     resolving->insert(name);
+
     WorldGenBiome result;
     if (!raw.parent.isEmpty() && rawBiomes.contains(raw.parent))
         result = resolveBiome(raw.parent, rawBiomes, resolved, resolving);
+
     result.name = raw.name;
     result.parent = raw.parent;
     result.mapBiome = raw.mapBiome;
@@ -737,8 +812,13 @@ WorldGenBiome resolveBiome(
          iterator != raw.declaredParameters.constEnd(); ++iterator) {
         result.parameters.insert(iterator.key(), iterator.value());
     }
+    // WorldGenReader inherits most biome fields through the parent chain,
+    // but deliberately keeps the child's own generate flag. An omitted flag
+    // defaults to true, allowing generate=false templates to feed selectable
+    // ore-level children.
     result.generate = raw.generate;
     result.hasGenerate = raw.hasGenerate;
+
     result.declaredSubBiomeLinks = raw.declaredSubBiomeLinks;
     result.declaredPlacementRules = raw.declaredPlacementRules;
     result.declaredProtectedRules = raw.declaredProtectedRules;
@@ -751,10 +831,12 @@ WorldGenBiome resolveBiome(
         result.protectedRules = raw.declaredProtectedRules;
     if (raw.declaredReplacementRules)
         result.replacementRules = raw.declaredReplacementRules;
+
     resolving->remove(name);
     resolved->insert(name, result);
     return result;
 }
+
 QMap<QString, WorldGenBiome> resolveBiomes(
         const QMap<QString, WorldGenBiome> &rawBiomes)
 {
@@ -764,6 +846,7 @@ QMap<QString, WorldGenBiome> resolveBiomes(
         resolveBiome(name, rawBiomes, &resolved, &resolving);
     return resolved;
 }
+
 bool loadDefinitions(const QString &requestedPath,
                      const QString &projectRootPath,
                      WorldGenDefinitions *definitions,
@@ -778,6 +861,7 @@ bool loadDefinitions(const QString &requestedPath,
         }
         return false;
     }
+
     lua_State *state = luaL_newstate();
     if (!state) {
         if (error)
@@ -785,6 +869,7 @@ bool loadDefinitions(const QString &requestedPath,
         return false;
     }
     lua_sethook(state, luaInstructionLimit, LUA_MASKCOUNT, 1000000);
+
     const char initialization[] =
             "worldgen = {"
             " features = { GROUND={}, PLANT={}, BUSH={}, TREE={}, ORE={}, NONE={} },"
@@ -796,11 +881,13 @@ bool loadDefinitions(const QString &requestedPath,
         lua_close(state);
         return false;
     }
+
     const QString projectRoot = projectRootPath.trimmed().isEmpty()
             ? QString()
             : QDir::cleanPath(QDir::fromNativeSeparators(projectRootPath));
     const QDir gameDirectory(root);
     const QDir projectDirectory(projectRoot);
+
     if (!executeLuaFiles(
                 state,
                 luaFiles(gameDirectory.filePath(QStringLiteral("features"))),
@@ -824,6 +911,7 @@ bool loadDefinitions(const QString &requestedPath,
     const QSet<QString> projectFeatureEntries =
             changedRegistryEntries(gameFeaturePointers,
                                    finalFeaturePointers);
+
     if (!executeLuaFiles(
                 state,
                 luaFiles(gameDirectory.filePath(QStringLiteral("prefabs"))),
@@ -846,6 +934,7 @@ bool loadDefinitions(const QString &requestedPath,
             changedRegistryEntries(
                 gamePrefabPointers,
                 biomeRegistryPointers(state, "prefabs"));
+
     if (!executeLuaFiles(
                 state,
                 luaFiles(gameDirectory.filePath(
@@ -860,6 +949,7 @@ bool loadDefinitions(const QString &requestedPath,
         lua_close(state);
         return false;
     }
+
     QStringList gameBiomeFiles;
     gameBiomeFiles += luaFiles(gameDirectory.filePath(
                                    QStringLiteral("biomes/map")));
@@ -873,6 +963,7 @@ bool loadDefinitions(const QString &requestedPath,
             biomeRegistryPointers(state, "biomes");
     const QHash<QString, quintptr> gameMapPointers =
             biomeRegistryPointers(state, "biomes_map");
+
     if (!projectRoot.isEmpty()) {
         QStringList projectBiomeFiles;
         projectBiomeFiles += luaFiles(projectDirectory.filePath(
@@ -892,6 +983,7 @@ bool loadDefinitions(const QString &requestedPath,
             changedRegistryEntries(
                 gameMapPointers,
                 biomeRegistryPointers(state, "biomes_map"));
+
     WorldGenDefinitions result;
     result.rootPath = root;
     result.projectRootPath = projectRoot;
@@ -899,6 +991,7 @@ bool loadDefinitions(const QString &requestedPath,
     readFeatureRegistry(state, &result, &featureNames,
                         projectFeatureEntries);
     readPrefabRegistry(state, &result, projectPrefabEntries);
+
     const QMap<QString, WorldGenBiome> rawProcedural =
             readBiomeRegistry(state, "biomes", false, featureNames,
                               projectProceduralEntries);
@@ -907,6 +1000,7 @@ bool loadDefinitions(const QString &requestedPath,
                               projectMapEntries);
     result.proceduralBiomes = resolveBiomes(rawProcedural);
     result.mapBiomes = resolveBiomes(rawMap);
+
     lua_getglobal(state, "worldgen");
     lua_getfield(state, -1, "subbiomes");
     if (lua_istable(state, -1)) {
@@ -918,6 +1012,7 @@ bool loadDefinitions(const QString &requestedPath,
     }
     lua_pop(state, 2);
     lua_close(state);
+
     for (const WorldGenPrefab &prefab : result.prefabs) {
         if (prefab.width <= 0 || prefab.height <= 0) {
             if (error) {
@@ -955,6 +1050,7 @@ bool loadDefinitions(const QString &requestedPath,
             }
         }
     }
+
     if (result.features.isEmpty()
             || (result.proceduralBiomes.isEmpty()
                 && result.mapBiomes.isEmpty())) {
@@ -968,6 +1064,7 @@ bool loadDefinitions(const QString &requestedPath,
     *definitions = result;
     return true;
 }
+
 const WorldGenBiome *findBiome(const WorldGenDefinitions &definitions,
                                const QString &key)
 {
@@ -984,6 +1081,7 @@ const WorldGenBiome *findBiome(const WorldGenDefinitions &definitions,
     }
     return nullptr;
 }
+
 PreviewGrid generatePreview(const WorldGenDefinitions &definitions,
                             const WorldGenBiome &biome,
                             quint32 seed)
@@ -991,15 +1089,18 @@ PreviewGrid generatePreview(const WorldGenDefinitions &definitions,
     PreviewGrid grid;
     std::mt19937 random(seed);
     std::uniform_real_distribution<double> realDistribution(0.0, 1.0);
+
     for (const QString &category : FeatureCategories) {
         const QList<WeightedFeature> weightedFeatures =
                 biome.features.value(category);
         if (weightedFeatures.isEmpty())
             continue;
+
         QVector<PendingTile> pending(PreviewSize * PreviewSize);
         double allProbability = 0.0;
         for (const WeightedFeature &weighted : weightedFeatures)
             allProbability += qMax(0.0, weighted.probability);
+
         for (int x = 0; x < PreviewSize; ++x) {
             for (int y = 0; y < PreviewSize; ++y) {
                 const int squareIndex = y * PreviewSize + x;
@@ -1022,6 +1123,7 @@ PreviewGrid generatePreview(const WorldGenDefinitions &definitions,
                         if (eligibleFeatures.isEmpty()
                                 || eligibleProbability <= 0.0)
                             continue;
+
                         const double randomValue = realDistribution(random);
                         double cumulative = 0.0;
                         WeightedFeature selected;
@@ -1038,6 +1140,7 @@ PreviewGrid generatePreview(const WorldGenDefinitions &definitions,
                         }
                         if (!hasSelection)
                             break;
+
                         const WorldGenFeature feature =
                                 definitions.features.value(
                                     selected.featureName);
@@ -1059,6 +1162,7 @@ PreviewGrid generatePreview(const WorldGenDefinitions &definitions,
                         if (x + pattern.width() > PreviewSize
                                 || y + pattern.height() > PreviewSize)
                             continue;
+
                         for (int row = 0; row < pattern.height(); ++row) {
                             for (int column = 0;
                                  column < pattern.width(); ++column) {
@@ -1074,6 +1178,7 @@ PreviewGrid generatePreview(const WorldGenDefinitions &definitions,
                         break;
                     }
                 }
+
                 if (current.sprite.isEmpty())
                     continue;
                 pending[squareIndex] = PendingTile();
@@ -1081,6 +1186,7 @@ PreviewGrid generatePreview(const WorldGenDefinitions &definitions,
                     ++grid.markerCount;
                     continue;
                 }
+
                 PreviewTile tile;
                 tile.sprite = current.sprite;
                 tile.category = category;
@@ -1093,6 +1199,7 @@ PreviewGrid generatePreview(const WorldGenDefinitions &definitions,
     }
     return grid;
 }
+
 bool splitSpriteName(const QString &sprite, QString *tilesetName,
                      int *tileIndex)
 {
@@ -1109,6 +1216,7 @@ bool splitSpriteName(const QString &sprite, QString *tilesetName,
         *tileIndex = index;
     return true;
 }
+
 bool hasCompatiblePreviewGeometry(Tileset *tileset)
 {
     if (!tileset)
@@ -1125,6 +1233,7 @@ bool hasCompatiblePreviewGeometry(Tileset *tileset)
             && tileset->imageWidth() % sourceTileWidth == 0
             && tileset->imageHeight() % sourceTileHeight == 0;
 }
+
 Tile *tileForSprite(const QString &sprite)
 {
     QString tilesetName;
@@ -1137,18 +1246,24 @@ Tile *tileForSprite(const QString &sprite)
         return nullptr;
     return tileset->tileAt(tileIndex);
 }
+
 QPointF squareBase(int x, int y)
 {
+    // The margins include the maximum JUMBOXXL footprint. The complete
+    // logical scene is scaled in paintEvent() to keep the 2x2-chunk block
+    // and its largest overhanging sprites visible at once.
     const qreal originX = 736.0;
     const qreal originY = 550.0;
     return QPointF(originX + (x - y) * TileWidth / 2.0,
                    originY + (x + y) * TileHeight / 2.0);
 }
+
 QPointF squareImageBase(int x, int y)
 {
     return squareBase(x, y)
             + QPointF(-TileWidth / 2.0, TileHeight);
 }
+
 QPainterPath squareDiamond(int x, int y)
 {
     const QPointF top = squareBase(x, y);
@@ -1162,6 +1277,7 @@ QPainterPath squareDiamond(int x, int y)
     path.closeSubpath();
     return path;
 }
+
 QRectF previewTileTarget(Tile *tile, int x, int y)
 {
     Tileset *tileset = tile->tileset();
@@ -1178,6 +1294,8 @@ QRectF previewTileTarget(Tile *tile, int x, int y)
     const QSize customSize =
             CustomTileSize::forTileset(tileset->name());
     if (!customSize.isEmpty()) {
+        // CellScene applies this translation in the source image's
+        // coordinate system. Convert it along with a selected 2x PNG.
         target.translate(
                     -(customSize.width() - TileWidth)
                     / 2.0 * sourceScale,
@@ -1185,12 +1303,14 @@ QRectF previewTileTarget(Tile *tile, int x, int y)
     }
     return target;
 }
+
 void drawPreviewTile(QPainter *painter, Tile *tile, int x, int y)
 {
     if (!tile || !tile->tileset() || tile->image().isNull())
         return;
     painter->drawImage(previewTileTarget(tile, x, y), tile->image());
 }
+
 class WorldGenPreviewCanvas : public QWidget
 {
 public:
@@ -1204,17 +1324,21 @@ public:
         canvasPalette.setColor(QPalette::Window, QColor(32, 35, 38));
         setPalette(canvasPalette);
     }
+
     void setGrid(const PreviewGrid &grid)
     {
         mGrid = grid;
         update();
     }
+
     void setCategoryVisible(const QString &category, bool visible)
     {
         mCategoryVisibility[category] = visible;
         update();
     }
+
     std::function<void(int, int)> squareSelected;
+
 protected:
     void paintEvent(QPaintEvent *) override
     {
@@ -1223,12 +1347,14 @@ protected:
         painter.fillRect(rect(), palette().window());
         painter.save();
         painter.scale(PreviewScale, PreviewScale);
+
         painter.setPen(QPen(QColor(76, 84, 90), 1.0));
         painter.setBrush(QColor(44, 49, 53));
         for (int x = 0; x < PreviewSize; ++x) {
             for (int y = 0; y < PreviewSize; ++y)
                 painter.drawPath(squareDiamond(x, y));
         }
+
         for (int diagonal = 0; diagonal <= (PreviewSize - 1) * 2;
              ++diagonal) {
             for (int x = 0; x < PreviewSize; ++x) {
@@ -1245,6 +1371,7 @@ protected:
                         continue;
                     Tileset *tileset = tile->tileset();
                     drawPreviewTile(&painter, tile, x, y);
+
                     const QString tilesetName = tileset->name();
                     const bool splitJumbo =
                             tilesetName.contains(
@@ -1254,6 +1381,8 @@ protected:
                                 QStringLiteral("JUMBOXXL_"),
                                 Qt::CaseInsensitive);
                     if (splitJumbo && tile->id() < 6) {
+                        // IsoTreeJumbo renders XL/XXL trees as the main
+                        // sprite N plus its treetop sprite N+6.
                         drawPreviewTile(&painter,
                                         tileset->tileAt(tile->id() + 6),
                                         x, y);
@@ -1261,6 +1390,7 @@ protected:
                 }
             }
         }
+
         painter.setBrush(Qt::NoBrush);
         painter.setPen(QPen(QColor(112, 122, 130, 180), 1.0));
         for (int x = 0; x <= PreviewSize; ++x) {
@@ -1275,12 +1405,14 @@ protected:
             line.lineTo(squareBase(PreviewSize, y));
             painter.drawPath(line);
         }
+
         painter.setPen(QPen(QColor(255, 180, 45), 3.0));
         const QPointF top = squareBase(0, 0);
         const QPointF east = squareBase(PreviewSize, 0);
         const QPointF bottom = squareBase(PreviewSize, PreviewSize);
         const QPointF west = squareBase(0, PreviewSize);
         painter.drawPolygon(QPolygonF() << top << east << bottom << west);
+
         painter.setPen(QPen(QColor(82, 190, 255), 2.0,
                             Qt::DashLine));
         painter.drawLine(squareBase(ChunkSize, 0),
@@ -1288,12 +1420,14 @@ protected:
         painter.drawLine(squareBase(0, ChunkSize),
                          squareBase(PreviewSize, ChunkSize));
         painter.restore();
+
         painter.setPen(QColor(225, 229, 232));
         painter.drawText(QRectF(18, 16, width() - 36, 32),
                          Qt::AlignLeft | Qt::AlignVCenter,
                          tr("16 x 16 squares  |  2 x 2 chunks  |  "
                             "orange: generation block  |  blue: chunk borders"));
     }
+
     void mousePressEvent(QMouseEvent *event) override
     {
         if (event->button() != Qt::LeftButton)
@@ -1312,11 +1446,13 @@ protected:
             }
         }
     }
+
 private:
     PreviewGrid mGrid;
     QMap<QString, bool> mCategoryVisibility;
     QPoint mSelectedSquare = QPoint(-1, -1);
 };
+
 QString projectWorldGenRoot(WorldDocument *worldDocument)
 {
     if (!worldDocument || worldDocument->fileName().isEmpty())
@@ -1324,12 +1460,14 @@ QString projectWorldGenRoot(WorldDocument *worldDocument)
     return QDir(QFileInfo(worldDocument->fileName()).absolutePath())
             .filePath(QStringLiteral("media/lua/server/WorldGen"));
 }
+
 bool validDefinitionName(const QString &name)
 {
     static const QRegularExpression expression(
                 QStringLiteral("^[A-Za-z_][A-Za-z0-9_]*$"));
     return expression.match(name).hasMatch();
 }
+
 QString luaQuoted(QString value)
 {
     value.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
@@ -1338,6 +1476,7 @@ QString luaQuoted(QString value)
     value.replace(QLatin1Char('\r'), QStringLiteral("\\r"));
     return QLatin1Char('"') + value + QLatin1Char('"');
 }
+
 QString luaStringList(const QStringList &values)
 {
     QStringList quoted;
@@ -1346,6 +1485,7 @@ QString luaStringList(const QStringList &values)
     return QStringLiteral("{ %1 }").arg(
                 quoted.join(QStringLiteral(", ")));
 }
+
 bool writeProjectLuaFile(const QString &fileName, const QString &contents,
                          QString *error)
 {
@@ -1357,6 +1497,7 @@ bool writeProjectLuaFile(const QString &fileName, const QString &contents,
         }
         return false;
     }
+
     QSaveFile file(fileName);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         if (error) {
@@ -1377,6 +1518,7 @@ bool writeProjectLuaFile(const QString &fileName, const QString &contents,
     }
     return true;
 }
+
 QString featureLua(const WorldGenFeature &feature)
 {
     QString output;
@@ -1408,6 +1550,7 @@ QString featureLua(const WorldGenFeature &feature)
             .arg(feature.category, luaQuoted(feature.name), feature.name);
     return output;
 }
+
 QString prefabLua(const WorldGenPrefab &prefab)
 {
     QString output;
@@ -1457,6 +1600,7 @@ QString prefabLua(const WorldGenPrefab &prefab)
             .arg(luaQuoted(prefab.name));
     return output;
 }
+
 QString biomeLua(const WorldGenBiome &biome)
 {
     QString output;
@@ -1486,6 +1630,7 @@ QString biomeLua(const WorldGenBiome &biome)
         }
         output += QStringLiteral("    },\n");
     }
+
     output += QStringLiteral("    params = {\n");
     const QStringList sequenceFields = {
         QStringLiteral("landscape"),
@@ -1518,6 +1663,7 @@ QString biomeLua(const WorldGenBiome &biome)
                  luaQuoted(biome.name), biome.name);
     return output;
 }
+
 class WorldGenFeatureEditorDialog : public QDialog
 {
 public:
@@ -1536,6 +1682,7 @@ public:
             pattern.rows.append(QVector<QString>() << QString());
             mPatterns.append(pattern);
         }
+
         QVBoxLayout *layout = new QVBoxLayout(this);
         QFormLayout *identity = new QFormLayout;
         mName = new QLineEdit(initial.name, this);
@@ -1548,6 +1695,7 @@ public:
         mCategory->setEnabled(!editingProjectDefinition);
         identity->addRow(tr("Category:"), mCategory);
         layout->addLayout(identity);
+
         QLabel *help = new QLabel(
                     tr("Each pattern is a visual square layout. Enter a tile "
                        "sprite name in every cell, or a supported marker such "
@@ -1555,6 +1703,7 @@ public:
                     this);
         help->setWordWrap(true);
         layout->addWidget(help);
+
         QHBoxLayout *patternControls = new QHBoxLayout;
         patternControls->addWidget(new QLabel(tr("Pattern:"), this));
         mPatternCombo = new QComboBox(this);
@@ -1574,6 +1723,7 @@ public:
         patternControls->addWidget(mHeight);
         patternControls->addStretch(1);
         layout->addLayout(patternControls);
+
         mGrid = new QTableWidget(this);
         mGrid->setIconSize(QSize(48, 48));
         mGrid->horizontalHeader()->setSectionResizeMode(
@@ -1581,11 +1731,14 @@ public:
         mGrid->verticalHeader()->setSectionResizeMode(
                     QHeaderView::ResizeToContents);
         layout->addWidget(mGrid, 1);
+
         QDialogButtonBox *buttons = new QDialogButtonBox(
                     QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
         layout->addWidget(buttons);
+
         for (int index = 0; index < mPatterns.size(); ++index)
             mPatternCombo->addItem(tr("Pattern %1").arg(index + 1));
+
         connect(mPatternCombo,
                 QOverload<int>::of(&QComboBox::currentIndexChanged),
                 this, [this](int index) {
@@ -1629,8 +1782,10 @@ public:
             if (validate())
                 accept();
         });
+
         loadPattern(0);
     }
+
     WorldGenFeature feature()
     {
         storePattern();
@@ -1645,6 +1800,7 @@ public:
                                       pattern.minimumDimension());
         return result;
     }
+
 private:
     void updateTileIcon(QTableWidgetItem *item)
     {
@@ -1661,6 +1817,7 @@ private:
                                 48, 48, Qt::KeepAspectRatio,
                                 Qt::SmoothTransformation)));
     }
+
     void storePattern()
     {
         if (mLoading || mCurrentPattern < 0
@@ -1677,6 +1834,7 @@ private:
         }
         mPatterns[mCurrentPattern] = pattern;
     }
+
     void loadPattern(int index)
     {
         if (index < 0 || index >= mPatterns.size())
@@ -1702,6 +1860,7 @@ private:
         }
         mLoading = false;
     }
+
     void resizeCurrentPattern()
     {
         if (mLoading || mCurrentPattern < 0)
@@ -1721,6 +1880,7 @@ private:
         mPatterns[mCurrentPattern] = resized;
         loadPattern(mCurrentPattern);
     }
+
     bool validate()
     {
         storePattern();
@@ -1754,6 +1914,7 @@ private:
         }
         return true;
     }
+
     QLineEdit *mName = nullptr;
     QComboBox *mCategory = nullptr;
     QComboBox *mPatternCombo = nullptr;
@@ -1764,6 +1925,7 @@ private:
     int mCurrentPattern = -1;
     bool mLoading = false;
 };
+
 int ensurePrefabTile(WorldGenPrefab *prefab, const QString &sprite)
 {
     int index = prefab->tiles.indexOf(sprite);
@@ -1773,11 +1935,13 @@ int ensurePrefabTile(WorldGenPrefab *prefab, const QString &sprite)
     }
     return index + 1;
 }
+
 QString spriteForPrefabRef(const WorldGenPrefab &prefab, int ref)
 {
     return ref > 0 && ref <= prefab.tiles.size()
             ? prefab.tiles.at(ref - 1) : QString();
 }
+
 bool mapToPrefab(Map *map, const QString &name,
                  WorldGenPrefab *prefab, QStringList *warnings,
                  QString *error)
@@ -1796,6 +1960,7 @@ bool mapToPrefab(Map *map, const QString &name,
         }
         return false;
     }
+
     WorldGenPrefab result;
     result.name = name;
     result.width = map->width();
@@ -1805,6 +1970,7 @@ bool mapToPrefab(Map *map, const QString &name,
         result.schematic.insert(
                     category, QVector<int>(result.width * result.height, 0));
     }
+
     QList<TileLayer *> floorLayers;
     QList<TileLayer *> otherLayers;
     int ignoredObjectLayers = 0;
@@ -1837,11 +2003,13 @@ bool mapToPrefab(Map *map, const QString &name,
             otherLayers.append(tileLayer);
         }
     }
+
     if (ignoredObjectLayers && warnings) {
         warnings->append(QObject::tr(
             "%1 non-tile/object layer(s) are not representable and were "
             "ignored.").arg(ignoredObjectLayers));
     }
+
     int concreteTiles = 0;
     auto tileAt = [](TileLayer *layer, int x, int y) -> Tile * {
         const int localX = x - layer->x();
@@ -1859,6 +2027,7 @@ bool mapToPrefab(Map *map, const QString &name,
                   + QString::number(tile->id())
                 : QString();
     };
+
     for (int y = 0; y < result.height; ++y) {
         for (int x = 0; x < result.width; ++x) {
             Tile *floorTile = nullptr;
@@ -1882,6 +2051,7 @@ bool mapToPrefab(Map *map, const QString &name,
                 floorTile = tile;
                 floorLayerName = layer->nameWithPrefix();
             }
+
             QList<Tile *> stack;
             QStringList stackLayers;
             for (TileLayer *layer : otherLayers) {
@@ -1902,6 +2072,7 @@ bool mapToPrefab(Map *map, const QString &name,
                 }
                 return false;
             }
+
             const int cell = y * result.width + x;
             if (floorTile) {
                 const QString sprite = spriteName(floorTile);
@@ -1931,6 +2102,7 @@ bool mapToPrefab(Map *map, const QString &name,
     *prefab = result;
     return true;
 }
+
 bool importPrefabSource(const QString &fileName, WorldGenPrefab *prefab,
                         QStringList *warnings, QString *error)
 {
@@ -1940,6 +2112,7 @@ bool importPrefabSource(const QString &fileName, WorldGenPrefab *prefab,
                  QStringLiteral("_"));
     if (name.isEmpty() || name.at(0).isDigit())
         name.prepend(QStringLiteral("prefab_"));
+
     if (info.suffix().compare(QStringLiteral("tmx"),
                               Qt::CaseInsensitive) == 0) {
         qInfo() << "WorldGen prefab import: reading TMX" << fileName;
@@ -1959,6 +2132,7 @@ bool importPrefabSource(const QString &fileName, WorldGenPrefab *prefab,
                 << (converted ? "passed" : "failed");
         return converted;
     }
+
     if (info.suffix().compare(QStringLiteral("tbx"),
                               Qt::CaseInsensitive) == 0) {
         BuildingEditor::BuildingReader reader;
@@ -1983,10 +2157,12 @@ bool importPrefabSource(const QString &fileName, WorldGenPrefab *prefab,
         QScopedPointer<Map> map(buildingMap.mergedMap());
         return mapToPrefab(map.data(), name, prefab, warnings, error);
     }
+
     if (error)
         *error = QObject::tr("Choose a .tmx or .tbx source file.");
     return false;
 }
+
 class WorldGenPrefabPreview : public QWidget
 {
 public:
@@ -1995,11 +2171,13 @@ public:
     {
         setMinimumSize(720, 460);
     }
+
     void setPrefab(const WorldGenPrefab &prefab)
     {
         mPrefab = prefab;
         update();
     }
+
 protected:
     void paintEvent(QPaintEvent *) override
     {
@@ -2007,6 +2185,7 @@ protected:
         painter.fillRect(rect(), palette().brush(QPalette::Base));
         if (mPrefab.width <= 0 || mPrefab.height <= 0)
             return;
+
         const qreal baseWidth = (mPrefab.width + mPrefab.height) * 32.0;
         const qreal baseHeight =
                 (mPrefab.width + mPrefab.height) * 16.0 + 160.0;
@@ -2019,6 +2198,7 @@ protected:
             return QPointF(origin.x() + (x - y) * 32.0 * drawScale,
                            origin.y() + (x + y) * 16.0 * drawScale);
         };
+
         QPen gridPen(QColor(95, 105, 115, 115));
         gridPen.setWidthF(qMax(0.7, drawScale));
         painter.setPen(gridPen);
@@ -2026,6 +2206,9 @@ protected:
             painter.drawLine(point(x, 0), point(x, mPrefab.height));
         for (int y = 0; y <= mPrefab.height; ++y)
             painter.drawLine(point(0, y), point(mPrefab.width, y));
+
+        // Paint by isometric depth, not by rows.  This is required for tall
+        // and XL/XXL sprites whose images extend over neighboring anchors.
         for (int depth = 0;
              depth <= mPrefab.width + mPrefab.height - 2;
              ++depth) {
@@ -2053,6 +2236,9 @@ protected:
                 }
             }
         }
+
+        // Chunk limits are an inspection overlay.  Draw them last so a
+        // complete Floor does not hide the very boundaries being checked.
         QPen chunkPen(QColor(238, 164, 70, 220));
         chunkPen.setWidthF(qMax(1.2, 2.0 * drawScale));
         painter.setPen(chunkPen);
@@ -2060,6 +2246,7 @@ protected:
             painter.drawLine(point(x, 0), point(x, mPrefab.height));
         for (int y = 0; y <= mPrefab.height; y += ChunkSize)
             painter.drawLine(point(0, y), point(mPrefab.width, y));
+
         painter.setPen(palette().color(QPalette::Text));
         painter.drawText(
                     QRect(10, height() - 28, width() - 20, 20),
@@ -2067,9 +2254,11 @@ protected:
                     tr("%1 x %2 squares — orange lines: 8 x 8 chunks")
                     .arg(mPrefab.width).arg(mPrefab.height));
     }
+
 private:
     WorldGenPrefab mPrefab;
 };
+
 class WorldGenPrefabEditorDialog : public QDialog
 {
 public:
@@ -2091,6 +2280,7 @@ public:
             mPrefab.schematic[category].resize(
                         mPrefab.width * mPrefab.height);
         }
+
         QVBoxLayout *layout = new QVBoxLayout(this);
         QFormLayout *identity = new QFormLayout;
         mName = new QLineEdit(mPrefab.name, this);
@@ -2118,6 +2308,7 @@ public:
         dimensions->addStretch(1);
         identity->addRow(tr("Runtime dimensions:"), dimensions);
         layout->addLayout(identity);
+
         QLabel *help = new QLabel(
             tr("A Build 42 WorldGen prefab is a z=0 static-module tile "
                "schematic, not a building and not a biome feature. Paint up "
@@ -2126,6 +2317,7 @@ public:
             this);
         help->setWordWrap(true);
         layout->addWidget(help);
+
         QTabWidget *tabs = new QTabWidget(this);
         QWidget *editPage = new QWidget(tabs);
         QHBoxLayout *editLayout = new QHBoxLayout(editPage);
@@ -2151,6 +2343,7 @@ public:
         mGrid->verticalHeader()->setDefaultSectionSize(64);
         gridLayout->addWidget(mGrid, 1);
         editLayout->addLayout(gridLayout, 1);
+
         QVBoxLayout *paletteLayout = new QVBoxLayout;
         paletteLayout->addWidget(new QLabel(tr("Tiles palette:"), editPage));
         mTileset = new QComboBox(editPage);
@@ -2165,12 +2358,15 @@ public:
         paletteLayout->addWidget(mPalette, 1);
         editLayout->addLayout(paletteLayout);
         tabs->addTab(editPage, tr("Paint schematic"));
+
         mPreview = new WorldGenPrefabPreview(tabs);
         tabs->addTab(mPreview, tr("Isometric preview"));
         layout->addWidget(tabs, 1);
+
         QDialogButtonBox *buttons = new QDialogButtonBox(
                     QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
         layout->addWidget(buttons);
+
         connect(mCategory,
                 QOverload<int>::of(&QComboBox::currentIndexChanged),
                 this, [this]() { loadGrid(); });
@@ -2209,10 +2405,12 @@ public:
             if (validate())
                 accept();
         });
+
         loadGrid();
         loadPalette();
         updatePreview();
     }
+
     WorldGenPrefab prefab()
     {
         mPrefab.name = mName->text().trimmed();
@@ -2220,6 +2418,7 @@ public:
         mPrefab.projectOwned = true;
         return mPrefab;
     }
+
 private:
     void resizePrefab()
     {
@@ -2245,6 +2444,7 @@ private:
         loadGrid();
         updatePreview();
     }
+
     void loadGrid()
     {
         mLoading = true;
@@ -2266,6 +2466,7 @@ private:
         }
         mLoading = false;
     }
+
     void setItemIcon(QTableWidgetItem *item, const QString &sprite)
     {
         Tile *tile = tileForSprite(sprite);
@@ -2279,6 +2480,7 @@ private:
                                 54, 54, Qt::KeepAspectRatio,
                                 Qt::SmoothTransformation)));
     }
+
     void updateFromItem(QTableWidgetItem *item)
     {
         if (!item)
@@ -2292,6 +2494,7 @@ private:
         setItemIcon(item, sprite);
         updatePreview();
     }
+
     void paintSelection(bool erase)
     {
         const QString sprite = mBrush->text().trimmed();
@@ -2343,6 +2546,7 @@ private:
         mLoading = false;
         updatePreview();
     }
+
     void loadPalette()
     {
         mPalette->clear();
@@ -2372,10 +2576,12 @@ private:
             item->setToolTip(sprite);
         }
     }
+
     void updatePreview()
     {
         mPreview->setPrefab(mPrefab);
     }
+
     bool validate()
     {
         const QString name = mName->text().trimmed();
@@ -2415,6 +2621,7 @@ private:
         }
         return true;
     }
+
     WorldGenPrefab mPrefab;
     QLineEdit *mName = nullptr;
     QSpinBox *mWidth = nullptr;
@@ -2428,6 +2635,7 @@ private:
     WorldGenPrefabPreview *mPreview = nullptr;
     bool mLoading = false;
 };
+
 class WorldGenBiomeEditorDialog : public QDialog
 {
 public:
@@ -2443,6 +2651,7 @@ public:
                        : tr("Create Project Biome"));
         resize(900, 720);
         QVBoxLayout *layout = new QVBoxLayout(this);
+
         QLabel *help = new QLabel(
                     tr("Only values declared here are written to the project "
                        "overlay. Advanced placement, protection, replacement, "
@@ -2450,6 +2659,7 @@ public:
                     this);
         help->setWordWrap(true);
         layout->addWidget(help);
+
         QFormLayout *identity = new QFormLayout;
         mName = new QLineEdit(initial.name, this);
         mName->setEnabled(!editingProjectDefinition);
@@ -2470,6 +2680,7 @@ public:
         mGenerate->setChecked(initial.generate);
         identity->addRow(tr("Generate:"), mGenerate);
         layout->addLayout(identity);
+
         connect(mRegistry,
                 QOverload<int>::of(&QComboBox::currentIndexChanged),
                 this, [this](int) {
@@ -2477,6 +2688,7 @@ public:
             populateParents(mRegistry->currentData().toBool());
             mParent->setCurrentText(previous);
         });
+
         QGroupBox *parameters = new QGroupBox(tr("Declared parameters"), this);
         QFormLayout *parameterLayout = new QFormLayout(parameters);
         const QStringList fields = {
@@ -2513,6 +2725,7 @@ public:
         zombieLayout->addWidget(mZombies, 1);
         parameterLayout->addRow(tr("zombies:"), zombieLayout);
         layout->addWidget(parameters);
+
         QGroupBox *features = new QGroupBox(
                     tr("Declared biome-feature weights"), this);
         QVBoxLayout *featureLayout = new QVBoxLayout(features);
@@ -2539,6 +2752,7 @@ public:
         weightButtons->addStretch(1);
         featureLayout->addLayout(weightButtons);
         layout->addWidget(features, 1);
+
         for (const QString &category : FeatureCategories) {
             for (const WeightedFeature &weighted
                  : initial.declaredFeatures.value(category)) {
@@ -2554,6 +2768,7 @@ public:
             if (row >= 0)
                 mWeights->removeRow(row);
         });
+
         QDialogButtonBox *buttons = new QDialogButtonBox(
                     QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
         layout->addWidget(buttons);
@@ -2564,6 +2779,7 @@ public:
                 accept();
         });
     }
+
     WorldGenBiome biome() const
     {
         WorldGenBiome result;
@@ -2614,6 +2830,7 @@ public:
         result.parameters = result.declaredParameters;
         return result;
     }
+
 private:
     void populateParents(bool mapBiome)
     {
@@ -2624,6 +2841,7 @@ private:
                          : mDefinitions.proceduralBiomes;
         mParent->addItems(biomes.keys());
     }
+
     QStringList featureNames(const QString &category) const
     {
         QStringList result;
@@ -2634,6 +2852,7 @@ private:
         result.sort(Qt::CaseInsensitive);
         return result;
     }
+
     void populateFeatureCombo(QComboBox *combo, const QString &category,
                               const QString &preferred)
     {
@@ -2642,6 +2861,7 @@ private:
         combo->setEditable(true);
         combo->setCurrentText(preferred);
     }
+
     void addWeightRow(const QString &categoryName,
                       const QString &featureName, double probability)
     {
@@ -2666,6 +2886,7 @@ private:
             populateFeatureCombo(feature, category->currentText(), QString());
         });
     }
+
     bool validate() const
     {
         const QString name = mName->text().trimmed();
@@ -2723,6 +2944,7 @@ private:
         }
         return true;
     }
+
     const WorldGenDefinitions &mDefinitions;
     QLineEdit *mName = nullptr;
     QComboBox *mRegistry = nullptr;
@@ -2733,6 +2955,7 @@ private:
     QDoubleSpinBox *mZombies = nullptr;
     QTableWidget *mWeights = nullptr;
 };
+
 QString defaultWorldGenPath()
 {
     QSettings settings;
@@ -2740,14 +2963,12 @@ QString defaultWorldGenPath()
                 QStringLiteral("WorldGenPreview/Root")).toString();
     if (!normalizedWorldGenRoot(saved).isEmpty())
         return normalizedWorldGenRoot(saved);
+
     const QString environment =
             qEnvironmentVariable("PZ_WORLDGEN_ROOT");
     if (!normalizedWorldGenRoot(environment).isEmpty())
         return normalizedWorldGenRoot(environment);
-    const QString configuredGame =
-            Preferences::instance()->projectZomboidDirectory();
-    if (!normalizedWorldGenRoot(configuredGame).isEmpty())
-        return normalizedWorldGenRoot(configuredGame);
+
     const QString tilesDirectory =
             Preferences::instance()->tilesDirectory();
     const QString developmentCandidate =
@@ -2755,6 +2976,7 @@ QString defaultWorldGenPath()
                 QStringLiteral("../42.20/lua/server/WorldGen"));
     if (!normalizedWorldGenRoot(developmentCandidate).isEmpty())
         return normalizedWorldGenRoot(developmentCandidate);
+
     const QStringList commonGameDirectories = {
         QStringLiteral(
             "C:/Program Files (x86)/Steam/steamapps/common/"
@@ -2768,7 +2990,9 @@ QString defaultWorldGenPath()
     }
     return QString();
 }
-}
+
+} // namespace
+
 class WorldGenPreviewDialogPrivate
 {
 public:
@@ -2776,6 +3000,7 @@ public:
         BiomeMode,
         PrefabMode
     };
+
     explicit WorldGenPreviewDialogPrivate(QDialog *dialog,
                                           WorldDocument *document,
                                           Mode editorMode)
@@ -2785,6 +3010,7 @@ public:
         , mode(editorMode)
     {
     }
+
     void buildInterface()
     {
         q->setWindowTitle(mode == BiomeMode
@@ -2793,6 +3019,7 @@ public:
         q->setWindowFlags(q->windowFlags()
                           | Qt::WindowMaximizeButtonHint);
         q->resize(1500, 920);
+
         QVBoxLayout *mainLayout = new QVBoxLayout(q);
         QHBoxLayout *pathLayout = new QHBoxLayout;
         pathLayout->addWidget(new QLabel(
@@ -2808,6 +3035,7 @@ public:
         pathLayout->addWidget(browseButton);
         pathLayout->addWidget(reloadButton);
         mainLayout->addLayout(pathLayout);
+
         QHBoxLayout *projectPathLayout = new QHBoxLayout;
         projectPathLayout->addWidget(new QLabel(
                                          q->tr("Project WorldGen overlay:"),
@@ -2819,6 +3047,7 @@ public:
                     q->tr("Save and load a WorldEd project to enable editing"));
         projectPathLayout->addWidget(projectPathEdit, 1);
         mainLayout->addLayout(projectPathLayout);
+
         QFrame *projectBanner = new QFrame(q);
         projectBanner->setFrameShape(QFrame::StyledPanel);
         QHBoxLayout *bannerLayout = new QHBoxLayout(projectBanner);
@@ -2838,17 +3067,21 @@ public:
         banner->setWordWrap(true);
         bannerLayout->addWidget(banner);
         mainLayout->addWidget(projectBanner);
+
         if (mode == BiomeMode)
             buildBiomeInterface(mainLayout);
         else
             buildPrefabInterface(mainLayout);
+
         statusLabel = new QLabel(q);
         statusLabel->setWordWrap(true);
         mainLayout->addWidget(statusLabel);
+
         QObject::connect(browseButton, &QPushButton::clicked, q,
                          [this]() { browse(); });
         QObject::connect(reloadButton, &QPushButton::clicked, q,
                          [this]() { reload(); });
+
         pathEdit->setText(QDir::toNativeSeparators(
                               defaultWorldGenPath()));
         if (!pathEdit->text().isEmpty())
@@ -2857,6 +3090,7 @@ public:
             setStatus(q->tr("Choose the Project Zomboid WorldGen "
                             "definitions directory."), true);
     }
+
     void buildBiomeInterface(QVBoxLayout *mainLayout)
     {
         QHBoxLayout *controls = new QHBoxLayout;
@@ -2887,6 +3121,7 @@ public:
             controls->addWidget(checkBox);
         }
         mainLayout->addLayout(controls);
+
         QHBoxLayout *editorControls = new QHBoxLayout;
         newBiomeButton = new QPushButton(q->tr("New Biome..."), q);
         editBiomeButton = new QPushButton(q);
@@ -2903,12 +3138,14 @@ public:
         editorControls->addWidget(editFeatureButton);
         editorControls->addStretch(1);
         mainLayout->addLayout(editorControls);
+
         QSplitter *splitter = new QSplitter(Qt::Horizontal, q);
         canvas = new WorldGenPreviewCanvas(splitter);
         QScrollArea *scrollArea = new QScrollArea(splitter);
         scrollArea->setWidget(canvas);
         scrollArea->setWidgetResizable(false);
         splitter->addWidget(scrollArea);
+
         QWidget *inspectorWidget = new QWidget(splitter);
         QVBoxLayout *inspectorLayout = new QVBoxLayout(inspectorWidget);
         inspectorLayout->setContentsMargins(0, 0, 0, 0);
@@ -2947,6 +3184,7 @@ public:
         splitter->setStretchFactor(1, 0);
         splitter->setSizes(QList<int>() << 1040 << 430);
         mainLayout->addWidget(splitter, 1);
+
         QObject::connect(typeCombo,
                          QOverload<int>::of(&QComboBox::currentIndexChanged),
                          q, [this]() { populateBiomeCombo(); });
@@ -2979,12 +3217,14 @@ public:
         canvas->squareSelected = [this](int x, int y) {
             showSquare(x, y);
         };
+
         const bool editingEnabled = !projectRootPath.isEmpty();
         newBiomeButton->setEnabled(editingEnabled);
         editBiomeButton->setEnabled(editingEnabled);
         newFeatureButton->setEnabled(editingEnabled);
         editFeatureButton->setEnabled(editingEnabled);
     }
+
     void buildPrefabInterface(QVBoxLayout *mainLayout)
     {
         QHBoxLayout *prefabControls = new QHBoxLayout;
@@ -3005,6 +3245,7 @@ public:
         prefabControls->addWidget(stagePrefabButton);
         prefabControls->addStretch(1);
         mainLayout->addLayout(prefabControls);
+
         QLabel *explanation = new QLabel(
                     q->tr("Static WorldGen prefabs are independent from biome "
                           "rules. Select one to inspect it, or open the visual "
@@ -3013,6 +3254,7 @@ public:
                     q);
         explanation->setWordWrap(true);
         mainLayout->addWidget(explanation);
+
         prefabInspector = new QTreeWidget(q);
         prefabInspector->setColumnCount(2);
         prefabInspector->setHeaderLabels(
@@ -3022,6 +3264,7 @@ public:
                     0, QHeaderView::ResizeToContents);
         prefabInspector->header()->setStretchLastSection(true);
         mainLayout->addWidget(prefabInspector, 1);
+
         QObject::connect(prefabCombo,
                          QOverload<int>::of(&QComboBox::currentIndexChanged),
                          q, [this]() { prefabChanged(); });
@@ -3033,12 +3276,14 @@ public:
                          [this]() { editOrCopyPrefab(); });
         QObject::connect(stagePrefabButton, &QPushButton::clicked, q,
                          [this]() { stagePrefab(); });
+
         const bool editingEnabled = !projectRootPath.isEmpty();
         newPrefabButton->setEnabled(editingEnabled);
         importPrefabButton->setEnabled(editingEnabled);
         editPrefabButton->setEnabled(editingEnabled);
         stagePrefabButton->setEnabled(editingEnabled);
     }
+
     void browse()
     {
         const QString start = pathEdit->text().isEmpty()
@@ -3051,6 +3296,7 @@ public:
         pathEdit->setText(QDir::toNativeSeparators(directory));
         reload();
     }
+
     void reload()
     {
         WorldGenDefinitions loaded;
@@ -3076,6 +3322,7 @@ public:
             setStatus(error, true);
             return;
         }
+
         definitions = loaded;
         pathEdit->setText(QDir::toNativeSeparators(
                               definitions.rootPath));
@@ -3112,6 +3359,7 @@ public:
             populatePrefabCombo();
         }
     }
+
     void populateBiomeCombo()
     {
         const QString previous = biomeCombo->currentData().toString();
@@ -3151,6 +3399,7 @@ public:
         biomeCombo->blockSignals(false);
         biomeChanged();
     }
+
     QString uniqueBiomeName(const QString &base) const
     {
         QString candidate = base;
@@ -3161,6 +3410,7 @@ public:
         }
         return candidate;
     }
+
     QString uniqueFeatureName(const QString &base) const
     {
         QString candidate = base;
@@ -3169,6 +3419,7 @@ public:
             candidate = base + QStringLiteral("_%1").arg(suffix++);
         return candidate;
     }
+
     QString uniquePrefabName(const QString &base) const
     {
         QString candidate = base;
@@ -3177,6 +3428,7 @@ public:
             candidate = base + QStringLiteral("_%1").arg(suffix++);
         return candidate;
     }
+
     void populateFeatureCombo()
     {
         const QString previous = featureCombo->currentData().toString();
@@ -3208,6 +3460,7 @@ public:
         featureCombo->blockSignals(false);
         featureChanged();
     }
+
     const WorldGenFeature *currentFeature() const
     {
         const auto iterator = definitions.features.constFind(
@@ -3215,6 +3468,7 @@ public:
         return iterator == definitions.features.constEnd()
                 ? nullptr : &iterator.value();
     }
+
     void featureChanged()
     {
         const WorldGenFeature *feature = currentFeature();
@@ -3225,6 +3479,7 @@ public:
                     ? q->tr("Edit Project Feature...")
                     : q->tr("Create Feature Variant..."));
     }
+
     bool saveFeatureDefinition(const WorldGenFeature &feature,
                                bool editing)
     {
@@ -3255,6 +3510,7 @@ public:
                        QDir::toNativeSeparators(fileName)), false);
         return true;
     }
+
     void populatePrefabCombo()
     {
         const QString previous = prefabCombo->currentData().toString();
@@ -3277,6 +3533,7 @@ public:
         prefabCombo->blockSignals(false);
         prefabChanged();
     }
+
     const WorldGenPrefab *currentPrefab() const
     {
         const auto iterator = definitions.prefabs.constFind(
@@ -3284,6 +3541,7 @@ public:
         return iterator == definitions.prefabs.constEnd()
                 ? nullptr : &iterator.value();
     }
+
     void prefabChanged()
     {
         const WorldGenPrefab *prefab = currentPrefab();
@@ -3299,6 +3557,7 @@ public:
         prefabInspector->clear();
         if (!prefab)
             return;
+
         QTreeWidgetItem *identity =
                 new QTreeWidgetItem(prefabInspector);
         identity->setText(0, q->tr("Prefab"));
@@ -3327,6 +3586,7 @@ public:
                     QStringList() << q->tr("Sprite catalogue")
                                   << q->tr("%1 unique entries")
                                      .arg(prefab->tiles.size()));
+
         for (const QString &category : PrefabCategories) {
             const QVector<int> refs = prefab->schematic.value(category);
             int placements = 0;
@@ -3361,6 +3621,7 @@ public:
             }
         }
     }
+
     bool savePrefabDefinition(const WorldGenPrefab &prefab, bool editing)
     {
         if (!editing && definitions.prefabs.contains(prefab.name)) {
@@ -3387,6 +3648,7 @@ public:
                        QDir::toNativeSeparators(fileName)), false);
         return true;
     }
+
     void createPrefab()
     {
         if (projectRootPath.isEmpty())
@@ -3399,6 +3661,7 @@ public:
         if (dialog.exec() == QDialog::Accepted)
             savePrefabDefinition(dialog.prefab(), false);
     }
+
     void importPrefab()
     {
         if (projectRootPath.isEmpty())
@@ -3409,6 +3672,7 @@ public:
                     q->tr("PZ maps and buildings (*.tmx *.tbx)"));
         if (source.isEmpty())
             return;
+
         WorldGenPrefab imported;
         QStringList warnings;
         QString error;
@@ -3437,6 +3701,7 @@ public:
         if (dialog.exec() == QDialog::Accepted)
             savePrefabDefinition(dialog.prefab(), false);
     }
+
     void editOrCopyPrefab()
     {
         const WorldGenPrefab *selected = currentPrefab();
@@ -3453,11 +3718,13 @@ public:
         if (dialog.exec() == QDialog::Accepted)
             savePrefabDefinition(dialog.prefab(), editing);
     }
+
     void stagePrefab()
     {
         const WorldGenPrefab *selected = currentPrefab();
         if (!selected || projectRootPath.isEmpty())
             return;
+
         QDialog dialog(q);
         dialog.setWindowTitle(q->tr("Stage WorldGen Prefab for Game / Mod"));
         dialog.resize(760, 420);
@@ -3522,6 +3789,7 @@ public:
                          &dialog, &QDialog::accept);
         if (dialog.exec() != QDialog::Accepted)
             return;
+
         const QString targetRoot = QDir::cleanPath(
                     QFileInfo(target->text().trimmed()).absoluteFilePath());
         const QString gameRoot = ownerRootForWorldGen(
@@ -3551,6 +3819,7 @@ public:
                               "media/maps folder name."));
             return;
         }
+
         const qint64 xmin = x->value();
         const qint64 ymin = y->value();
         const qint64 xmax = xmin + selected->width - 1;
@@ -3582,6 +3851,7 @@ public:
                     QMessageBox::No) != QMessageBox::Yes) {
             return;
         }
+
         const QString prefabFile = QDir(targetRoot).filePath(
                     QStringLiteral("media/lua/server/WorldGen/prefabs/%1.lua")
                     .arg(selected->name));
@@ -3594,6 +3864,7 @@ public:
             QMessageBox::critical(q, q->tr("Could not stage prefab"), error);
             return;
         }
+
         QString existing;
         QFile input(overrideFile);
         if (input.exists()) {
@@ -3650,6 +3921,7 @@ public:
                        compactBoundaryReport),
                   false);
     }
+
     bool saveBiomeDefinition(const WorldGenBiome &biome, bool editing)
     {
         if (!editing
@@ -3685,6 +3957,7 @@ public:
                        QDir::toNativeSeparators(fileName)), false);
         return true;
     }
+
     void createFeature()
     {
         if (projectRootPath.isEmpty())
@@ -3701,6 +3974,7 @@ public:
         if (dialog.exec() == QDialog::Accepted)
             saveFeatureDefinition(dialog.feature(), false);
     }
+
     void editOrCopyFeature()
     {
         const WorldGenFeature *selected = currentFeature();
@@ -3717,6 +3991,7 @@ public:
         if (dialog.exec() == QDialog::Accepted)
             saveFeatureDefinition(dialog.feature(), editing);
     }
+
     void createBiome()
     {
         if (projectRootPath.isEmpty())
@@ -3736,6 +4011,7 @@ public:
         if (dialog.exec() == QDialog::Accepted)
             saveBiomeDefinition(dialog.biome(), false);
     }
+
     void editOrCopyBiome()
     {
         const WorldGenBiome *selected = currentBiome();
@@ -3764,6 +4040,7 @@ public:
         if (dialog.exec() == QDialog::Accepted)
             saveBiomeDefinition(dialog.biome(), editing);
     }
+
     void biomeChanged()
     {
         const WorldGenBiome *biome = currentBiome();
@@ -3788,11 +4065,13 @@ public:
         populateInspector(*biome);
         regenerate();
     }
+
     const WorldGenBiome *currentBiome() const
     {
         return findBiome(definitions,
                          biomeCombo->currentData().toString());
     }
+
     void populateInspector(const WorldGenBiome &biome)
     {
         QTreeWidgetItem *identity = new QTreeWidgetItem(inspector);
@@ -3821,6 +4100,7 @@ public:
                             << q->tr("Selectable")
                             << (biome.generate
                                 ? q->tr("yes") : q->tr("no (template)")));
+
         QTreeWidgetItem *parameters =
                 new QTreeWidgetItem(inspector);
         parameters->setText(0, q->tr("Effective parameters"));
@@ -3849,6 +4129,7 @@ public:
                             QStringList()
                             << q->tr("Replacement rules")
                             << QString::number(biome.replacementRules));
+
         for (const QString &category : FeatureCategories) {
             if (!biome.features.contains(category))
                 continue;
@@ -3889,6 +4170,7 @@ public:
             }
         }
     }
+
     void regenerate()
     {
         const WorldGenBiome *biome = currentBiome();
@@ -3896,6 +4178,7 @@ public:
             return;
         grid = generatePreview(definitions, *biome,
                                quint32(seedSpin->value()));
+
         QSet<Tileset *> requiredTilesets;
         QSet<QString> missingSprites;
         for (const QVector<PreviewTile> &square : grid.squares) {
@@ -3921,6 +4204,7 @@ public:
             TileMetaInfoMgr::instance()->loadTilesets(required);
             TilesetManager::instance()->waitForTilesets(required, q);
         }
+
         for (const QVector<PreviewTile> &square : grid.squares) {
             for (const PreviewTile &tile : square) {
                 Tile *resolved = tileForSprite(tile.sprite);
@@ -3930,6 +4214,7 @@ public:
         }
         canvas->setGrid(grid);
         squareDetails->clear();
+
         const QString warning = biome->mapBiome
                 ? q->tr(" Map-biome preview is shown on an empty synthetic "
                         "surface; replacements and protections need a real "
@@ -3962,6 +4247,7 @@ public:
                   .arg(warning, markerWarning, missingWarning),
                   !missingSprites.isEmpty());
     }
+
     void showSquare(int x, int y)
     {
         squareDetails->clear();
@@ -3998,6 +4284,7 @@ public:
             item->setExpanded(true);
         }
     }
+
     void setStatus(const QString &message, bool warning)
     {
         statusLabel->setText(message);
@@ -4008,6 +4295,7 @@ public:
                             : q->palette().color(QPalette::WindowText));
         statusLabel->setPalette(statusPalette);
     }
+
     QDialog *q;
     WorldDocument *worldDocument = nullptr;
     QString projectRootPath;
@@ -4039,6 +4327,7 @@ public:
     WorldGenDefinitions definitions;
     PreviewGrid grid;
 };
+
 WorldGenPreviewDialog::WorldGenPreviewDialog(WorldDocument *worldDocument,
                                              QWidget *parent)
     : QDialog(parent)
@@ -4048,7 +4337,9 @@ WorldGenPreviewDialog::WorldGenPreviewDialog(WorldDocument *worldDocument,
 {
     d->buildInterface();
 }
+
 WorldGenPreviewDialog::~WorldGenPreviewDialog() = default;
+
 WorldGenPrefabDialog::WorldGenPrefabDialog(
         WorldDocument *worldDocument, QWidget *parent)
     : QDialog(parent)
@@ -4058,7 +4349,9 @@ WorldGenPrefabDialog::WorldGenPrefabDialog(
 {
     d->buildInterface();
 }
+
 WorldGenPrefabDialog::~WorldGenPrefabDialog() = default;
+
 bool WorldGenPrefabDialog::renderValidationWindow(
         const QString &path, const QString &outputFile, QString *error)
 {
@@ -4070,6 +4363,7 @@ bool WorldGenPrefabDialog::renderValidationWindow(
             *error = dialog.d->statusLabel->text();
         return false;
     }
+
     dialog.show();
     dialog.raise();
     QApplication::processEvents();
@@ -4085,6 +4379,7 @@ bool WorldGenPrefabDialog::renderValidationWindow(
     dialog.close();
     return true;
 }
+
 bool WorldGenPreviewDialog::validateDefinitions(
         const QString &path, QString *summary, QString *error)
 {
@@ -4103,6 +4398,7 @@ bool WorldGenPreviewDialog::validateDefinitions(
         }
         return false;
     }
+
     const WorldGenBiome *sample = nullptr;
     if (definitions.proceduralBiomes.contains(
                 QStringLiteral("pine_forest_boulder_none"))) {
@@ -4118,6 +4414,7 @@ bool WorldGenPreviewDialog::validateDefinitions(
             *error = tr("The sample biome produced no preview tiles.");
         return false;
     }
+
     if (summary) {
         *summary = tr("%1 biome features, %2 static prefabs, %3 procedural "
                      "biomes, %4 map biomes, %5 subbiomes; sample '%6': "
@@ -4132,6 +4429,7 @@ bool WorldGenPreviewDialog::validateDefinitions(
     }
     return true;
 }
+
 bool WorldGenPreviewDialog::validateProjectOverlay(
         const QString &gamePath, const QString &projectPath,
         QString *summary, QString *error)
@@ -4139,6 +4437,7 @@ bool WorldGenPreviewDialog::validateProjectOverlay(
     WorldGenDefinitions definitions;
     if (!loadDefinitions(gamePath, projectPath, &definitions, error))
         return false;
+
     int projectFeatures = 0;
     for (const WorldGenFeature &feature : definitions.features) {
         if (feature.projectOwned)
@@ -4180,6 +4479,7 @@ bool WorldGenPreviewDialog::validateProjectOverlay(
     }
     return true;
 }
+
 bool WorldGenPreviewDialog::renderValidationPreview(
         const QString &path, const QString &outputFile, QString *error)
 {
@@ -4191,6 +4491,7 @@ bool WorldGenPreviewDialog::renderValidationPreview(
             *error = dialog.d->statusLabel->text();
         return false;
     }
+
     dialog.show();
     dialog.raise();
     QApplication::processEvents();
@@ -4206,6 +4507,7 @@ bool WorldGenPreviewDialog::renderValidationPreview(
     dialog.close();
     return true;
 }
+
 bool WorldGenPreviewDialog::renderValidationPrefabEditor(
         const QString &path, const QString &outputFile, QString *error)
 {
@@ -4239,6 +4541,7 @@ bool WorldGenPreviewDialog::renderValidationPrefabEditor(
     dialog.close();
     return true;
 }
+
 bool WorldGenPreviewDialog::validatePrefabImport(
         const QString &fileName, QString *summary, QString *error)
 {

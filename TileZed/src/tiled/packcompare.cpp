@@ -18,7 +18,6 @@
 #include "packcompare.h"
 #include "ui_packcompare.h"
 
-#include "preferences.h"
 #include "zprogress.h"
 
 #include <QApplication>
@@ -37,24 +36,29 @@
 #include <QTextStream>
 
 #include <algorithm>
+
 namespace {
+
 QString csvCell(const QString &value)
 {
     QString escaped = value;
     escaped.replace(QLatin1Char('"'), QStringLiteral("\"\""));
     return QLatin1Char('"') + escaped + QLatin1Char('"');
 }
+
 QString shortHash(const QByteArray &hash)
 {
     if (hash.isEmpty())
         return QStringLiteral("-");
     return PackFile::sha256Text(hash).left(16);
 }
+
 void fillRect(QImage *image, const QRect &rect, const QColor &color)
 {
     QPainter painter(image);
     painter.fillRect(rect, color);
 }
+
 void addDemoTexture(PackPage *page, const QString &name,
                     const QRect &packedRect, const QColor &color,
                     const QSize &fullSize = QSize(64, 64),
@@ -67,6 +71,7 @@ void addDemoTexture(PackPage *page, const QString &name,
                 offset.x(), offset.y(),
                 fullSize.width(), fullSize.height(), name);
 }
+
 bool createDemoPacks(const QString &firstPath, const QString &secondPath,
                      QString *errorString)
 {
@@ -86,6 +91,7 @@ bool createDemoPacks(const QString &firstPath, const QString &secondPath,
                    QRect(160, 0, 32, 32), QColor(150, 85, 210));
     addDemoTexture(&firstPage, QStringLiteral("both_0"),
                    QRect(0, 80, 32, 32), QColor(210, 125, 40));
+
     PackPage secondPage;
     secondPage.name = QStringLiteral("demo_page");
     secondPage.image = QImage(256, 256, QImage::Format_ARGB32);
@@ -104,6 +110,7 @@ bool createDemoPacks(const QString &firstPath, const QString &secondPath,
                    QRect(200, 0, 32, 32), QColor(150, 85, 210));
     addDemoTexture(&secondPage, QStringLiteral("both_0"),
                    QRect(40, 80, 32, 32), QColor(40, 175, 210));
+
     PackFile first;
     first.addPage(firstPage);
     if (!first.write(firstPath)) {
@@ -118,7 +125,9 @@ bool createDemoPacks(const QString &firstPath, const QString &secondPath,
     }
     return true;
 }
-}
+
+} // anonymous namespace
+
 PackCompare::PackCompare(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::PackCompare)
@@ -133,6 +142,7 @@ PackCompare::PackCompare(QWidget *parent)
     ui->statusFilter->addItem(tr("Metadata changes"), 101);
     ui->statusFilter->addItem(tr("Duplicates"), int(Duplicate) + 1);
     ui->statusFilter->addItem(tr("Unchanged"), int(Unchanged) + 1);
+
     ui->comparisonTable->setSelectionBehavior(
                 QAbstractItemView::SelectRows);
     ui->comparisonTable->setSelectionMode(
@@ -148,6 +158,7 @@ PackCompare::PackCompare(QWidget *parent)
         ui->comparisonTable->horizontalHeader()->setSectionResizeMode(
                     column, QHeaderView::ResizeToContents);
     }
+
     connect(ui->packBrowse1, &QAbstractButton::clicked,
             this, &PackCompare::browse1);
     connect(ui->packBrowse2, &QAbstractButton::clicked,
@@ -171,6 +182,7 @@ PackCompare::PackCompare(QWidget *parent)
             this, &QWidget::close);
     connect(ui->actionExportReport, &QAction::triggered,
             this, &PackCompare::exportReport);
+
     ui->exportButton->setEnabled(false);
     ui->copyButton->setEnabled(false);
     ui->actionExportReport->setEnabled(false);
@@ -184,26 +196,18 @@ PackCompare::~PackCompare()
 
 void PackCompare::browse1()
 {
-    const QString start = ui->packEdit1->text().isEmpty()
-            ? Tiled::Internal::Preferences::instance()->gameMediaPath(
-                  QStringLiteral("texturepacks"))
-            : ui->packEdit1->text();
     const QString fileName = QFileDialog::getOpenFileName(
                 this, tr("Choose first pack file"),
-                start, tr("Pack files (*.pack)"));
+                ui->packEdit1->text(), tr("Pack files (*.pack)"));
     if (!fileName.isEmpty())
         ui->packEdit1->setText(QDir::toNativeSeparators(fileName));
 }
 
 void PackCompare::browse2()
 {
-    const QString start = ui->packEdit2->text().isEmpty()
-            ? Tiled::Internal::Preferences::instance()->gameMediaPath(
-                  QStringLiteral("texturepacks"))
-            : ui->packEdit2->text();
     const QString fileName = QFileDialog::getOpenFileName(
                 this, tr("Choose second pack file"),
-                start, tr("Pack files (*.pack)"));
+                ui->packEdit2->text(), tr("Pack files (*.pack)"));
     if (!fileName.isEmpty())
         ui->packEdit2->setText(QDir::toNativeSeparators(fileName));
 }
@@ -216,6 +220,7 @@ void PackCompare::compare()
         QMessageBox::warning(this, tr("Pack comparison failed"), error);
     }
 }
+
 void PackCompare::swapPacks()
 {
     const QString first = ui->packEdit1->text();
@@ -226,6 +231,7 @@ void PackCompare::swapPacks()
         compare();
     }
 }
+
 bool PackCompare::loadComparison(const QString &file1,
                                  const QString &file2,
                                  QString *errorString)
@@ -234,6 +240,7 @@ bool PackCompare::loadComparison(const QString &file1,
         *errorString = tr("Choose both .pack files.");
         return false;
     }
+
     PROGRESS progress(tr("Reading first pack"), this);
     if (!mPackFile1.read(file1)) {
         *errorString = mPackFile1.errorString();
@@ -244,6 +251,7 @@ bool PackCompare::loadComparison(const QString &file1,
         *errorString = mPackFile2.errorString();
         return false;
     }
+
     progress.update(tr("Hashing and comparing textures"));
     buildComparison();
     updateSummary();
@@ -253,10 +261,12 @@ bool PackCompare::loadComparison(const QString &file1,
     ui->actionExportReport->setEnabled(true);
     return true;
 }
+
 void PackCompare::buildComparison()
 {
     QMap<QString, QVector<Location>> first;
     QMap<QString, QVector<Location>> second;
+
     const auto collect = [](const PackFile &pack,
                             QMap<QString, QVector<Location>> *locations) {
         for (int pageIndex = 0; pageIndex < pack.pages().size();
@@ -279,6 +289,7 @@ void PackCompare::buildComparison()
     };
     collect(mPackFile1, &first);
     collect(mPackFile2, &second);
+
     QSet<QString> allNames;
     for (auto iterator = first.constBegin();
          iterator != first.constEnd(); ++iterator) {
@@ -293,6 +304,7 @@ void PackCompare::buildComparison()
               [](const QString &left, const QString &right) {
         return QString::localeAwareCompare(left, right) < 0;
     });
+
     mRows.clear();
     mRows.reserve(names.size());
     for (const QString &name : names) {
@@ -325,6 +337,7 @@ void PackCompare::buildComparison()
         mRows.append(row);
     }
 }
+
 QString PackCompare::statusText(Status status) const
 {
     switch (status) {
@@ -339,6 +352,7 @@ QString PackCompare::statusText(Status status) const
     }
     return QString();
 }
+
 QColor PackCompare::statusColor(Status status) const
 {
     switch (status) {
@@ -352,6 +366,7 @@ QColor PackCompare::statusColor(Status status) const
     }
     return QColor();
 }
+
 bool PackCompare::statusMatchesFilter(Status status) const
 {
     const int filter = ui->statusFilter->currentData().toInt();
@@ -369,15 +384,18 @@ bool PackCompare::statusMatchesFilter(Status status) const
     }
     return filter == int(status) + 1;
 }
+
 void PackCompare::updateFilter()
 {
     rebuildTable();
 }
+
 void PackCompare::rebuildTable()
 {
     const QString search = ui->searchEdit->text().trimmed();
     ui->comparisonTable->setSortingEnabled(false);
     ui->comparisonTable->setRowCount(0);
+
     int visibleCount = 0;
     for (int index = 0; index < mRows.size(); ++index) {
         const ComparisonRow &row = mRows.at(index);
@@ -386,6 +404,7 @@ void PackCompare::rebuildTable()
                  !row.name.contains(search, Qt::CaseInsensitive))) {
             continue;
         }
+
         const int tableRow = ui->comparisonTable->rowCount();
         ui->comparisonTable->insertRow(tableRow);
         QTableWidgetItem *statusItem =
@@ -396,10 +415,12 @@ void PackCompare::rebuildTable()
         statusFont.setBold(true);
         statusItem->setFont(statusFont);
         ui->comparisonTable->setItem(tableRow, 0, statusItem);
+
         QTableWidgetItem *nameItem =
                 new QTableWidgetItem(row.name);
         nameItem->setData(Qt::UserRole, index);
         ui->comparisonTable->setItem(tableRow, 1, nameItem);
+
         const auto pageName = [this](const PackFile &pack,
                                      const QVector<Location> &locations) {
             if (locations.isEmpty())
@@ -416,6 +437,7 @@ void PackCompare::rebuildTable()
         ui->comparisonTable->setItem(
                     tableRow, 3,
                     new QTableWidgetItem(pageName(mPackFile2, row.pack2)));
+
         QString geometry = QStringLiteral("-");
         const PackSubTexInfo *firstTexture =
                 row.pack1.isEmpty() ? nullptr :
@@ -435,6 +457,7 @@ void PackCompare::rebuildTable()
         }
         ui->comparisonTable->setItem(
                     tableRow, 4, new QTableWidgetItem(geometry));
+
         const QByteArray firstHash = row.pack1.isEmpty()
                 ? QByteArray() : row.pack1.first().pixelHash;
         const QByteArray secondHash = row.pack2.isEmpty()
@@ -449,6 +472,7 @@ void PackCompare::rebuildTable()
         ui->comparisonTable->setItem(tableRow, 6, secondHashItem);
         ++visibleCount;
     }
+
     ui->comparisonTable->setSortingEnabled(true);
     ui->visibleSummary->setText(
                 tr("%1 of %2 texture names shown")
@@ -458,6 +482,7 @@ void PackCompare::rebuildTable()
     else
         selectedTextureChanged();
 }
+
 const PackPage *PackCompare::pageFor(
         const PackFile &pack, const Location &location) const
 {
@@ -467,6 +492,7 @@ const PackPage *PackCompare::pageFor(
     }
     return &pack.pages().at(location.pageIndex);
 }
+
 const PackSubTexInfo *PackCompare::textureFor(
         const PackFile &pack, const Location &location) const
 {
@@ -477,6 +503,7 @@ const PackSubTexInfo *PackCompare::textureFor(
     }
     return &page->mInfo.at(location.textureIndex);
 }
+
 QImage PackCompare::imageFor(
         const PackFile &pack,
         const QVector<Location> &locations) const
@@ -490,12 +517,14 @@ QImage PackCompare::imageFor(
         return QImage();
     return PackFile::extractTexture(*page, *texture);
 }
+
 QString PackCompare::locationDescription(
         const PackFile &pack,
         const QVector<Location> &locations) const
 {
     if (locations.isEmpty())
         return tr("Not present");
+
     QStringList descriptions;
     for (const Location &location : locations) {
         const PackPage *page = pageFor(pack, location);
@@ -518,6 +547,7 @@ QString PackCompare::locationDescription(
     }
     return descriptions.join(QStringLiteral("\n\n"));
 }
+
 void PackCompare::setPreview(QLabel *label, const QImage &image,
                              const QString &emptyText)
 {
@@ -531,12 +561,14 @@ void PackCompare::setPreview(QLabel *label, const QImage &image,
                          QSize(360, 280), Qt::KeepAspectRatio,
                          Qt::FastTransformation));
 }
+
 QImage PackCompare::differenceImage(
         const QImage &firstImage,
         const QImage &secondImage) const
 {
     if (firstImage.isNull() && secondImage.isNull())
         return QImage();
+
     const QImage first = firstImage.convertToFormat(
                 QImage::Format_ARGB32);
     const QImage second = secondImage.convertToFormat(
@@ -570,6 +602,7 @@ QImage PackCompare::differenceImage(
     }
     return difference;
 }
+
 void PackCompare::selectedTextureChanged()
 {
     const QList<QTableWidgetItem *> selected =
@@ -598,6 +631,7 @@ void PackCompare::selectedTextureChanged()
                      locationDescription(mPackFile1, row.pack1),
                      locationDescription(mPackFile2, row.pack2)));
 }
+
 void PackCompare::updateSummary()
 {
     const auto summary = [](const PackFile &pack) {
@@ -612,6 +646,7 @@ void PackCompare::updateSummary()
     ui->packSummary1->setToolTip(mPackFile1.fileName());
     ui->packSummary2->setText(summary(mPackFile2));
     ui->packSummary2->setToolTip(mPackFile2.fileName());
+
     QMap<Status, int> counts;
     for (const ComparisonRow &row : mRows)
         ++counts[row.status];
@@ -627,6 +662,7 @@ void PackCompare::updateSummary()
                 .arg(counts.value(Duplicate))
                 .arg(counts.value(Unchanged)));
 }
+
 QString PackCompare::csvReport() const
 {
     QString report;
@@ -666,6 +702,7 @@ QString PackCompare::csvReport() const
     }
     return report;
 }
+
 void PackCompare::exportReport()
 {
     const QString fileName = QFileDialog::getSaveFileName(
@@ -688,11 +725,13 @@ void PackCompare::exportReport()
                              .arg(QDir::toNativeSeparators(fileName)));
     }
 }
+
 void PackCompare::copyReport()
 {
     QApplication::clipboard()->setText(csvReport());
     ui->statusbar->showMessage(tr("Comparison report copied."), 3000);
 }
+
 bool PackCompare::runSelfTest(QString *summary,
                               QString *errorString)
 {
@@ -708,9 +747,11 @@ bool PackCompare::runSelfTest(QString *summary,
             temporary.filePath(QStringLiteral("second.pack"));
     if (!createDemoPacks(firstPath, secondPath, errorString))
         return false;
+
     PackCompare comparator;
     if (!comparator.loadComparison(firstPath, secondPath, errorString))
         return false;
+
     QMap<Status, int> counts;
     for (const ComparisonRow &row : comparator.mRows)
         ++counts[row.status];
@@ -727,6 +768,7 @@ bool PackCompare::runSelfTest(QString *summary,
                     "Unexpected comparison status or SHA-256 result");
         return false;
     }
+
     QFile validFile(secondPath);
     if (!validFile.open(QIODevice::ReadOnly)) {
         *errorString = QStringLiteral(
@@ -758,11 +800,13 @@ bool PackCompare::runSelfTest(QString *summary,
                     "A truncated pack was not rejected explicitly");
         return false;
     }
+
     *summary = QStringLiteral(
                 "2 version-1 packs, all 7 status classes, file/metadata/pixel "
                 "SHA-256 and truncated-input rejection verified");
     return true;
 }
+
 bool PackCompare::renderValidation(const QString &outputFile,
                                    QString *errorString)
 {

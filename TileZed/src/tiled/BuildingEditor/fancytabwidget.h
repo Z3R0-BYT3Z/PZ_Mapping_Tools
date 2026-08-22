@@ -51,7 +51,7 @@ class FancyTab : public QObject
 
     Q_PROPERTY(float fader READ fader WRITE setFader)
 public:
-    FancyTab(QWidget *tabbar) : enabled(false), tabbar(tabbar), m_fader(0) {
+    FancyTab(QWidget *tabbar) : enabled(false), visible(true), tabbar(tabbar), m_fader(0) {
         animator.setPropertyName("fader");
         animator.setTargetObject(this);
     }
@@ -65,6 +65,7 @@ public:
     QString text;
     QString toolTip;
     bool enabled;
+    bool visible;
 
 private:
     QPropertyAnimation animator;
@@ -99,6 +100,8 @@ public:
 
     void setTabEnabled(int index, bool enable);
     bool isTabEnabled(int index) const;
+    void setTabVisible(int index, bool visible);
+    bool isTabVisible(int index) const;
 
     void insertTab(int index, const QIcon &icon, const QString &label) {
         FancyTab *tab = new FancyTab(this);
@@ -120,6 +123,7 @@ public:
     QIcon tabIcon(int index) const { return m_tabs.at(index)->icon; }
     QString tabText(int index) const { return m_tabs.at(index)->text; }
     int count() const {return m_tabs.count(); }
+    int visibleCount() const;
     QRect tabRect(int index) const;
 
 signals:
@@ -162,6 +166,8 @@ public:
 
     void setTabEnabled(int index, bool enable);
     bool isTabEnabled(int index) const;
+    void setTabVisible(int index, bool visible);
+    bool isTabVisible(int index) const;
 
 signals:
     void currentAboutToShow(int index);

@@ -17,7 +17,6 @@
 
 #include "worldwriter.h"
 
-#include "InGameMap/ingamemapcell.h"
 #include "bmptotmx.h"
 #include "world.h"
 #include "worldcell.h"
@@ -28,8 +27,6 @@
 #include <QFileInfo>
 #include <QTemporaryFile>
 #include <QXmlStreamWriter>
-
-#include <utility>
 
 class WorldWriterPrivate
 {
@@ -239,42 +236,6 @@ public:
 
         foreach (WorldCellObject *obj, cell->objects())
             writeObject(w, obj);
-
-        for (InGameMapFeature *feature :
-             std::as_const(cell->inGameMap().features()))
-            writeInGameMapFeature(w, feature);
-
-        w.writeEndElement();
-    }
-
-    void writeInGameMapFeature(QXmlStreamWriter &w,
-                               InGameMapFeature *feature)
-    {
-        w.writeStartElement(QLatin1String("feature"));
-
-        w.writeStartElement(QLatin1String("geometry"));
-        w.writeAttribute(QLatin1String("type"), feature->mGeometry.mType);
-        for (const InGameMapCoordinates &coordinates :
-             std::as_const(feature->mGeometry.mCoordinates)) {
-            w.writeStartElement(QLatin1String("coordinates"));
-            for (const InGameMapPoint &point : coordinates) {
-                w.writeEmptyElement(QLatin1String("point"));
-                w.writeAttribute(QLatin1String("x"),
-                                 QString::number(point.x, 'g', 16));
-                w.writeAttribute(QLatin1String("y"),
-                                 QString::number(point.y, 'g', 16));
-            }
-            w.writeEndElement();
-        }
-        w.writeEndElement();
-
-        w.writeStartElement(QLatin1String("properties"));
-        for (const InGameMapProperty &property : feature->mProperties) {
-            w.writeEmptyElement(QLatin1String("property"));
-            w.writeAttribute(QLatin1String("name"), property.mKey);
-            w.writeAttribute(QLatin1String("value"), property.mValue);
-        }
-        w.writeEndElement();
 
         w.writeEndElement();
     }

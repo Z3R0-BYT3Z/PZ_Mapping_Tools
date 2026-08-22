@@ -104,6 +104,7 @@ public:
             }
         }
     }
+
     void addClippedPolygonFeatures(InGameMapCell *newCell,
                                    InGameMapFeature *oldFeature,
                                    int newCellX, int newCellY)
@@ -127,6 +128,7 @@ public:
         }
         if (subject.empty())
             return;
+
         const ClipperLib::cInt left = ClipperLib::cInt(newCellX) * mCellSizeNew;
         const ClipperLib::cInt top = ClipperLib::cInt(newCellY) * mCellSizeNew;
         const ClipperLib::cInt right = left + mCellSizeNew;
@@ -136,6 +138,7 @@ public:
                << ClipperLib::IntPoint(right, top)
                << ClipperLib::IntPoint(right, bottom)
                << ClipperLib::IntPoint(left, bottom);
+
         ClipperLib::Clipper clipper;
         clipper.AddPaths(subject, ClipperLib::ptSubject, true);
         clipper.AddPath(bounds, ClipperLib::ptClip, true);
@@ -144,6 +147,7 @@ public:
                              ClipperLib::pftEvenOdd,
                              ClipperLib::pftEvenOdd))
             return;
+
         struct Polygon {
             ClipperLib::Path outer;
             ClipperLib::Paths holes;
@@ -162,12 +166,14 @@ public:
                 polygons += polygon;
             }
         }
+
         auto relativeCoordinates = [left, top](const ClipperLib::Path &path) {
             InGameMapCoordinates result;
             for (const ClipperLib::IntPoint &point : path)
                 result += InGameMapPoint(point.X - left, point.Y - top);
             return result;
         };
+
         for (Polygon *polygon : std::as_const(polygons)) {
             if (polygon->outer.size() < 3)
                 continue;
@@ -276,6 +282,7 @@ public:
         InGameMapFeature *feature;
         InGameMapGeometry geometry;
     };
+
     InGameMapWriterBinaryPrivate()
         : mWorld(nullptr)
         , mFeatureScope(InGameMapFeatureScope::AllFeatures)
@@ -306,6 +313,7 @@ public:
         writer.setByteOrder(QDataStream::LittleEndian);
 
         writeWorld(writer, world);
+
         qInfo() << "InGameMap binary geometry validation:"
                 << "output" << mOutputPath
                 << "written" << mWrittenFeatures
@@ -319,7 +327,7 @@ public:
 
         w << qint32(VERSION_LATEST);
 
-        w << qint32(256);
+        w << qint32(256); // cell size (8x8 chunks)
         w << qint32(world->width());
         w << qint32(world->height());
 
@@ -377,12 +385,14 @@ public:
         }
         return false;
     }
+
     static QPoint worldCellCoordinates(WorldCell *cell)
     {
         const QPoint origin =
                 cell->world()->getGenerateLotsSettings().worldOrigin;
         return origin + QPoint(cell->x(), cell->y());
     }
+
     static double distanceToSegmentSquared(const InGameMapPoint &point,
                                            const InGameMapPoint &start,
                                            const InGameMapPoint &end)
@@ -403,6 +413,7 @@ public:
         const double py = point.y - (start.y + t * dy);
         return px * px + py * py;
     }
+
     static void simplifySection(const QVector<InGameMapPoint> &points,
                                 int first, int last,
                                 double toleranceSquared,
@@ -428,11 +439,13 @@ public:
         simplifySection(points, farthestIndex, last,
                         toleranceSquared, keep);
     }
+
     static InGameMapCoordinates simplifyClosedCoordinates(
             const InGameMapCoordinates &source, double tolerance)
     {
         if (source.size() <= 3 || tolerance <= 0.0)
             return source;
+
         int opposite = 1;
         double farthestDistance = -1.0;
         for (int index = 1; index < source.size(); ++index) {
@@ -446,11 +459,13 @@ public:
         }
         if (opposite <= 0 || opposite >= source.size())
             return source;
+
         QVector<InGameMapPoint> unwrapped;
         unwrapped.reserve(source.size() + 1);
         for (int index = 0; index < source.size(); ++index)
             unwrapped += source.at(index);
         unwrapped += source.first();
+
         QVector<bool> keep(unwrapped.size(), false);
         keep[0] = true;
         keep[opposite] = true;
@@ -460,6 +475,7 @@ public:
                         toleranceSquared, keep);
         simplifySection(unwrapped, opposite, unwrapped.size() - 1,
                         toleranceSquared, keep);
+
         InGameMapCoordinates result;
         for (int index = 0; index < unwrapped.size() - 1; ++index) {
             if (keep.at(index))
@@ -467,6 +483,7 @@ public:
         }
         return result.size() >= 3 ? result : source;
     }
+
     static int rendererIndexEstimate(const QList<ExportFeature> &features)
     {
         qint64 estimate = 0;
@@ -482,6 +499,8 @@ public:
             const qint64 baseTriangleIndices = qMax<qint64>(
                         3, qint64(3) *
                         (pointCount + holeCount * 2 - 2));
+            // WorldMapGeometry creates the normal triangulation plus six
+            // zoom-dependent variants for every polygon tagged "highway".
             estimate += baseTriangleIndices *
                     (hasProperty(item.feature,
                                  QStringLiteral("highway")) ? 7 : 1);
@@ -489,11 +508,12 @@ public:
         return int(qMin<qint64>(estimate,
                     std::numeric_limits<int>::max()));
     }
+
     bool fitRendererBudget(QList<ExportFeature> &features,
                            WorldCell *cell)
     {
-        static const int safeIndexBudget = 24000;
-        static const int safePointBufferShorts = 28000;
+        static const int safeIndexBudget = 28000;
+        static const int safePointBufferShorts = 30000;
         auto pointCount = [&features]() {
             int count = 0;
             for (const ExportFeature &item : std::as_const(features)) {
@@ -503,16 +523,18 @@ public:
             }
             return count;
         };
+
         const int originalPoints = pointCount();
         const int originalEstimate = rendererIndexEstimate(features);
         if (originalPoints * 2 <= safePointBufferShorts &&
                 originalEstimate <= safeIndexBudget)
             return true;
+
         int changedFeatures = 0;
         double usedTolerance = 0.0;
         const QVector<double> tolerances =
                 {1.0, 2.0, 3.0, 4.0, 6.0, 8.0,
-                 12.0, 16.0, 24.0, 32.0, 48.0, 64.0};
+                 12.0, 16.0, 24.0, 32.0};
         for (double tolerance : tolerances) {
             changedFeatures = 0;
             for (ExportFeature &item : features) {
@@ -520,6 +542,7 @@ public:
                         !hasProperty(item.feature,
                                      QStringLiteral("highway")))
                     continue;
+
                 InGameMapGeometry simplified = item.geometry;
                 for (InGameMapCoordinates &coordinates :
                      simplified.mCoordinates) {
@@ -543,6 +566,7 @@ public:
                     rendererIndexEstimate(features) <= safeIndexBudget)
                 break;
         }
+
         const int finalPoints = pointCount();
         const int finalEstimate = rendererIndexEstimate(features);
         const QPoint cellCoordinates = worldCellCoordinates(cell);
@@ -557,6 +581,7 @@ public:
                        .arg(originalEstimate).arg(finalEstimate)
                        .arg(changedFeatures);
         }
+
         if (finalPoints * 2 > safePointBufferShorts ||
                 finalEstimate > safeIndexBudget) {
             mError = tr("InGameMap cell %1,%2 is too complex for the "
@@ -569,6 +594,7 @@ public:
         }
         return true;
     }
+
     void writeCell(QDataStream &w, WorldCell *cell)
     {
         QList<ExportFeature> exportFeatures;
@@ -604,8 +630,10 @@ public:
             }
             exportFeatures += item;
         }
+
         if (!fitRendererBudget(exportFeatures, cell))
             return;
+
         if (exportFeatures.isEmpty()) {
             w << qint32(-1);
             return;
@@ -613,6 +641,7 @@ public:
 
         w << qint32(cellCoordinates.x());
         w << qint32(cellCoordinates.y());
+
         w << qint32(exportFeatures.size());
 
         for (const ExportFeature &item : std::as_const(exportFeatures)) {
@@ -643,6 +672,7 @@ public:
         }
         return true;
     }
+
     QString propertySummary(InGameMapFeature *feature) const
     {
         QStringList properties;
@@ -723,6 +753,7 @@ bool InGameMapWriterBinary::writeWorld(World *world, const QString &filePath)
     d->writeWorld(worldForExport, &tempFile, QFileInfo(filePath).absolutePath());
     if (worldForExport != world)
         delete worldForExport;
+
     if (!d->mError.isEmpty())
         return false;
 
@@ -793,6 +824,7 @@ void InGameMapWriterBinary::writeWorld(World *world, QIODevice *device, const QS
     if (worldForExport != world)
         delete worldForExport;
 }
+
 void InGameMapWriterBinary::setFeatureScope(InGameMapFeatureScope scope)
 {
     d->mFeatureScope = scope;

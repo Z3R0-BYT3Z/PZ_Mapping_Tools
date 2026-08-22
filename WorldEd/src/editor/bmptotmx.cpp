@@ -63,6 +63,7 @@
 using namespace Tiled;
 
 namespace {
+
 int cellSizeForImage(const QSize &imageSize, int requestedCellSize)
 {
     if (requestedCellSize == 256 || requestedCellSize == 300)
@@ -73,12 +74,14 @@ int cellSizeForImage(const QSize &imageSize, int requestedCellSize)
         return 256;
     return 0;
 }
+
 struct BitmapValidationResult
 {
     int unknownPixels = 0;
     int repairedPixels = 0;
     QMap<QRgb, QList<QPoint> > samples;
 };
+
 BitmapValidationResult validateBitmapColors(
         QImage &image, const QSet<QRgb> &knownColors,
         QRgb fallbackColor, bool repair, const QPoint &sourceOrigin)
@@ -101,6 +104,7 @@ BitmapValidationResult validateBitmapColors(
     }
     return result;
 }
+
 bool validateBitmapColorRepair(QString *error)
 {
     const QRgb black = qRgb(0, 0, 0);
@@ -109,6 +113,7 @@ bool validateBitmapColorRepair(QString *error)
     QSet<QRgb> knownColors;
     knownColors.insert(black);
     knownColors.insert(known);
+
     QImage image(3, 1, QImage::Format_ARGB32);
     image.setPixel(0, 0, black);
     image.setPixel(1, 0, known);
@@ -376,6 +381,7 @@ bool writeBinaryFile(const QString &fileName, const QByteArray &data,
     return true;
 }
 }
+
 BMPToTMX *BMPToTMX::mInstance = 0;
 
 BMPToTMX *BMPToTMX::instance()
@@ -408,6 +414,7 @@ bool BMPToTMX::validateGenerationInputs(WorldDocument *worldDoc)
         mError = tr("No WorldEd project is available for BMP to TMX validation.");
         return false;
     }
+
     mWorldDoc = worldDoc;
     mError.clear();
     TileMetaInfoMgr::instance()->resolveTilesets();
@@ -755,6 +762,8 @@ bool BMPToTMX::generateWorld(WorldDocument *worldDoc, BMPToTMX::GenerateMode mod
         return false;
     }
 #endif
+    // Generation only needs the dimensions and resolved image paths. The
+    // pixels are loaded later, for the tilesets actually used by the map.
     TileMetaInfoMgr::instance()->resolveTilesets();
 
     const BMPToTMXSettings &settings = world->getBMPToTMXSettings();
@@ -948,6 +957,7 @@ BMPToTMXImages *BMPToTMX::getImages(const QString &path, const QPoint &origin,
                 .arg(image.width()).arg(image.height());
         return nullptr;
     }
+
     BMPToTMXImages *images = new BMPToTMXImages;
     images->mBmp = image;
     images->mBmpVeg = imageVeg;
@@ -1013,6 +1023,7 @@ QSize BMPToTMX::validateImages(const QString &path, int cellSize)
                 .arg(QDir::toNativeSeparators(infoVeg.canonicalFilePath()));
         return QSize();
     }
+
     return image.size();
 }
 
@@ -1112,6 +1123,7 @@ void BMPToTMX::validateAndRepairBitmaps(
             mWorldDoc->world()->getBMPToTMXSettings();
     if (!settings.warnUnknownColors && !settings.repairUnknownColors)
         return;
+
     const QRgb black = qRgb(0, 0, 0);
     QSet<QRgb> knownGround;
     QSet<QRgb> knownVegetation;
@@ -1125,6 +1137,7 @@ void BMPToTMX::validateAndRepairBitmaps(
          iterator != mRulesByColor1.constEnd(); ++iterator) {
         knownVegetation.insert(iterator.key());
     }
+
     QRgb groundFallback = QRgb(settings.unknownGroundFallback);
     QRgb vegetationFallback =
             QRgb(settings.unknownVegetationFallback);
@@ -1132,6 +1145,7 @@ void BMPToTMX::validateAndRepairBitmaps(
         groundFallback = black;
     if (!knownVegetation.contains(vegetationFallback))
         vegetationFallback = black;
+
     const BitmapValidationResult groundResult =
             validateBitmapColors(
                 ground, knownGround, groundFallback,
@@ -1140,10 +1154,12 @@ void BMPToTMX::validateAndRepairBitmaps(
             validateBitmapColors(
                 vegetation, knownVegetation, vegetationFallback,
                 settings.repairUnknownColors, sourceOrigin);
+
     mRepairedGroundPixels += groundResult.repairedPixels;
     mRepairedVegetationPixels += vegetationResult.repairedPixels;
     if (!settings.warnUnknownColors)
         return;
+
     for (auto iterator = groundResult.samples.constBegin();
          iterator != groundResult.samples.constEnd(); ++iterator) {
         UnknownColor &unknown = mUnknownColors[sourcePath][iterator.key()];
@@ -1166,6 +1182,7 @@ void BMPToTMX::validateAndRepairBitmaps(
         }
     }
 }
+
 void BMPToTMX::reportUnknownColors()
 {
     if (!mWorldDoc->world()->getBMPToTMXSettings().warnUnknownColors)
@@ -1203,6 +1220,7 @@ void BMPToTMX::reportUnknownColors()
         }
         return descriptions;
     };
+
     foreach (QString imagePath, imagePaths) {
         QMap<QRgb,UnknownColor> &map = mUnknownColors[imagePath];
         if (map.size()) {
@@ -1275,6 +1293,11 @@ bool BMPToTMX::LoadBaseXML()
         return false;
     }
 
+    // Some older or manually-edited projects ended up with Rules.txt in the
+    // MapBaseXML setting.  "alias" and "rule" are valid Rules.txt blocks, but
+    // they can never describe the TMX layer template.  Recover with the
+    // portable MapBaseXML.txt instead of reporting the misleading
+    // "Unknown block name 'alias'" error.
     bool looksLikeRulesFile = false;
     foreach (SimpleFileBlock block, simple.blocks) {
         if (block.name == QLatin1String("alias")
@@ -1303,6 +1326,7 @@ bool BMPToTMX::LoadBaseXML()
                    << "using portable template" << path;
         simple = fallback;
     }
+
     mLayers.clear();
 
     foreach (SimpleFileBlock block, simple.blocks) {
@@ -1446,6 +1470,7 @@ bogusTile:
 bool BMPToTMX::loadGenerationTilesets()
 {
     QSet<Tileset *> requiredTilesets;
+
     const auto addConcreteTile = [&requiredTilesets, this](
             const QString &tileName) {
         if (tileName.isEmpty())
@@ -1467,6 +1492,7 @@ bool BMPToTMX::loadGenerationTilesets()
             addConcreteTile(tileName);
         }
     };
+
     for (BmpAlias *alias : mAliases) {
         if (!alias)
             continue;
@@ -1489,10 +1515,12 @@ bool BMPToTMX::loadGenerationTilesets()
         for (int i = 0; i + 1 < blend->exclude2.size(); i += 2)
             addTileOrAlias(blend->exclude2.at(i));
     }
+
     QList<Tileset *> required = requiredTilesets.values();
     TileMetaInfoMgr::instance()->loadTilesets(required);
     Tiled::Internal::TilesetManager::instance()->waitForTilesets(
                 required, MainWindow::instance());
+
     QStringList unavailable;
     for (Tileset *tileset : required) {
         if (!tileset || tileset->isMissing() || !tileset->isLoaded())
@@ -1512,10 +1540,12 @@ bool BMPToTMX::loadGenerationTilesets()
         qCritical().noquote() << mError;
         return false;
     }
+
     qInfo() << "BMP to TMX generation tilesets ready:"
             << required.size() << "required by rules and blends";
     return true;
 }
+
 void BMPToTMX::AddRule(BmpRule *rule)
 {
     mRules += new BmpRule(rule);
@@ -1567,6 +1597,7 @@ bool BMPToTMX::WriteMap(WorldCell *cell, int bmpIndex)
                 .convertToFormat(QImage::Format_ARGB32);
         rbmpVeg.rimage() = bmpVeg.copy(ix, iy, cellSize, cellSize)
                 .convertToFormat(QImage::Format_ARGB32);
+
         validateAndRepairBitmaps(
                     rbmpMain.rimage(), rbmpVeg.rimage(),
                     images->mPath, QPoint(ix, iy));

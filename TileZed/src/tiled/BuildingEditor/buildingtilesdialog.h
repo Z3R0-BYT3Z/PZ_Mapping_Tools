@@ -56,7 +56,7 @@ class FurnitureTiles;
 class BuildingTilesDialog : public QDialog
 {
     Q_OBJECT
-    
+
 public:
     static BuildingTilesDialog *instance();
     static void deleteInstance();
@@ -122,7 +122,6 @@ private:
     typedef Tiled::Tileset Tileset;
 
 private slots:
-    void categoryFilterEdited(const QString &text);
     void categoryChanged(int index);
     void tilesetFilterEdited(const QString &text);
     void tilesetSelectionChanged();

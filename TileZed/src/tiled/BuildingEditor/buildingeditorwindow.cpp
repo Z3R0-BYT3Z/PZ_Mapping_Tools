@@ -33,7 +33,6 @@
 #include "buildingpropertiesdialog.h"
 #include "buildingreader.h"
 #include "buildingundoredo.h"
-#include "tileselectionscope.h"
 #include "buildingisoview.h"
 #include "buildingorthoview.h"
 #include "buildingtemplates.h"
@@ -84,6 +83,7 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileDialog>
+#include <QFile>
 #include <QFileInfo>
 #include <QGraphicsView>
 #include <QHash>
@@ -103,6 +103,11 @@
 #include <QUrl>
 #include <QXmlStreamReader>
 
+#ifdef Q_OS_WIN
+#include <dwmapi.h>
+#pragma comment(lib, "dwmapi.lib")
+#endif
+
 using namespace BuildingEditor;
 using namespace Tiled;
 using namespace Tiled::Internal;
@@ -119,6 +124,7 @@ static QString splitterSettingsKey(const QObject *root,
     }
     return parts.join(QLatin1Char('.'));
 }
+
 static void saveSplitterStates(QWidget *root, QSettings &settings)
 {
     settings.beginGroup(QLatin1String("Splitters"));
@@ -127,11 +133,14 @@ static void saveSplitterStates(QWidget *root, QSettings &settings)
         int totalSize = 0;
         for (int size : splitter->sizes())
             totalSize += size;
+        // Splitters belonging to inactive edit modes can temporarily report
+        // 0,0. Keep the last valid state instead of overwriting it.
         if (!key.isEmpty() && splitter->isVisible() && totalSize > 0)
             settings.setValue(key, splitter->saveState());
     }
     settings.endGroup();
 }
+
 static void restoreSplitterStates(QWidget *root, QSettings &settings)
 {
     QList<QPair<QSplitter*, QByteArray>> states;
@@ -145,18 +154,21 @@ static void restoreSplitterStates(QWidget *root, QSettings &settings)
         }
     }
     settings.endGroup();
+
     QTimer::singleShot(0, root, [states]() {
         for (const auto &entry : states)
             entry.first->restoreState(entry.second);
     });
 }
+
 /////
 
 EditorWindowPerDocumentStuff::EditorWindowPerDocumentStuff(BuildingDocument *doc) :
     QObject(doc),
     mMainWindow(BuildingEditorWindow::instance()),
     mDocument(doc),
-    mEditMode(IsoObjectMode),
+    mEditMode(OrthoObjectMode),
+    mPrevObjectMode(OrthoObjectMode),
     mPrevObjectTool(PencilTool::instance()),
     mPrevTileTool(DrawTileTool::instance()),
     mPrevAttributeTool(SelectTileTool::instance()),
@@ -170,21 +182,8 @@ EditorWindowPerDocumentStuff::EditorWindowPerDocumentStuff(BuildingDocument *doc
     connect(document()->undoStack(), &QUndoStack::indexChanged, this, &EditorWindowPerDocumentStuff::autoSaveCheck);
 
     mAutoSaveTimer.setSingleShot(true);
-    mAutoSaveTimer.setInterval(qMax(1,
-        BuildingPreferences::instance()->autoSaveIntervalMinutes()) *
-        60 * 1000);
+    mAutoSaveTimer.setInterval(2.5 * 60 * 1000); // 2.5 minutes
     connect(&mAutoSaveTimer, &QTimer::timeout, this, &EditorWindowPerDocumentStuff::autoSaveTimeout);
-    connect(BuildingPreferences::instance(),
-            &BuildingPreferences::autoSaveIntervalChanged,
-            this, [this](int minutes) {
-        if (minutes <= 0) {
-            mAutoSaveTimer.stop();
-            removeAutoSaveFile();
-            return;
-        }
-        mAutoSaveTimer.setInterval(minutes * 60 * 1000);
-        autoSaveCheck();
-    });
 }
 
 EditorWindowPerDocumentStuff::~EditorWindowPerDocumentStuff()
@@ -440,9 +439,37 @@ BuildingEditorWindow::BuildingEditorWindow(QWidget *parent) :
 {
     ui->setupUi(this);
 
+    QFile studioStyle(QLatin1String(":/BuildingEditor/studio-workspace.qss"));
+    if (studioStyle.open(QIODevice::ReadOnly | QIODevice::Text))
+        setStyleSheet(QString::fromUtf8(studioStyle.readAll()));
+
+    setDockOptions(QMainWindow::AnimatedDocks
+                   | QMainWindow::AllowNestedDocks
+                   | QMainWindow::AllowTabbedDocks);
+
     mInstance = this;
 
     BuildingPreferences *prefs = BuildingPreferences::instance();
+
+    struct StudioActionIcon {
+        QAction *action;
+        const char *resource;
+    };
+    const StudioActionIcon studioIcons[] = {
+        { ui->actionPencil, ":/BuildingEditor/studio/room.svg" },
+        { ui->actionWall, ":/BuildingEditor/studio/wall.svg" },
+        { ui->actionDoor, ":/BuildingEditor/studio/door.svg" },
+        { ui->actionWindow, ":/BuildingEditor/studio/window.svg" },
+        { ui->actionStairs, ":/BuildingEditor/studio/stairs.svg" },
+        { ui->actionRoof, ":/BuildingEditor/studio/roof.svg" },
+        { ui->actionFurniture, ":/BuildingEditor/studio/furniture.svg" },
+        { ui->actionFitBuilding, ":/BuildingEditor/studio/fit.svg" },
+        { ui->actionNormalSize, ":/BuildingEditor/studio/zoom.svg" }
+    };
+    for (const StudioActionIcon &entry : studioIcons)
+        entry.action->setIcon(QIcon(QLatin1String(entry.resource)));
+    ui->actionFitBuilding->setText(tr("Fit Building"));
+    ui->actionNormalSize->setText(tr("100%"));
 
     connect(docman(), &BuildingDocumentMgr::documentAdded,
             this, &BuildingEditorWindow::documentAdded);
@@ -592,6 +619,16 @@ BuildingEditorWindow::BuildingEditorWindow(QWidget *parent) :
     connect(prefs, &BuildingPreferences::highlightUnlitRoomsChanged,
             this, &BuildingEditorWindow::highlightUnlitRoomsChanged);
 
+    mNightPreviewAction = new QAction(tr("Night Preview"), this);
+    mNightPreviewAction->setCheckable(true);
+    mNightPreviewAction->setToolTip(
+                tr("Dim the building and preview tiledef lights and powered rooms"));
+    mSettings.setValue(QLatin1String("NightPreview/Enabled"), false);
+    mNightPreviewAction->setChecked(false);
+    // This preview is intentionally hidden until it can match the game's
+    // lighting renderer instead of approximating it with circular glows.
+    mNightPreviewAction->setVisible(false);
+    mNightPreviewAction->setEnabled(false);
     ui->menuView->addSeparator();
     QAction *renderDiagnosticsAction = new QAction(
                 tr("Render Diagnostics"), this);
@@ -610,6 +647,46 @@ BuildingEditorWindow::BuildingEditorWindow(QWidget *parent) :
         for (BuildingIsoView *view : views)
             view->setRenderDiagnosticsEnabled(enabled);
     });
+    ui->menuView->addAction(mNightPreviewAction);
+    QToolButton *nightPreviewButton = new QToolButton(this);
+    nightPreviewButton->setCheckable(true);
+    nightPreviewButton->setText(tr("DAY"));
+    nightPreviewButton->setToolTip(
+                tr("Toggle day/night and tiledef lighting preview"));
+    nightPreviewButton->setAutoRaise(false);
+    nightPreviewButton->setVisible(false);
+    nightPreviewButton->setStyleSheet(QStringLiteral(
+        "QToolButton { padding: 2px 7px; border: 1px solid #68717d;"
+        " border-radius: 4px; font-weight: bold; }"
+        "QToolButton:checked { border: 2px solid #76c7ff;"
+        " background: #235c84; color: white; }"));
+    statusBar()->addPermanentWidget(nightPreviewButton);
+    connect(nightPreviewButton, &QToolButton::toggled,
+            mNightPreviewAction, &QAction::setChecked);
+    connect(mNightPreviewAction, &QAction::toggled,
+            nightPreviewButton, [nightPreviewButton](bool enabled) {
+        const QSignalBlocker blocker(nightPreviewButton);
+        nightPreviewButton->setChecked(enabled);
+        nightPreviewButton->setText(enabled
+                                    ? QObject::tr("NIGHT")
+                                    : QObject::tr("DAY"));
+    });
+    connect(mNightPreviewAction, &QAction::toggled, this,
+            [this](bool enabled) {
+        mSettings.setValue(QLatin1String("NightPreview/Enabled"), enabled);
+        for (EditorWindowPerDocumentStuff *stuff :
+             qAsConst(mDocumentStuff)) {
+            const QList<BuildingIsoView*> views = {
+                stuff->isoView(), stuff->tileView(),
+                stuff->attributeView()
+            };
+            for (BuildingIsoView *view : views) {
+                if (view && view->scene())
+                    view->scene()->setNightPreviewEnabled(enabled);
+            }
+        }
+    });
+
     QList<QKeySequence> keys = QKeySequence::keyBindings(QKeySequence::ZoomIn);
     keys += QKeySequence(tr("Ctrl+="));
     keys += QKeySequence(tr("+"));
@@ -624,6 +701,11 @@ BuildingEditorWindow::BuildingEditorWindow(QWidget *parent) :
     keys += QKeySequence(tr("Ctrl+0"));
     keys += QKeySequence(tr("0"));
     ui->actionNormalSize->setShortcuts(keys);
+
+    connect(ui->actionFitBuilding, &QAction::triggered,
+            this, &BuildingEditorWindow::fitBuildingToView);
+    connect(ui->actionCenterBuilding, &QAction::triggered,
+            this, &BuildingEditorWindow::centerBuildingInView);
 
     connect(ui->actionCropToMinimum, &QAction::triggered, this, &BuildingEditorWindow::cropToMinimum);
     connect(ui->actionCropToSelection, &QAction::triggered, this, &BuildingEditorWindow::cropToSelection);
@@ -664,6 +746,7 @@ BuildingEditorWindow::BuildingEditorWindow(QWidget *parent) :
             this, &BuildingEditorWindow::runLuaScript);
     connect(mLuaConsoleAction, &QAction::triggered,
             this, &BuildingEditorWindow::showLuaConsole);
+
     connect(ui->actionHelp, &QAction::triggered, this, &BuildingEditorWindow::help);
     QAction *aboutBuildingEd = new QAction(tr("About BuildingEd"), this);
     aboutBuildingEd->setMenuRole(QAction::AboutRole);
@@ -747,10 +830,30 @@ void BuildingEditorWindow::closeEvent(QCloseEvent *event)
 
 }
 
+void BuildingEditorWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+#ifdef Q_OS_WIN
+    // Qt 5.14 predates native dark-title-bar support. Ask modern Windows for
+    // the matching non-client treatment while retaining the normal frame,
+    // snapping, accessibility and system menu behavior.
+    const BOOL dark = TRUE;
+    const DWORD immersiveDarkMode = 20;
+    const DWORD immersiveDarkModeLegacy = 19;
+    const HWND windowHandle = reinterpret_cast<HWND>(winId());
+    if (FAILED(DwmSetWindowAttribute(windowHandle, immersiveDarkMode,
+                                     &dark, sizeof(dark)))) {
+        DwmSetWindowAttribute(windowHandle, immersiveDarkModeLegacy,
+                              &dark, sizeof(dark));
+    }
+#endif
+}
+
 bool BuildingEditorWindow::openFile(const QString &fileName)
 {
     if (!ensureTilesDirectoryConfigured())
         return false;
+
     // Select existing document if this file is already open
     int documentIndex = docman()->findDocument(fileName);
     if (documentIndex != -1) {
@@ -791,6 +894,7 @@ bool BuildingEditorWindow::openAutoSave(const QString &fileName)
 {
     if (!ensureTilesDirectoryConfigured())
         return false;
+
     QString error;
     if (BuildingDocument *doc = BuildingDocument::read(fileName, error)) {
         docman()->addDocument(doc);
@@ -806,6 +910,7 @@ bool BuildingEditorWindow::ensureTilesDirectoryConfigured()
     const QString tilesDirectory = Preferences::instance()->tilesDirectory();
     if (PortableSettings::isTilesPath(tilesDirectory))
         return true;
+
     qWarning() << "BuildingEd cannot open a building because the Tiles "
                   "directory is not configured";
     QMessageBox::warning(
@@ -819,6 +924,7 @@ bool BuildingEditorWindow::ensureTilesDirectoryConfigured()
                    "restart BuildingEd."));
     return false;
 }
+
 bool BuildingEditorWindow::confirmAllSave()
 {
     foreach (BuildingDocument *doc, docman()->documents()) {
@@ -906,7 +1012,7 @@ void BuildingEditorWindow::readSettings()
         qInfo() << "BuildingEd geometry restored:" << restored;
     }
     else
-        resize(800, 600);
+        resize(1280, 800);
     const QByteArray state = mSettings.value(QLatin1String("state"),
                                              QByteArray()).toByteArray();
     if (!state.isEmpty())
@@ -922,7 +1028,6 @@ void BuildingEditorWindow::readSettings()
         toggleOrthoIso();
 #endif
     mSettings.endGroup();
-    PortableSettings::applyOneShotMainWindowGeometry(this);
     restoreSplitterStates(this, mSettings);
 
     mOrthoObjectEditMode->readSettings(mSettings);
@@ -934,18 +1039,20 @@ void BuildingEditorWindow::readSettings()
 void BuildingEditorWindow::writeSettings()
 {
     writeWindowSettings();
-    if (PortableSettings::shouldPersistMainWindowGeometry(this))
-        saveSplitterStates(this, mSettings);
+    saveSplitterStates(this, mSettings);
+
     mOrthoObjectEditMode->writeSettings(mSettings);
     mIsoObjectEditMode->writeSettings(mSettings);
     mTileEditMode->writeSettings(mSettings);
     mAttributeEditMode->writeSettings(mSettings);
     mSettings.sync();
 }
+
 void BuildingEditorWindow::startSettingsAutoSave()
 {
     if (findChild<QTimer*>(QStringLiteral("settingsAutoSaveTimer")))
         return;
+
     QTimer *settingsSaveTimer = new QTimer(this);
     settingsSaveTimer->setObjectName(QStringLiteral("settingsAutoSaveTimer"));
     settingsSaveTimer->setInterval(5000);
@@ -953,12 +1060,9 @@ void BuildingEditorWindow::startSettingsAutoSave()
             this, &BuildingEditorWindow::writeSettings);
     settingsSaveTimer->start();
 }
+
 void BuildingEditorWindow::writeWindowSettings()
 {
-    if (!PortableSettings::shouldPersistMainWindowGeometry(this)) {
-        qInfo() << "One-shot main-window session: persistent window layout skipped";
-        return;
-    }
     mSettings.beginGroup(QLatin1String("MainWindow"));
     mSettings.setValue(QLatin1String("geometry"), saveGeometry());
     mSettings.setValue(QLatin1String("state"), saveState());
@@ -1006,6 +1110,9 @@ QToolBar *BuildingEditorWindow::createCommonToolBar()
 {
     QToolBar *toolBar = new QToolBar;
     toolBar->setWindowTitle(tr("Main ToolBar"));
+    toolBar->setIconSize(QSize(22, 22));
+    toolBar->setMovable(false);
+    toolBar->setFloatable(false);
     toolBar->addAction(ui->actionNewBuilding);
     toolBar->addAction(ui->actionOpen);
     toolBar->addAction(ui->actionSave);
@@ -1125,6 +1232,7 @@ void BuildingEditorWindow::newBuilding()
                     .arg(unresolved.count())
                     .arg(details.join(QLatin1Char('\n'))));
     }
+
     docman()->addDocument(doc);
 }
 
@@ -1277,6 +1385,7 @@ void BuildingEditorWindow::documentAdded(BuildingDocument *doc)
     mIsoObjectEditMode->setEnabled(true);
     mTileEditMode->setEnabled(true);
     mAttributeEditMode->setEnabled(true);
+    mTabWidget->setTabVisible(0, false);
 
 //    reportMissingTilesets();
 #if 1
@@ -1422,6 +1531,20 @@ void BuildingEditorWindow::currentDocumentChanged(BuildingDocument *doc)
 
     mCurrentDocument = doc;
     mCurrentDocumentStuff = doc ? mDocumentStuff[doc] : nullptr; // FIXME: unset when deleted
+    mTabWidget->setTabVisible(0, mCurrentDocument == nullptr);
+
+    if (mCurrentDocumentStuff && mNightPreviewAction) {
+        const bool enabled = mNightPreviewAction->isChecked();
+        const QList<BuildingIsoView*> views = {
+            mCurrentDocumentStuff->isoView(),
+            mCurrentDocumentStuff->tileView(),
+            mCurrentDocumentStuff->attributeView()
+        };
+        for (BuildingIsoView *view : views) {
+            if (view && view->scene())
+                view->scene()->setNightPreviewEnabled(enabled);
+        }
+    }
 
     if (mCurrentDocument) {
         IMode *mode = 0;
@@ -1750,11 +1873,7 @@ void BuildingEditorWindow::editPaste()
         return;
 
     if (mCurrentDocumentStuff->isTile()) {
-        const QList<BuildingDocument::ClipboardTileLayer> &clips =
-                mCurrentDocument->clipboardTileLayers();
-        if (clips.size() == 1 &&
-                !mCurrentDocument->clipboardPreservesPlanes()) {
-            FloorTileGrid *tiles = clips.first().tiles;
+        if (FloorTileGrid *tiles = mCurrentDocument->clipboardTiles()) {
             DrawTileTool::instance()->makeCurrent();
             DrawTileTool::instance()->setCaptureTiles(tiles->clone(),
                                                       mCurrentDocument->clipboardTilesRgn());
@@ -1978,40 +2097,16 @@ void BuildingEditorWindow::editDelete()
             return;
         QRegion selection = currentDocument()->tileSelection();
         QRect r = selection.boundingRect();
-        QUndoStack *undoStack = mCurrentDocument->undoStack();
-        undoStack->beginMacro(tr("Delete Tiles"));
-        for (BuildingFloor *floor : mCurrentDocument->building()->floors()) {
-            if (!mTileSelectionScope && floor != currentFloor())
-                continue;
-            if (mTileSelectionScope &&
-                    mTileSelectionScope->levelMode() ==
-                    Tiled::Internal::TileSelectionScope::CurrentLevel &&
-                    floor != currentFloor()) {
-                continue;
-            }
-            for (const QString &layerName : BuildingMap::layerNames(
-                     floor->level())) {
-                const bool current = layerName == currentLayer();
-                if (!mTileSelectionScope && !current)
-                    continue;
-                if (mTileSelectionScope &&
-                        !mTileSelectionScope->includesLayer(
-                            layerName, floor->layerVisibility(layerName),
-                            current)) {
-                    continue;
-                }
-                FloorTileGrid *tiles = floor->grimeAt(layerName, r);
-                if (tiles->replace(selection.translated(-r.topLeft()),
-                                   QString())) {
-                    undoStack->push(new PaintFloorTiles(
-                        mCurrentDocument, floor, layerName, selection,
-                        r.topLeft(), tiles, "Delete Tiles"));
-                } else {
-                    delete tiles;
-                }
-            }
-        }
-        undoStack->endMacro();
+        FloorTileGrid *tiles = currentFloor()->grimeAt(currentLayer(), r);
+        bool changed = tiles->replace(selection.translated(-r.topLeft()), QString());
+        if (changed)
+            mCurrentDocument->undoStack()->push(
+                        new PaintFloorTiles(mCurrentDocument, currentFloor(),
+                                            currentLayer(), selection,
+                                            r.topLeft(), tiles,
+                                            "Delete Tiles"));
+        else
+            delete tiles;
         return;
     }
     deleteObjects();
@@ -2077,6 +2172,50 @@ void BuildingEditorWindow::selectNone()
         return;
     }
     mCurrentDocument->setSelectedObjects(QSet<BuildingObject*>());
+}
+
+void BuildingEditorWindow::fitBuildingToView()
+{
+    IMode *mode = ModeManager::instance().currentMode();
+    if (!mode || !mode->widget())
+        return;
+
+    for (BuildingOrthoView *view :
+         mode->widget()->findChildren<BuildingOrthoView*>()) {
+        if (view->isVisible()) {
+            view->fitToBuilding();
+            return;
+        }
+    }
+    for (BuildingIsoView *view :
+         mode->widget()->findChildren<BuildingIsoView*>()) {
+        if (view->isVisible()) {
+            view->fitToBuilding();
+            return;
+        }
+    }
+}
+
+void BuildingEditorWindow::centerBuildingInView()
+{
+    IMode *mode = ModeManager::instance().currentMode();
+    if (!mode || !mode->widget())
+        return;
+
+    for (BuildingOrthoView *view :
+         mode->widget()->findChildren<BuildingOrthoView*>()) {
+        if (view->isVisible()) {
+            view->centerBuilding();
+            return;
+        }
+    }
+    for (BuildingIsoView *view :
+         mode->widget()->findChildren<BuildingIsoView*>()) {
+        if (view->isVisible()) {
+            view->centerBuilding();
+            return;
+        }
+    }
 }
 
 void BuildingEditorWindow::deleteObjects()
@@ -2227,6 +2366,7 @@ void BuildingEditorWindow::proceduralLootEditor()
                 this, roomName, QString(), projectRoot);
     dialog.exec();
 }
+
 void BuildingEditorWindow::roomAdded(Room *room)
 {
     Q_UNUSED(room)
@@ -2851,6 +2991,7 @@ void BuildingEditorWindow::showLuaConsole()
                                     tr("Open a building before running a script."));
                         return;
                     }
+
                     mLuaScriptFile = selected;
                     console->setFile(selected);
                     BuildingLuaScript script(mCurrentDocument);
@@ -2887,6 +3028,7 @@ void BuildingEditorWindow::showLuaConsole()
     console->raise();
     console->activateWindow();
 }
+
 void BuildingEditorWindow::runLuaScript()
 {
     showLuaConsole();
@@ -2894,6 +3036,7 @@ void BuildingEditorWindow::runLuaScript()
     QMetaObject::invokeMethod(LuaConsole::instance(), "runScript",
                               Qt::QueuedConnection);
 }
+
 void BuildingEditorWindow::initActionManager()
 {
     const QString fileName = Preferences::instance()->userPath(QStringLiteral("shortcuts/BuildingEd.txt"));
@@ -2935,6 +3078,8 @@ void BuildingEditorWindow::initActionManager()
     actionManager->registerAction(ui->actionZoomIn, CONTEXT_MENU, CATEGORY_MENU_VIEW, QStringLiteral("Menu.View.ZoomIn"));
     actionManager->registerAction(ui->actionZoomOut, CONTEXT_MENU, CATEGORY_MENU_VIEW, QStringLiteral("Menu.View.ZoomOut"));
     actionManager->registerAction(ui->actionNormalSize, CONTEXT_MENU, CATEGORY_MENU_VIEW, QStringLiteral("Menu.View.ZoomNormal"));
+    actionManager->registerAction(ui->actionFitBuilding, CONTEXT_MENU, CATEGORY_MENU_VIEW, QStringLiteral("Menu.View.FitBuilding"));
+    actionManager->registerAction(ui->actionCenterBuilding, CONTEXT_MENU, CATEGORY_MENU_VIEW, QStringLiteral("Menu.View.CenterBuilding"));
 
     actionManager->registerAction(ui->actionCropToMinimum, CONTEXT_MENU, CATEGORY_MENU_BUILDING, QStringLiteral("Menu.Building.CropToMinimum"));
     actionManager->registerAction(ui->actionCropToSelection, CONTEXT_MENU, CATEGORY_MENU_BUILDING, QStringLiteral("Menu.Building.CropToSelection"));
@@ -3113,6 +3258,7 @@ void BuildingEditorWindow::reportMissingTilesets()
     }
     unavailableTilesets.removeDuplicates();
     unavailableTilesets.sort(Qt::CaseInsensitive);
+
     if (!unavailableTilesets.isEmpty()) {
         ListOfStringsDialog dialog(
                     tr("The following tilesets could not be loaded from the "
@@ -3171,6 +3317,8 @@ void BuildingEditorWindow::updateActions()
 
     ui->actionShowObjects->setEnabled(hasDoc);
     ui->actionHighlightUnlitRooms->setEnabled(hasDoc);
+    ui->actionFitBuilding->setEnabled(hasDoc);
+    ui->actionCenterBuilding->setEnabled(hasDoc);
 
     ui->actionBuildingProperties->setEnabled(hasDoc);
     ui->actionKeyValues->setEnabled(hasDoc);

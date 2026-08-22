@@ -35,13 +35,9 @@ public slots:
     void filterChanged();
     void selectAllVisible();
     void clearVisible();
-    void prepareAllTiles();
-    void prepareAllTilesets();
-    void prepareAllObjects();
     void modeChanged();
 
 private:
-    void prepareAll(int mode);
     void populateTextures(PROGRESS *progress);
     bool rowMatches(int row, QString *regularExpressionError) const;
     QList<QPair<int, int>> checkedVisibleTextures() const;

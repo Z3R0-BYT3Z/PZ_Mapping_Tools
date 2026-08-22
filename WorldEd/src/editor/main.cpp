@@ -21,9 +21,9 @@
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QSettings>
-#include <QSslSocket>
 #include <QTimer>
 #include <QXmlStreamReader>
+
 #include <limits>
 #include "mainwindow.h"
 #include "../firstlaunchdialog.h"
@@ -33,7 +33,6 @@
 #include "documentmanager.h"
 #include "document.h"
 #include "bmptotmx.h"
-#include "biomemapgeneratordialog.h"
 #include "biomemapimageprocessor.h"
 #include "biomemapitem.h"
 #include "osmterrainimportdialog.h"
@@ -54,7 +53,6 @@
 #include "tilesetmanager.h"
 #include "vehiclemeshpreview.h"
 #include "streetnamesdock.h"
-#include "regionsdock.h"
 #include "InGameMap/ingamemapreader.h"
 #include "InGameMap/ingamemapfeaturegenerator.h"
 #include "InGameMap/ingamemapwriterbinary.h"
@@ -208,25 +206,9 @@ int main(int argc, char *argv[])
                         << "BiomeMapConfig validation failed:" << error;
                 return 32;
             }
-            QString fallbackSummary;
-            if (!BiomeMapGeneratorDialog::validateFallbackBehavior(
-                        &fallbackSummary, &error)) {
-                qCritical().noquote()
-                        << "BiomeMap fallback validation failed:" << error;
-                return 32;
-            }
-            if (!BiomeMapItem::validateChannelPainting(&error)) {
-                qCritical().noquote()
-                        << "BiomeMap channel-paint validation failed:" << error;
-                return 32;
-            }
-            qInfo().noquote() << "BiomeMapConfig validation passed:"
-                              << BiomeMapImageProcessor::palette().size()
-                              << "entries,"
-                              << fallbackSummary
-                              << ", red and green channel painting preserved "
-                                 "the other bytes, and green strokes remained "
-                                 "aligned to complete 8 x 8 chunks";
+            qInfo() << "BiomeMapConfig validation passed:"
+                    << BiomeMapImageProcessor::palette().size()
+                    << "entries including the map-override ID";
             return 0;
         }
         if (argument == QLatin1String(
@@ -278,31 +260,6 @@ int main(int argc, char *argv[])
             return 0;
         }
         if (argument == QLatin1String(
-                    "--validate-osm-terrain-import")) {
-            QString summary;
-            QString error;
-            if (!OsmTerrainImporter::validate(&summary, &error)) {
-                qCritical().noquote()
-                        << "OpenStreetMap terrain validation failed:"
-                        << error;
-                return 34;
-            }
-            if (!QSslSocket::supportsSsl()) {
-                qCritical().noquote()
-                        << "OpenStreetMap terrain validation failed: "
-                           "HTTPS support is unavailable. Qt was built for"
-                        << QSslSocket::sslLibraryBuildVersionString()
-                        << "but no compatible SSL runtime was loaded.";
-                return 35;
-            }
-            qInfo().noquote()
-                    << "OpenStreetMap terrain validation passed:"
-                    << summary
-                    << "| SSL runtime:"
-                    << QSslSocket::sslLibraryVersionString();
-            return 0;
-        }
-        if (argument == QLatin1String(
                     "--validate-native-256-lot-geometry")) {
             QString error;
             if (!LotFilesManager256::validateNative256Geometry(&error)) {
@@ -334,17 +291,6 @@ int main(int argc, char *argv[])
                 return 31;
             }
             qInfo() << "Hole Detection repair validation passed";
-            return 0;
-        }
-        if (argument == QLatin1String(
-                    "--validate-basement-placement")) {
-            QString error;
-            if (!CellScene::validateBasementPlacement(&error)) {
-                qCritical().noquote()
-                        << "Basement placement validation failed:" << error;
-                return 39;
-            }
-            qInfo() << "Basement placement validation passed";
             return 0;
         }
         const QString defaultsValidationPrefix =
@@ -519,6 +465,7 @@ int main(int argc, char *argv[])
                             << fileName << scanFile.errorString();
                 return 6;
             }
+
             int minX = std::numeric_limits<int>::max();
             int minY = std::numeric_limits<int>::max();
             int maxX = std::numeric_limits<int>::min();
@@ -547,6 +494,7 @@ int main(int argc, char *argv[])
                                "the XML bounds:" << scanner.errorString();
                 return 7;
             }
+
             World world(maxX - minX + 1, maxY - minY + 1,
                         WorldGridFormat::Legacy300);
             GenerateLotsSettings settings;
@@ -558,6 +506,7 @@ int main(int argc, char *argv[])
                             << reader.errorString();
                 return 8;
             }
+
             const QString outputFile =
                     fileName + QLatin1String(".validated.bin");
             InGameMapWriterBinary writer;
@@ -570,6 +519,7 @@ int main(int argc, char *argv[])
                     << "converted output:" << outputFile;
             return 0;
         }
+
         const QString bmpValidationPrefix =
                 QLatin1String("--validate-bmp-generation=");
         if (argument.startsWith(bmpValidationPrefix)) {
@@ -674,8 +624,10 @@ int main(int argc, char *argv[])
                 << "street(s)";
         return 0;
     }
+
     if (!FirstLaunchDialog::ensureSharedPaths())
         return 0;
+
     for (const QString &argument : commandLineArguments) {
         if (argument == QLatin1String("--renderer=opengl"))
             Preferences::instance()->setUseOpenGL(true);
@@ -898,6 +850,7 @@ int main(int argc, char *argv[])
                 << removed << "removed";
         return 0;
     }
+
     if (!auditTilesetCleanupPath.isEmpty()) {
         const QFileInfo target(auditTilesetCleanupPath);
         QStringList files;
@@ -914,6 +867,7 @@ int main(int argc, char *argv[])
                     << auditTilesetCleanupPath;
             return 20;
         }
+
         TilesetCleanupOptions options;
         QList<TilesetCleanupResult> results;
         bool hasErrors = false;
@@ -929,6 +883,7 @@ int main(int argc, char *argv[])
                 << TilesetCleanup::report(results);
         return hasErrors ? 21 : 0;
     }
+
     if (!renderTilesetCleanupRoot.isEmpty()) {
         if (renderWorldGenPreviewOutput.isEmpty()) {
             qCritical() << "Project Doctor render requires "
@@ -958,6 +913,7 @@ int main(int argc, char *argv[])
                 << renderWorldGenPreviewOutput;
         return 0;
     }
+
     if (!renderWorldGenPreviewRoot.isEmpty()) {
         if (renderWorldGenPreviewOutput.isEmpty()) {
             qCritical() << "WorldGen preview render requires "
@@ -976,6 +932,7 @@ int main(int argc, char *argv[])
                 << renderWorldGenPreviewOutput;
         return 0;
     }
+
     if (!renderWorldGenPrefabRoot.isEmpty()) {
         if (renderWorldGenPreviewOutput.isEmpty()) {
             qCritical() << "WorldGen prefab render requires "
@@ -994,6 +951,7 @@ int main(int argc, char *argv[])
                 << renderWorldGenPreviewOutput;
         return 0;
     }
+
     if (!renderWorldGenPrefabWindowRoot.isEmpty()) {
         if (renderWorldGenPreviewOutput.isEmpty()) {
             qCritical() << "WorldGen prefab-window render requires "
@@ -1012,6 +970,7 @@ int main(int argc, char *argv[])
                 << renderWorldGenPreviewOutput;
         return 0;
     }
+
     if (!validateWorldGenPrefabImport.isEmpty()) {
         QString summary;
         QString error;
@@ -1025,6 +984,7 @@ int main(int argc, char *argv[])
                 << "WorldGen prefab import validation passed:" << summary;
         return 0;
     }
+
     if (!validateBmpGenerationProject.isEmpty()) {
         if (!w.openFile(validateBmpGenerationProject)) {
             qCritical() << "BMP to TMX input validation could not open:"
@@ -1046,6 +1006,10 @@ int main(int argc, char *argv[])
                 << validateBmpGenerationProject;
         return 0;
     }
+
+    // Mark the interactive session dirty before restoring documents.  If a
+    // malformed project or map terminates WorldEd, the next launch starts
+    // safely instead of reopening the same file in an endless crash loop.
     QSettings sessionSettings(QSettings::IniFormat, QSettings::UserScope,
                               QLatin1String("TheIndieStone"),
                               QLatin1String("PZWorldEd"));
@@ -1055,6 +1019,10 @@ int main(int argc, char *argv[])
             sessionSettings.value(cleanExitKey, true).toBool();
     sessionSettings.setValue(cleanExitKey, false);
     sessionSettings.sync();
+
+    // Let the event loop paint the main window before the complete tileset
+    // catalogue is decoded. InitConfigFiles keeps deterministic preloading,
+    // while its progress dialog now remains visible and responsive.
     QTimer::singleShot(
                 10, &w,
                 [&w, commandLineArguments,
@@ -1065,6 +1033,7 @@ int main(int argc, char *argv[])
             qApp->quit();
             return;
         }
+
         bool openedCommandLineFile = false;
         QPoint commandLineCell(-1, -1);
         for (const QString &argument : commandLineArguments) {
@@ -1106,6 +1075,7 @@ int main(int argc, char *argv[])
                         << commandLineCell;
             }
         }
+
         if (!openedCommandLineFile
                 && Preferences::instance()->restoreLastSession()) {
             if (previousSessionClosedCleanly) {
@@ -1124,7 +1094,14 @@ int main(int argc, char *argv[])
                                 "log in settings/logs."));
             }
         }
+
+        // Tile loading and session restoration can change dock size hints
+        // after the initial restore. Reapply the persisted layout once
+        // startup is done.
         w.readSettings();
+
+        // Do not overwrite the saved layout/session while tilesets and the
+        // previous session are still being restored.
         w.startSettingsAutoSave();
         qInfo() << "WorldEd interactive startup tasks complete";
     });
@@ -1133,6 +1110,7 @@ int main(int argc, char *argv[])
 
     sessionSettings.setValue(cleanExitKey, true);
     sessionSettings.sync();
+
     DocumentManager::deleteInstance();
     ToolManager::deleteInstance();
     Preferences::deleteInstance();

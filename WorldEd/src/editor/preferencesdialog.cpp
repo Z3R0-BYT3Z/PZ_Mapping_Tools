@@ -23,11 +23,9 @@
 #include "vehiclemeshpreview.h"
 #include "../firstlaunchdialog.h"
 #include "../portablesettings.h"
-#include "../sharedmainwindowgeometrywidget.h"
 
 #include <QFileDialog>
 #include <QCheckBox>
-#include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -342,31 +340,6 @@ PreferencesDialog::PreferencesDialog(WorldDocument *worldDoc, QWidget *parent)
     featuresLayout->addStretch();
     ui->tabWidget->addTab(featuresTab, tr("Feature Generation"));
 
-    ui->tabWidget->addTab(
-                new SharedMainWindowGeometryWidget(parent, ui->tabWidget),
-                tr("Window Setup"));
-
-    QWidget *savingTab = new QWidget(ui->tabWidget);
-    QVBoxLayout *savingLayout = new QVBoxLayout(savingTab);
-    QGroupBox *autoSaveGroup = new QGroupBox(tr("Automatic Save"), savingTab);
-    QFormLayout *autoSaveLayout = new QFormLayout(autoSaveGroup);
-    mAutoSaveCombo->addItem(tr("Disabled"), 0);
-    for (int minutes : {1, 5, 10, 20, 60})
-        mAutoSaveCombo->addItem(tr("Every %1 minute(s)").arg(minutes),
-                                minutes);
-    const int autoSaveIndex = mAutoSaveCombo->findData(
-                prefs->autoSaveIntervalMinutes());
-    mAutoSaveCombo->setCurrentIndex(autoSaveIndex >= 0 ? autoSaveIndex : 0);
-    autoSaveLayout->addRow(tr("Save modified projects:"), mAutoSaveCombo);
-    QLabel *autoSaveDescription = new QLabel(tr(
-            "Only an existing project with a file path is saved. New "
-            "untitled projects still require Save As."), autoSaveGroup);
-    autoSaveDescription->setWordWrap(true);
-    autoSaveLayout->addRow(autoSaveDescription);
-    savingLayout->addWidget(autoSaveGroup);
-    savingLayout->addStretch();
-    ui->tabWidget->addTab(savingTab, tr("Saving"));
-
 }
 
 void PreferencesDialog::browseTilesDirectory()
@@ -483,7 +456,6 @@ void PreferencesDialog::accept()
 {
     Preferences *prefs = Preferences::instance();
     Tiled::TileMetaInfoMgr::instance()->changeTilesDirectory(mTilesDirectory);
-    prefs->setProjectZomboidDirectory(mProjectZomboidDirectory);
     prefs->setUseOpenGL(ui->openGL->isChecked());
     prefs->setLoadAllWorldThumbnails(ui->thumbnails->isChecked());
     prefs->setGridColor(mGridColor);
@@ -496,8 +468,6 @@ void PreferencesDialog::accept()
     prefs->setVehicleMeshPreviewQuality(
                 ui->vehicleMeshPreviewQuality->value());
     prefs->setRestoreLastSession(ui->restoreLastSession->isChecked());
-    prefs->setAutoSaveIntervalMinutes(
-                mAutoSaveCombo->currentData().toInt());
     prefs->setRoadSimplificationHighway(mRoadSimplificationHighway->value());
     prefs->setRoadPointSpacingHighway(mRoadPointSpacingHighway->value());
     prefs->setRoadSimplificationTrail(mRoadSimplificationTrail->value());

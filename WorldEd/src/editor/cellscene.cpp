@@ -19,16 +19,15 @@
 
 #include "bmpblender.h"
 #include "celldocument.h"
-#include "environmentpreviewitem.h"
 #include "cellview.h"
 #include "mainwindow.h"
 #include "mapbuildings.h"
 #include "mapcomposite.h"
 #include "mapimagemanager.h"
 #include "mapmanager.h"
+#include "nightpreviewitem.h"
 #include "preferences.h"
 #include "progress.h"
-#include "../portablesettings.h"
 #include "scenetools.h"
 #include "tilesetmanager.h"
 #include "undoredo.h"
@@ -60,7 +59,6 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
-#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QGraphicsItem>
@@ -290,6 +288,7 @@ QVector<int> nearestSourceCells(int width, int height,
         nearest[source] = source;
         pending.enqueue(source);
     }
+
     const QPoint neighbours[] = {
         QPoint(-1, 0), QPoint(1, 0),
         QPoint(0, -1), QPoint(0, 1)
@@ -312,6 +311,7 @@ QVector<int> nearestSourceCells(int width, int height,
     }
     return nearest;
 }
+
 }
 
 ///// ///// ///// ///// /////
@@ -848,6 +848,7 @@ void LayerGroupVBO::paint(QPainter *painter, Tiled::MapRenderer *renderer,
         painter->endNativePainting();
         return;
     }
+
     if (mCreated == false || mContext != QOpenGLContext::currentContext()) {
         if (!initializeOpenGLFunctions()) {
             if (!OPENGL_CORE_UNAVAILABLE_REPORTED) {
@@ -889,8 +890,11 @@ void LayerGroupVBO::paint(QPainter *painter, Tiled::MapRenderer *renderer,
 #version 330 core
 layout(location = 0) in vec2 vertexPosition;
 layout(location = 1) in vec2 vertexTexCoord;
+
 out vec2 texCoord;
+
 uniform mat4 mvpMatrix;
+
 void main()
 {
     gl_Position = mvpMatrix * vec4(vertexPosition, 0.0, 1.0);
@@ -901,13 +905,16 @@ void main()
 #version 330 core
 in vec2 texCoord;
 out vec4 fragColor;
+
 uniform sampler2D textureSampler;
 uniform vec4 color;
+
 void main()
 {
     fragColor = texture(textureSampler, texCoord) * color;
 }
 )";
+
         if (!shaderProgram.addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShader)
                 || !shaderProgram.addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShader)
                 || !shaderProgram.link()) {
@@ -970,6 +977,9 @@ void LayerGroupVBO::paint2(QPainter *painter, Tiled::MapRenderer *renderer,
     }
 
     for (VBOTiles *vboTiles : qAsConst(exposedTiles)) {
+//        VBOTiles *vboTiles = mTiles[vxy.x() + vxy.y() * VBO_PER_CELL];
+//        if (vboTiles == nullptr)
+//            continue;
         if (vboTiles->mGathered == false)
             continue;
         if (vboTiles->mCreated)
@@ -1012,6 +1022,7 @@ void LayerGroupVBO::paint2(QPainter *painter, Tiled::MapRenderer *renderer,
             vertices[n++] = bounds.y();
             vertices[n++] = u0;
             vertices[n++] = v0;
+
             vertices[n++] = bounds.right() + 1;
             vertices[n++] = bounds.y();
             vertices[n++] = u1;
@@ -1033,6 +1044,7 @@ void LayerGroupVBO::paint2(QPainter *painter, Tiled::MapRenderer *renderer,
         vboTiles->mVertexBuffer.release();
         vboTiles->mIndexBuffer.release();
 
+//            qDebug() << "mTiles.size() == " << tiles.size();
     }
 
     if (isEmpty()) {
@@ -1046,8 +1058,12 @@ void LayerGroupVBO::paint2(QPainter *painter, Tiled::MapRenderer *renderer,
         qWarning() << "WorldEd cell renderer: expected a QOpenGLWidget viewport";
         return;
     }
+
+    // QPainter's viewport uses physical pixels, while its transform and our
+    // tile vertices use logical pixels.
     const QRect viewport = painter->viewport();
     const qreal devicePixelRatio = openGLWidget->devicePixelRatioF();
+
     QMatrix4x4 projection;
     projection.ortho(0.f, viewport.width(), viewport.height(), 0, -1.f, 1.f);
 
@@ -1056,6 +1072,7 @@ void LayerGroupVBO::paint2(QPainter *painter, Tiled::MapRenderer *renderer,
     modelView.translate(xfrm.m31() * devicePixelRatio,
                         xfrm.m32() * devicePixelRatio, 0.0f);
     modelView.scale(xfrm.m11(), xfrm.m22(), 1.0f);
+
     QOpenGLShaderProgram& shaderProgram = mMapCompositeVBO->mShaderProgram;
     if (!shaderProgram.bind()) {
         qWarning() << "WorldEd cell renderer: failed to bind shader:"
@@ -1065,10 +1082,12 @@ void LayerGroupVBO::paint2(QPainter *painter, Tiled::MapRenderer *renderer,
     shaderProgram.setUniformValue("mvpMatrix", projection * modelView);
     shaderProgram.setUniformValue("textureSampler", 0);
     shaderProgram.setUniformValue("color", QVector4D(1.f, 1.f, 1.f, 1.f));
+
     const int posAttr = shaderProgram.attributeLocation("vertexPosition");
     const int texAttr = shaderProgram.attributeLocation("vertexTexCoord");
     shaderProgram.enableAttributeArray(posAttr);
     shaderProgram.enableAttributeArray(texAttr);
+
     const int strideBytes = 4 * sizeof(float);
     const int posOffsetBytes = 0;
     const int texOffsetBytes = 2 * sizeof(float);
@@ -1077,6 +1096,7 @@ void LayerGroupVBO::paint2(QPainter *painter, Tiled::MapRenderer *renderer,
     glActiveTexture(GL_TEXTURE2);
     glActiveTexture(GL_TEXTURE1);
     glActiveTexture(GL_TEXTURE0);
+
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
     bool wireframe = false;
@@ -1117,6 +1137,7 @@ void LayerGroupVBO::paint2(QPainter *painter, Tiled::MapRenderer *renderer,
                 if (vboTiles->mVertexBuffer.bind() == false) Q_ASSERT(false);
                 shaderProgram.setAttributeBuffer(posAttr, GL_FLOAT, posOffsetBytes, 2, strideBytes);
                 shaderProgram.setAttributeBuffer(texAttr, GL_FLOAT, texOffsetBytes, 2, strideBytes);
+
                 for (int i = 0; i < tiles.size(); i++) {
                     GLuint start = i * 4;
                     GLuint end = start + 4 - 1;
@@ -1140,6 +1161,7 @@ void LayerGroupVBO::paint2(QPainter *painter, Tiled::MapRenderer *renderer,
 #endif
                     ZLevelRenderer::addRenderedTileCount();
                 }
+
                 vboTiles->mVertexBuffer.release();
                 vboTiles->mIndexBuffer.release();
             }
@@ -1173,6 +1195,7 @@ void LayerGroupVBO::paint2(QPainter *painter, Tiled::MapRenderer *renderer,
                     if (vboTiles->mVertexBuffer.bind() == false) Q_ASSERT(false);
                     shaderProgram.setAttributeBuffer(posAttr, GL_FLOAT, posOffsetBytes, 2, strideBytes);
                     shaderProgram.setAttributeBuffer(texAttr, GL_FLOAT, texOffsetBytes, 2, strideBytes);
+
                     QPointF screenOrigin = renderer->tileToPixelCoords(
                                 vboTiles->mBounds.topLeft() + QPointF(0.5f, 1.5f),
                                 mLayerGroup->level());
@@ -1447,6 +1470,11 @@ void LayerGroupVBO::gatherTiles(Tiled::MapRenderer *renderer, const QRectF& expo
                         tileCount[vx + vy * VBO_SQUARES] += tryAddExtraJumbo_Trunk(tile, screenPos, tileWidth, tiles);
                         tileCount[vx + vy * VBO_SQUARES] += tryAddExtraJumbo_Leaves(tile, screenPos, tileWidth, tiles);
                     }
+
+                    // Powered variants and the treetop half of XL/XXL trees
+                    // are transparent overlays. Keep them next to their
+                    // source tile in the ordered VBO instead of drawing them
+                    // in a scene-wide item above roofs and upper floors.
                     const Tile *overlayTile =
                             mMapCompositeVBO->mScene->
                             environmentPreviewOverlayTile(
@@ -1529,11 +1557,13 @@ int LayerGroupVBO::tryAddExtraJumbo_Trunk(const Tiled::Tile *tile, const QPointF
 {
     if (!tile || !tile->tileset() || tiles.isEmpty())
         return 0;
+
     VBOTile &vboTile0 = tiles.last();
     // Leaves overlay
     const int columns = tile->tileset()->columnCount();
     if (columns <= 0)
         return 0;
+
     int row_trunk = 0;
     int row = tile->id() / columns;
     if (row < 2) {
@@ -1564,11 +1594,13 @@ int LayerGroupVBO::tryAddExtraJumbo_Leaves(const Tiled::Tile *tile, const QPoint
 {
     if (!tile || !tile->tileset() || tiles.isEmpty())
         return 0;
+
     VBOTile &vboTile0 = tiles.last();
     // Leaves overlay
     const int columns = tile->tileset()->columnCount();
     if (columns <= 0)
         return 0;
+
     int row_summer = 3;
     int row = tile->id() / columns;
     if (row >= 2) {
@@ -1716,6 +1748,7 @@ bool LayerGroupVBO::isEmpty() const
 
 void LayerGroupVBO::aboutToBeDestroyed()
 {
+    // The QOpenGLContext is going away and the OpenGL function table becomes invalid.
     for (int i = 0; i < 9; i++) {
         if (mLayerGroupItem->mVBO[i] == this) {
             mLayerGroupItem->mVBO[i] = nullptr;
@@ -1923,23 +1956,10 @@ bool ObjectLabelItem::contains(const QPointF &point) const
 void ObjectLabelItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *,
                             QWidget *)
 {
-    if (mRasterLabel.isNull())
-        rebuildRasterLabel();
-    painter->drawImage(boundingRect().topLeft(), mRasterLabel);
-}
-void ObjectLabelItem::rebuildRasterLabel()
-{
-    const QRectF bounds = boundingRect();
-    const QSize imageSize(qMax(1, qCeil(bounds.width())),
-                          qMax(1, qCeil(bounds.height())));
-    mRasterLabel = QImage(imageSize, QImage::Format_ARGB32_Premultiplied);
-    mRasterLabel.fill(Qt::transparent);
-    QPainter labelPainter(&mRasterLabel);
-    labelPainter.setRenderHint(QPainter::TextAntialiasing, true);
-    labelPainter.setFont(font());
-    labelPainter.fillRect(mRasterLabel.rect(), mBgColor);
-    labelPainter.setPen(Qt::black);
-    labelPainter.drawText(mRasterLabel.rect(), Qt::AlignCenter, text());
+    QRectF r = boundingRect();
+    painter->fillRect(r, mBgColor);
+    painter->setPen(Qt::black);
+    painter->drawText(r, Qt::AlignCenter, text());
 }
 
 void ObjectLabelItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event)
@@ -2318,7 +2338,6 @@ void ObjectLabelItem::synch()
         mBgColor = mItem->isMouseOverHighlighted() ? Qt::white : Qt::lightGray;
         mBgColor.setAlphaF(0.75);
 
-        rebuildRasterLabel();
         update();
     }
 }
@@ -4730,12 +4749,6 @@ void BasementItem::setEditable(bool editable)
     mStairHandle->synch();
 }
 
-void BasementItem::setSelected(bool selected)
-{
-    ObjectItem::setSelected(selected);
-    if (mAccessPreview)
-        mAccessPreview->setVisible(selected);
-}
 bool BasementItem::hoverToolCurrent() const
 {
     return SelectMoveObjectTool::instance()->isCurrent();
@@ -4745,100 +4758,6 @@ void BasementItem::synchWithObject()
 {
     ObjectItem::synchWithObject();
     mStairHandle->synch();
-    refreshAccessPreview();
-    QString details = toolTip();
-    const QString accessName = getAccessName();
-    if (!accessName.isEmpty()) {
-        details += QObject::tr("\nAccess: %1\nStair: %2 at %3, %4")
-                .arg(accessName, getStairDirection())
-                .arg(getStairOffsetX())
-                .arg(getStairOffsetY());
-        if (mAccessPreview) {
-            details += QObject::tr("\nTransparent source preview: %1")
-                    .arg(QDir::toNativeSeparators(mAccessPreviewPath));
-        } else {
-            details += QLatin1Char('\n') + mAccessPreviewStatus;
-        }
-    }
-    setToolTip(details);
-}
-QString BasementItem::getAccessName() const
-{
-    PropertyDef *definition = mObject->cell()->world()
-            ->propertyDefinition(QStringLiteral("Access"));
-    if (!definition)
-        return QString();
-    PropertyList properties;
-    resolveProperties(mObject, properties);
-    Property *property = properties.find(definition);
-    return property ? property->mValue.trimmed() : QString();
-}
-void BasementItem::refreshAccessPreview()
-{
-    const QString accessName = getAccessName();
-    const QString sourcePath = basementAccessSourcePath(mScene, accessName);
-    mAccessPreviewStatus.clear();
-    MapInfo *mapInfo = nullptr;
-    if (!sourcePath.isEmpty()) {
-        mapInfo = MapManager::instance()->mapInfo(sourcePath);
-        if (mapInfo && !mapInfo->map())
-            mapInfo = MapManager::instance()->loadMap(sourcePath);
-    }
-    if (sourcePath.isEmpty()) {
-        const QString compiledPath = compiledBasementAccessPath(accessName);
-        if (!compiledPath.isEmpty()) {
-            mAccessPreviewStatus = QObject::tr(
-                        "Compiled PZBY access found: %1\n"
-                        "Transparent preview requires the matching TBX or "
-                        "TMX source in portable pzby_tbx/basement_access "
-                        "or pzby_tbx/binmap.")
-                    .arg(QDir::toNativeSeparators(compiledPath));
-        } else {
-            mAccessPreviewStatus = QObject::tr(
-                        "Transparent source preview unavailable. The "
-                        "matching TBX or TMX is searched below the project, "
-                        "cell-map, configured Maps, and both portable "
-                        "pzby_tbx directories beside bin.");
-        }
-    } else if (!mapInfo) {
-        mAccessPreviewStatus = QObject::tr(
-                    "The access source was found but could not be loaded: "
-                    "%1\n%2")
-                .arg(QDir::toNativeSeparators(sourcePath),
-                     MapManager::instance()->errorString());
-    }
-    if (!mapInfo) {
-        delete mAccessPreview;
-        mAccessPreview = nullptr;
-        mAccessPreviewPath.clear();
-        return;
-    }
-    if (!mapInfo->map()) {
-        mapInfo = MapManager::instance()->loadMap(sourcePath);
-        if (!mapInfo)
-            return;
-    }
-    if (!mAccessPreview || mAccessPreviewPath != sourcePath) {
-        delete mAccessPreview;
-        mAccessPreview = new DnDItem(mapInfo, mRenderer, mObject->level(),
-                                     this, true);
-        mAccessPreview->setAcceptedMouseButtons(Qt::NoButton);
-        mAccessPreview->setZValue(-1.0);
-        mAccessPreviewPath = sourcePath;
-        qInfo().noquote() << "Basement access preview resolved"
-                          << accessName << "to"
-                          << QDir::toNativeSeparators(sourcePath);
-    }
-    mAccessPreview->setHotSpot(0, 0);
-    mAccessPreview->setAlignmentWarning(false);
-    mAccessPreview->setTilePosition(
-                (mObject->pos() + mDragOffset).toPoint());
-    mAccessPreview->setVisible(mIsSelected);
-}
-void BasementItem::mapImageChanged(MapImage *mapImage)
-{
-    if (mAccessPreview)
-        mAccessPreview->mapImageChanged(mapImage);
 }
 
 int BasementItem::getStairOffsetX() const
@@ -5038,15 +4957,11 @@ SubMapItem::SubMapItem(MapComposite *map, WorldCellLot *lot, MapRenderer *render
     , mMap(map)
     , mRenderer(renderer)
     , mLot(lot)
-    , mLowestSourceLevel(0)
-    , mHighestSourceLevel(0)
     , mIsEditable(false)
     , mIsMouseOver(false)
 {
     setAcceptHoverEvents(true);
-    mOccupiedTileBounds = occupiedTileBounds(&mLowestSourceLevel,
-                                              &mHighestSourceLevel);
-    mBoundingRect = mMap->boundingRect(mRenderer).united(volumeBoundingRect());
+    mBoundingRect = mMap->boundingRect(mRenderer);
 
     QString mapFileName = mMap->mapInfo()->path();
 #if 0
@@ -5067,113 +4982,19 @@ QRectF SubMapItem::boundingRect() const
     return mBoundingRect;
 }
 
-QRect SubMapItem::occupiedTileBounds(int *lowestSourceLevel,
-                                     int *highestSourceLevel) const
-{
-    QRect occupied;
-    int lowest = mMap->minLevel();
-    int highest = mMap->maxLevel();
-    bool foundTiles = false;
-    for (int sourceLevel = mMap->minLevel();
-         sourceLevel <= mMap->maxLevel(); ++sourceLevel) {
-        CompositeLayerGroup *group = mMap->tileLayersForLevel(sourceLevel);
-        if (!group)
-            continue;
-        const QRect levelBounds = group->bounds();
-        if (levelBounds.isEmpty())
-            continue;
-        if (!foundTiles) {
-            lowest = sourceLevel;
-            highest = sourceLevel;
-            foundTiles = true;
-        } else {
-            lowest = qMin(lowest, sourceLevel);
-            highest = qMax(highest, sourceLevel);
-        }
-        occupied = occupied.isEmpty() ? levelBounds
-                                      : occupied.united(levelBounds);
-    }
-    QRect bounds = occupied;
-    if (bounds.isEmpty())
-        bounds = QRect(QPoint(), mMap->map()->size());
-    bounds.translate(mMap->origin());
-    if (lowestSourceLevel)
-        *lowestSourceLevel = lowest;
-    if (highestSourceLevel)
-        *highestSourceLevel = highest;
-    return bounds;
-}
-
-QRectF SubMapItem::volumeBoundingRect() const
-{
-    const int bottomLevel = mMap->levelOffset() + mLowestSourceLevel;
-    const int topLevel = mMap->levelOffset() + mHighestSourceLevel + 1;
-    return mRenderer->tileToPixelCoords(mOccupiedTileBounds, bottomLevel)
-            .boundingRect().united(
-                mRenderer->tileToPixelCoords(mOccupiedTileBounds, topLevel)
-                .boundingRect());
-}
-
-void SubMapItem::drawVolumeOutline(QPainter *painter,
-                                   const QRect &tileBounds,
-                                   int bottomLevel, int topLevel,
-                                   const QColor &color) const
-{
-    const QPolygonF bottom = mRenderer->tileToPixelCoords(tileBounds,
-                                                           bottomLevel);
-    const QPolygonF top = mRenderer->tileToPixelCoords(tileBounds, topLevel);
-    if (bottom.size() != 4 || top.size() != 4)
-        return;
-    painter->save();
-    QColor fill = color;
-    fill.setAlpha(28);
-    QPen pen(color);
-    pen.setWidth(2);
-    pen.setCosmetic(true);
-    painter->setPen(pen);
-    painter->setBrush(fill);
-    for (int index = 0; index < 4; ++index) {
-        const int next = (index + 1) % 4;
-        QPolygonF side;
-        side << bottom.at(index) << bottom.at(next)
-             << top.at(next) << top.at(index);
-        painter->drawPolygon(side);
-    }
-    painter->setBrush(Qt::NoBrush);
-    painter->drawPolygon(bottom);
-    painter->drawPolygon(top);
-    for (int index = 0; index < 4; ++index)
-        painter->drawLine(bottom.at(index), top.at(index));
-    painter->restore();
-}
-
 void SubMapItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *)
 {
     QRect tileBounds(mMap->origin(), mMap->map()->size());
-    const int outlineLevel = occupiesLevel(0) ? 0 : mMap->levelOffset();
     QColor color = Qt::darkGray;
     if (mIsEditable)
-        color = QColor(0x33, 0x99, 0xff, 190);
+        color = QColor(0x33,0x99,0xff/*,255/8*/);
     if (!mIsValidPos)
         color = QColor(255, 0, 0);
     if (mIsMouseOver)
         color = color.lighter();
-    if (mIsEditable) {
-        const int bottomLevel = mMap->levelOffset() + mLowestSourceLevel;
-        const int topLevel = mMap->levelOffset() + mHighestSourceLevel + 1;
-        drawVolumeOutline(painter, mOccupiedTileBounds, bottomLevel, topLevel,
-                          color);
-        if (bottomLevel < 0) {
-            QColor buriedColor(255, 48, 48, 210);
-            if (mIsMouseOver)
-                buriedColor = buriedColor.lighter();
-            drawVolumeOutline(painter, mOccupiedTileBounds, bottomLevel,
-                              qMin(topLevel, 0), buriedColor);
-        }
-    } else {
-        mRenderer->drawFancyRectangle(painter, tileBounds, color,
-                                      outlineLevel);
-    }
+    mRenderer->drawFancyRectangle(painter, tileBounds,
+                                  color,
+                                  mMap->levelOffset());
 
     /* See note in ObjectItem::paint about OpenGL rendering bug. */
     QRectF bounds = mBoundingRect.translated(-mBoundingRect.topLeft());
@@ -5183,6 +5004,23 @@ void SubMapItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWid
     if (!mIsEditable)
         painter->drawRect(bounds);
 #endif
+
+    if (mIsEditable) {
+        QLineF top(bounds.topLeft(), bounds.topRight());
+        QLineF left(bounds.topLeft(), bounds.bottomLeft());
+        QLineF right(bounds.topRight(), bounds.bottomRight());
+        QLineF bottom(bounds.bottomLeft(), bounds.bottomRight());
+
+        QPen dashPen(Qt::DashLine);
+        dashPen.setCosmetic(true);
+        dashPen.setDashOffset(qMax(qreal(0), mBoundingRect.x()));
+        painter->setPen(dashPen);
+        painter->drawLines(QVector<QLineF>() << top << bottom);
+
+        dashPen.setDashOffset(qMax(qreal(0), mBoundingRect.y()));
+        painter->setPen(dashPen);
+        painter->drawLines(QVector<QLineF>() << left << right);
+    }
 }
 
 void SubMapItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event)
@@ -5206,7 +5044,7 @@ void SubMapItem::hoverLeaveEvent(QGraphicsSceneHoverEvent *event)
 QPainterPath SubMapItem::shape() const
 {
     // FIXME: MapRenderer should return a poly for a cell rectangle (like MapRenderer::shape)
-    int level = occupiesLevel(0) ? 0 : mMap->levelOffset();
+    int level = mMap->levelOffset();
     const QRect rect(mMap->origin(), mMap->map()->size() + QSize(1, 1));
     const QPointF topLeft = mRenderer->tileToPixelCoords(rect.topLeft(), level);
     const QPointF topRight = mRenderer->tileToPixelCoords(rect.topRight(), level);
@@ -5218,12 +5056,6 @@ QPainterPath SubMapItem::shape() const
     QPainterPath path;
     path.addPolygon(polygon);
     return path;
-}
-
-bool SubMapItem::occupiesLevel(int level) const
-{
-    return level >= mMap->levelOffset() + mMap->minLevel() &&
-            level <= mMap->levelOffset() + mMap->maxLevel();
 }
 
 void SubMapItem::setEditable(bool editable)
@@ -5245,9 +5077,7 @@ void SubMapItem::subMapMoved()
 {
     checkValidPos();
 
-    mOccupiedTileBounds = occupiedTileBounds(&mLowestSourceLevel,
-                                              &mHighestSourceLevel);
-    QRectF bounds = mMap->boundingRect(mRenderer).united(volumeBoundingRect());
+    QRectF bounds = mMap->boundingRect(mRenderer);
     if (bounds != mBoundingRect) {
         prepareGeometryChange();
         mBoundingRect = bounds;
@@ -5358,14 +5188,12 @@ void CellRoadItem::setDragOffset(const QPoint &offset)
 
 /////
 
-DnDItem::DnDItem(MapInfo *mapInfo, MapRenderer *renderer, int level,
-                 QGraphicsItem *parent, bool persistentPreview)
+DnDItem::DnDItem(MapInfo *mapInfo, MapRenderer *renderer, int level, QGraphicsItem *parent)
     : QGraphicsItem(parent)
     , mMapInfo(mapInfo)
     , mMapImage(MapImageManager::instance()->getMapImage(mapInfo->path()))
     , mRenderer(renderer)
     , mLevel(level)
-    , mPersistentPreview(persistentPreview)
 {
     setHotSpot(mMapInfo->width() / 2, mMapInfo->height() / 2);
 }
@@ -5378,7 +5206,7 @@ QRectF DnDItem::boundingRect() const
 void DnDItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *)
 {
     if (mMapImage) {
-        painter->setOpacity(mPersistentPreview ? 0.38 : 0.5);
+        painter->setOpacity(0.5);
         QRectF target = mBoundingRect;
         QRectF source = QRect(QPoint(0, 0), mMapImage->image().size());
         painter->drawImage(target, mMapImage->image(), source);
@@ -5387,26 +5215,13 @@ void DnDItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget
 
     QRect tileBounds(mPositionInMap.x() - mHotSpot.x(), mPositionInMap.y() - mHotSpot.y(),
                      mMapInfo->width(), mMapInfo->height());
-    mRenderer->drawFancyRectangle(painter, tileBounds,
-                                  mPersistentPreview
-                                  ? (mAlignmentWarning
-                                     ? QColor(255, 70, 70)
-                                     : QColor(255, 166, 52))
-                                  : QColor(Qt::darkGray),
-                                  mLevel);
+    mRenderer->drawFancyRectangle(painter, tileBounds, Qt::darkGray, mLevel);
 
-    if (mPersistentPreview) {
-        mRenderer->drawFancyRectangle(painter,
-                                      QRect(mPositionInMap, QSize(1, 1)),
-                                      QColor(80, 255, 150), mLevel);
-    }
-#ifdef _DEBUG
-    if (!mPersistentPreview) {
+#if 2//def _DEBUG
     QPen pen;
     pen.setCosmetic(true);
     painter->setPen(pen);
     painter->drawRect(mBoundingRect);
-    }
 #endif
 }
 
@@ -5462,11 +5277,6 @@ MapInfo *DnDItem::mapInfo()
     return mMapInfo;
 }
 
-void DnDItem::mapImageChanged(MapImage *mapImage)
-{
-    if (mapImage == mMapImage)
-        update();
-}
 /////
 
 class DummyGraphicsItem : public QGraphicsItem
@@ -5512,6 +5322,8 @@ CellScene::CellScene(QObject *parent)
     , mDnDItem(0)
     , mDarkRectangle(new QGraphicsRectItem)
     , mEnvironmentPreviewItem(new EnvironmentPreviewItem)
+    , mNightPreviewItem(new NightPreviewItem)
+    , mNightPreviewEnabled(false)
     , mPoweredPreviewEnabled(false)
     , mSnowPreviewEnabled(false)
     , mJumboPreviewEnabled(false)
@@ -5587,13 +5399,6 @@ CellScene::CellScene(QObject *parent)
     });
     connect(prefs, &Preferences::showLotFloorsOnlyChanged, this, &CellScene::showLotFloorsOnlyChanged);
     connect(prefs, &Preferences::showInvisibleTilesChanged, this, &CellScene::showInvisibleTilesChanged);
-    connect(MapImageManager::instance(), &MapImageManager::mapImageChanged,
-            this, [this](MapImage *mapImage) {
-        for (ObjectItem *item : qAsConst(mObjectItems)) {
-            if (item && item->isBasement())
-                static_cast<BasementItem *>(item)->mapImageChanged(mapImage);
-        }
-    });
 
     mHighlightCurrentLevel = prefs->highlightCurrentLevel();
 
@@ -5676,10 +5481,11 @@ void CellScene::setTool(AbstractTool *tool)
     for (SubMapItem *item : qAsConst(mSubMapItems)) {
         int currentLevel = mDocument->currentLevel();
         bool visible = item->subMap()->isVisible()
-                && mDocument->isLotLevelVisible(item->lot()->level())
+                && mDocument->isLotLevelVisible(currentLevel)
                 && SubMapTool::instance()->isCurrent();
-        if (mHighlightCurrentLevel)
-            visible &= item->occupiesLevel(currentLevel);
+        if (mHighlightCurrentLevel) {
+            visible &= (item->subMap()->levelOffset() == currentLevel);
+        }
         item->setVisible(visible);
     }
 
@@ -6087,6 +5893,7 @@ void CellScene::loadMap()
         restoreEnvironmentPreviewTiles();
         removeItem(mDarkRectangle);
         removeItem(mEnvironmentPreviewItem);
+        removeItem(mNightPreviewItem);
         removeItem(mGridItem);
         removeItem(mMapBordersItem);
         removeItem(mWaterFlowOverlay);
@@ -6152,6 +5959,7 @@ void CellScene::loadMap()
                    .arg(cellSize)
                    .arg(cell()->mapFilePath());
     }
+
 #if 1
     // Add any missing default tile layers so the user can hide/show them in the Layers Dock.
     // FIXME: mMap is shared, is this safe?
@@ -6256,6 +6064,10 @@ void CellScene::loadMap()
                 mPoweredPreviewEnabled || mSnowPreviewEnabled ||
                 mJumboPreviewEnabled);
     addItem(mEnvironmentPreviewItem);
+    mNightPreviewItem->setBounds(sceneRect());
+    mNightPreviewItem->setZValue(50000);
+    mNightPreviewItem->setVisible(mNightPreviewEnabled);
+    addItem(mNightPreviewItem);
     addItem(mGridItem);
     addItem(mMapBordersItem);
     addItem(mWaterFlowOverlay);
@@ -6270,6 +6082,8 @@ void CellScene::loadMap()
     if (mPoweredPreviewEnabled || mSnowPreviewEnabled ||
             mJumboPreviewEnabled)
         rebuildEnvironmentPreview();
+    if (mNightPreviewEnabled)
+        rebuildNightPreview();
 }
 
 void CellScene::updateBordersItem()
@@ -6389,6 +6203,9 @@ void CellScene::lotLevelChanged(WorldCellLot *lot)
         return;
     }
     if (SubMapItem *item = itemForLot(lot)) {
+
+        // When the level changes, the position also changes to keep
+        // the lot in the same visual location.
         item->subMap()->setOrigin(lot->pos());
 
         item->subMap()->setLevel(lot->level());
@@ -6766,7 +6583,10 @@ void CellScene::currentLevelChanged(int index)
     if (mPoweredPreviewEnabled || mSnowPreviewEnabled ||
             mJumboPreviewEnabled)
         rebuildEnvironmentPreview();
+    if (mNightPreviewEnabled)
+        rebuildNightPreview();
 }
+
 void CellScene::setPoweredPreviewEnabled(bool enabled)
 {
     mPoweredPreviewEnabled = enabled;
@@ -6777,6 +6597,7 @@ void CellScene::setPoweredPreviewEnabled(bool enabled)
                 mJumboPreviewEnabled);
     rebuildEnvironmentPreview();
 }
+
 void CellScene::setSnowPreviewEnabled(bool enabled)
 {
     mSnowPreviewEnabled = enabled;
@@ -6787,6 +6608,7 @@ void CellScene::setSnowPreviewEnabled(bool enabled)
                 mJumboPreviewEnabled);
     rebuildEnvironmentPreview();
 }
+
 void CellScene::setJumboPreviewEnabled(bool enabled)
 {
     mJumboPreviewEnabled = enabled;
@@ -6797,6 +6619,7 @@ void CellScene::setJumboPreviewEnabled(bool enabled)
                 mJumboPreviewEnabled);
     rebuildEnvironmentPreview();
 }
+
 void CellScene::rebuildEnvironmentPreview()
 {
     if (mEnvironmentPreviewRebuilding)
@@ -6814,6 +6637,7 @@ void CellScene::rebuildEnvironmentPreview()
         update();
         return;
     }
+
     const int level = mDocument->currentLevel();
     CompositeLayerGroup *layerGroup =
             mMapComposite->tileLayersForLevel(level);
@@ -6824,6 +6648,7 @@ void CellScene::rebuildEnvironmentPreview()
         update();
         return;
     }
+
     struct PendingSprite {
         int x;
         int y;
@@ -6860,12 +6685,14 @@ void CellScene::rebuildEnvironmentPreview()
                 requiredTilesets.insert(candidate->tileset());
         }
     }
+
     layerGroup->prepareDrawing2();
     OrderedCellsTemporaries vars;
     QVector<const Tiled::Cell*> cells;
     Tiled::Internal::TileDefWatcher *tileDefWatcher =
             BuildingEditor::getTileDefWatcher();
     tileDefWatcher->check();
+
     const auto tileFromFullName = [&tilesetsByName](
             const QString &fullName) -> Tiled::Tile* {
         const int separator = fullName.lastIndexOf(QLatin1Char('_'));
@@ -6897,6 +6724,7 @@ void CellScene::rebuildEnvironmentPreview()
                 return 5;
             return -1;
         }
+
         int snowId = sourceId;
         const auto paired = [sourceId](int current) {
             if (sourceId == 104 || sourceId == 106)
@@ -6962,6 +6790,7 @@ void CellScene::rebuildEnvironmentPreview()
         }
         return snowId;
     };
+
     for (int y = 0; y < mMap->height(); ++y) {
         for (int x = 0; x < mMap->width(); ++x) {
             if (!layerGroup->orderedCellsAt2(QPoint(x, y), vars, cells))
@@ -6972,6 +6801,7 @@ void CellScene::rebuildEnvironmentPreview()
                 Tiled::Tile *sourceTile = cell->tile;
                 Tiled::Tile *previewTile = nullptr;
                 Tiled::Tile *overlayTile = nullptr;
+
                 if (mSnowPreviewEnabled) {
                     TileDefTile *tileDef = tileDefWatcher->tile(
                                 sourceTile->tileset()->name(),
@@ -7015,6 +6845,7 @@ void CellScene::rebuildEnvironmentPreview()
                         }
                     }
                 }
+
                 if (mPoweredPreviewEnabled) {
                     const QString poweredName =
                             sourceTile->tileset()->name() +
@@ -7026,14 +6857,21 @@ void CellScene::rebuildEnvironmentPreview()
                                     sourceTile->id());
                     }
                 }
+
                 const bool isJumboMarker =
                         mJumboPreviewEnabled &&
                         sourceTile->tileset()->name().compare(
                             QStringLiteral("jumbo_tree_01"),
                             Qt::CaseInsensitive) == 0 &&
                         sourceTile->id() == 0;
+
+                // Jumbo markers are resolved per square by the renderer.
+                // They must never become a scene-wide overlay: doing that
+                // loses the original layer order and draws trees outside the
+                // map when the cell contains thousands of marker tiles.
                 if (!previewTile && isJumboMarker)
                     continue;
+
                 if (previewTile && previewTile != sourceTile) {
                     requiredTilesets.insert(previewTile->tileset());
                     pending.append({
@@ -7063,6 +6901,11 @@ void CellScene::rebuildEnvironmentPreview()
             }
         }
     }
+
+    // Environment substitutions are properties of a tile definition, not of
+    // the currently selected Z level. Build the roof/powered mappings from
+    // every tileset used by the composite so toggling SNOW or POWER affects
+    // all visible floors immediately.
     const QList<Tiled::Tileset*> usedTilesets =
             mMapComposite->usedTilesets();
     Tiled::Tileset *snowTileset = tilesetsByName.value(
@@ -7110,6 +6953,7 @@ void CellScene::rebuildEnvironmentPreview()
             }
         }
     }
+
     QList<Tiled::Tileset*> required = requiredTilesets.values();
     for (Tiled::Tileset *tileset : qAsConst(required)) {
         if (tileset && (!tileset->isLoaded() || tileset->isMissing())) {
@@ -7118,6 +6962,7 @@ void CellScene::rebuildEnvironmentPreview()
     }
     if (!required.isEmpty())
         tilesetManager->waitForTilesets(required);
+
     int mappedTiles = 0;
     for (const PendingSprite &entry : qAsConst(pending)) {
         Tiled::Tile *tile = entry.tile;
@@ -7134,6 +6979,7 @@ void CellScene::rebuildEnvironmentPreview()
         }
     }
     mEnvironmentPreviewJumboCandidates = jumboCandidates;
+
     mEnvironmentPreviewItem->setBounds(sceneRect());
     mEnvironmentPreviewItem->setSprites(sprites);
     mEnvironmentPreviewItem->setVisible(false);
@@ -7149,6 +6995,7 @@ void CellScene::rebuildEnvironmentPreview()
         .arg(sprites.size())
         .arg(jumboCandidates.size());
 }
+
 void CellScene::restoreEnvironmentPreviewTiles()
 {
     for (auto it = mEnvironmentPreviewOriginalTiles.begin();
@@ -7162,15 +7009,18 @@ void CellScene::restoreEnvironmentPreviewTiles()
     mEnvironmentPreviewOverlays.clear();
     mEnvironmentPreviewJumboCandidates.clear();
 }
+
 Tiled::Tile *CellScene::environmentPreviewTile(
         const Tiled::Tile *sourceTile, const QPoint &square) const
 {
     if (!sourceTile)
         return nullptr;
+
     if (Tiled::Tile *mapped =
             mEnvironmentPreviewMappings.value(
                 const_cast<Tiled::Tile*>(sourceTile), nullptr))
         return mapped;
+
     if (!mJumboPreviewEnabled ||
             mEnvironmentPreviewJumboCandidates.isEmpty() ||
             !sourceTile->tileset() ||
@@ -7179,6 +7029,7 @@ Tiled::Tile *CellScene::environmentPreviewTile(
                 Qt::CaseInsensitive) != 0 ||
             sourceTile->id() != 0)
         return const_cast<Tiled::Tile*>(sourceTile);
+
     const int cellSize = world()->cellSize();
     const qint64 worldX = qint64(cell()->x()) * cellSize + square.x();
     const qint64 worldY = qint64(cell()->y()) * cellSize + square.y();
@@ -7191,16 +7042,22 @@ Tiled::Tile *CellScene::environmentPreviewTile(
     return candidate && !candidate->image().isNull()
             ? candidate : const_cast<Tiled::Tile*>(sourceTile);
 }
+
 Tiled::Tile *CellScene::environmentPreviewOverlayTile(
         const Tiled::Tile *sourceTile, const QPoint &square) const
 {
     if (!sourceTile)
         return nullptr;
+
+    // A powered sheet contains only the illuminated pixels. It is not a
+    // replacement for the original object (a streetlight would otherwise
+    // lose its pole), so return it through the overlay path.
     if (Tiled::Tile *overlay =
             mEnvironmentPreviewOverlays.value(
                 const_cast<Tiled::Tile*>(sourceTile), nullptr)) {
         return overlay;
     }
+
     if (!mJumboPreviewEnabled ||
             mEnvironmentPreviewJumboCandidates.isEmpty() ||
             !sourceTile->tileset() ||
@@ -7210,6 +7067,7 @@ Tiled::Tile *CellScene::environmentPreviewOverlayTile(
             sourceTile->id() != 0) {
         return nullptr;
     }
+
     const int cellSize = world()->cellSize();
     const qint64 worldX = qint64(cell()->x()) * cellSize + square.x();
     const qint64 worldY = qint64(cell()->y()) * cellSize + square.y();
@@ -7221,11 +7079,15 @@ Tiled::Tile *CellScene::environmentPreviewOverlayTile(
                         mEnvironmentPreviewJumboCandidates.size())));
     if (!candidate || !candidate->tileset())
         return nullptr;
+
+    // IsoTreeJumbo describes XL/XXL trees as two sprites: the main tile at
+    // id N and its treetop at N+6. Preview both halves just like the game.
     Tiled::Tile *treetop = candidate->tileset()->tileAt(
                 candidate->id() + 6);
     return treetop && !treetop->image().isNull()
             ? treetop : nullptr;
 }
+
 void CellScene::invalidateEnvironmentPreviewVBOs()
 {
     for (MapCompositeVBO &mapVBO : mMapCompositeVBO) {
@@ -7244,6 +7106,346 @@ void CellScene::invalidateEnvironmentPreviewVBOs()
             }
         }
     }
+}
+
+void CellScene::setNightPreviewEnabled(bool enabled)
+{
+    mNightPreviewEnabled = enabled;
+    mNightPreviewItem->setVisible(enabled);
+    if (enabled)
+        rebuildNightPreview();
+}
+
+void CellScene::rebuildNightPreview()
+{
+    QVector<NightPreviewLight> lights;
+    QVector<QPolygonF> litRooms;
+
+    if (!mNightPreviewEnabled || !mMap || !mMapComposite || !mRenderer) {
+        mNightPreviewItem->setLights(lights);
+        mNightPreviewItem->setLitRooms(litRooms);
+        return;
+    }
+
+    const int level = mDocument->currentLevel();
+    CompositeLayerGroup *layerGroup =
+            mMapComposite->tileLayersForLevel(level);
+    if (!layerGroup) {
+        mNightPreviewItem->setLights(lights);
+        mNightPreviewItem->setLitRooms(litRooms);
+        return;
+    }
+
+    // orderedCellsAt2 includes lots and building submaps, which is important:
+    // the preview must describe the final composite rather than only the
+    // currently-open cell TMX.
+    layerGroup->prepareDrawing2();
+    OrderedCellsTemporaries vars;
+    QVector<const Tiled::Cell*> cells;
+    Tiled::Internal::TileDefWatcher *tileDefWatcher =
+            BuildingEditor::getTileDefWatcher();
+    tileDefWatcher->check();
+    QVector<QPoint> roomSwitchPositions;
+    QSet<quint64> roomSwitchKeys;
+    QSet<QString> lightKeys;
+    int explicitLightColors = 0;
+    int derivedLightColors = 0;
+    int fallbackLightColors = 0;
+    QMap<QString, Tiled::Tileset*> tilesetsByName;
+    Tiled::Internal::TilesetManager *tilesetManager =
+            Tiled::Internal::TilesetManager::instance();
+    for (Tiled::Tileset *tileset : tilesetManager->tilesets()) {
+        if (tileset)
+            tilesetsByName.insert(tileset->name().toLower(), tileset);
+    }
+    QSet<Tiled::Tileset*> loadedPoweredTilesets;
+    QHash<const Tiled::Tile*, QColor> derivedColorCache;
+
+    const auto derivePoweredColor =
+            [&tilesetsByName, tilesetManager, &loadedPoweredTilesets,
+             &derivedColorCache](const Tiled::Tile *sourceTile) {
+        if (derivedColorCache.contains(sourceTile))
+            return derivedColorCache.value(sourceTile);
+        QColor result;
+        if (!sourceTile || !sourceTile->tileset()) {
+            derivedColorCache.insert(sourceTile, result);
+            return result;
+        }
+        Tiled::Tileset *poweredTileset = tilesetsByName.value(
+                    (sourceTile->tileset()->name() +
+                     QStringLiteral("_on")).toLower(), nullptr);
+        if (!poweredTileset) {
+            derivedColorCache.insert(sourceTile, result);
+            return result;
+        }
+        if (!loadedPoweredTilesets.contains(poweredTileset) &&
+                (poweredTileset->tileCount() == 0 ||
+                 (poweredTileset->tileAt(0) &&
+                  poweredTileset->tileAt(0)->image().isNull()))) {
+            tilesetManager->loadTileset(
+                        poweredTileset, poweredTileset->imageSource());
+            tilesetManager->waitForTilesets({ poweredTileset });
+            loadedPoweredTilesets.insert(poweredTileset);
+        }
+        Tiled::Tile *poweredTile =
+                poweredTileset->tileAt(sourceTile->id());
+        if (!poweredTile || poweredTile->image().isNull() ||
+                sourceTile->image().isNull()) {
+            derivedColorCache.insert(sourceTile, result);
+            return result;
+        }
+        const QImage normal = sourceTile->image().convertToFormat(
+                    QImage::Format_ARGB32);
+        const QImage powered = poweredTile->image().convertToFormat(
+                    QImage::Format_ARGB32);
+        const int width = qMin(normal.width(), powered.width());
+        const int height = qMin(normal.height(), powered.height());
+        qint64 redSum = 0;
+        qint64 greenSum = 0;
+        qint64 blueSum = 0;
+        qint64 weightSum = 0;
+        for (int py = 0; py < height; ++py) {
+            const QRgb *normalLine =
+                    reinterpret_cast<const QRgb*>(normal.constScanLine(py));
+            const QRgb *poweredLine =
+                    reinterpret_cast<const QRgb*>(powered.constScanLine(py));
+            for (int px = 0; px < width; ++px) {
+                if (qAlpha(poweredLine[px]) == 0)
+                    continue;
+                const int delta = qGray(poweredLine[px]) -
+                        qGray(normalLine[px]);
+                if (delta < 12)
+                    continue;
+                const qint64 weight = qint64(delta) * delta;
+                redSum += qRed(poweredLine[px]) * weight;
+                greenSum += qGreen(poweredLine[px]) * weight;
+                blueSum += qBlue(poweredLine[px]) * weight;
+                weightSum += weight;
+            }
+        }
+        if (weightSum > 0) {
+            result = QColor(
+                        int(redSum / weightSum),
+                        int(greenSum / weightSum),
+                        int(blueSum / weightSum));
+        }
+        derivedColorCache.insert(sourceTile, result);
+        return result;
+    };
+
+    for (int y = 0; y < mMap->height(); ++y) {
+        for (int x = 0; x < mMap->width(); ++x) {
+            if (!layerGroup->orderedCellsAt2(QPoint(x, y), vars, cells))
+                continue;
+
+            for (const Tiled::Cell *cell : qAsConst(cells)) {
+                if (!cell || !cell->tile)
+                    continue;
+                const Tiled::Tile *tile = cell->tile;
+                TileDefTile *tileDef = tileDefWatcher->tile(
+                            tile->tileset()->name(), tile->id());
+                const auto property = [tile, tileDef](
+                        const QString &name) {
+                    if (tileDef) {
+                        auto exact = tileDef->mProperties.constFind(name);
+                        if (exact != tileDef->mProperties.constEnd())
+                            return exact.value();
+                        for (auto it = tileDef->mProperties.constBegin();
+                             it != tileDef->mProperties.constEnd(); ++it) {
+                            if (it.key().compare(name,
+                                                 Qt::CaseInsensitive) == 0)
+                                return it.value();
+                        }
+                    }
+                    const auto &properties = tile->properties();
+                    auto exact = properties.constFind(name);
+                    if (exact != properties.constEnd())
+                        return exact.value();
+                    for (auto it = properties.constBegin();
+                         it != properties.constEnd(); ++it) {
+                        if (it.key().compare(name,
+                                             Qt::CaseInsensitive) == 0)
+                            return it.value();
+                    }
+                    return QString();
+                };
+                const auto containsProperty = [tile, tileDef](
+                        const QString &name) {
+                    if (tileDef) {
+                        for (auto it = tileDef->mProperties.constBegin();
+                             it != tileDef->mProperties.constEnd(); ++it) {
+                            if (it.key().compare(name,
+                                                 Qt::CaseInsensitive) == 0)
+                                return true;
+                        }
+                    }
+                    const auto &properties = tile->properties();
+                    for (auto it = properties.constBegin();
+                         it != properties.constEnd(); ++it) {
+                        if (it.key().compare(name,
+                                             Qt::CaseInsensitive) == 0)
+                            return true;
+                    }
+                    return false;
+                };
+                const QString isoType = property(
+                            QStringLiteral("IsoType"));
+                const QString tilesetName = tile->tileset()->name();
+                const bool isKnownRoomSwitch =
+                        tilesetName.compare(
+                            QStringLiteral("lighting_indoor_01"),
+                            Qt::CaseInsensitive) == 0 &&
+                        tile->id() >= 0 && tile->id() < 8;
+                const bool isLightSwitch =
+                        isoType.compare(QStringLiteral("lightswitch"),
+                                        Qt::CaseInsensitive) == 0 ||
+                        containsProperty(
+                            QStringLiteral("lightswitch")) ||
+                        isKnownRoomSwitch;
+                const QString redText = property(
+                            QStringLiteral("lightR"));
+                const QString greenText = property(
+                            QStringLiteral("lightG"));
+                const QString blueText = property(
+                            QStringLiteral("lightB"));
+                bool redOk = false;
+                bool greenOk = false;
+                bool blueOk = false;
+                int red = redText.toInt(&redOk);
+                int green = greenText.toInt(&greenOk);
+                int blue = blueText.toInt(&blueOk);
+
+                bool hasLightColor = redOk && greenOk && blueOk;
+                if (hasLightColor)
+                    ++explicitLightColors;
+                const bool standardOutdoorLight =
+                        tilesetName.startsWith(
+                            QStringLiteral("lighting_outdoor_"),
+                            Qt::CaseInsensitive)
+                        && !tilesetName.endsWith(
+                            QStringLiteral("_on"),
+                            Qt::CaseInsensitive);
+                bool fallbackLight = false;
+                if (!hasLightColor && standardOutdoorLight) {
+                    // Vanilla maps can be edited without a registered
+                    // newtiledefinitions.tiles file. Preserve a useful
+                    // preview for the standard lamp sheets in that case;
+                    // explicit tiledefs always win above.
+                    QColor fallbackColor = derivePoweredColor(tile);
+                    if (fallbackColor.isValid())
+                        ++derivedLightColors;
+                    else
+                        ++fallbackLightColors;
+                    if (!fallbackColor.isValid()) {
+                        fallbackColor = QColor(
+                                QSettings().value(
+                                    QStringLiteral(
+                                        "NightPreview/FallbackColor"),
+                                    QStringLiteral("#ffdca4")).toString());
+                    }
+                    red = fallbackColor.isValid()
+                            ? fallbackColor.red() : 255;
+                    green = fallbackColor.isValid()
+                            ? fallbackColor.green() : 220;
+                    blue = fallbackColor.isValid()
+                            ? fallbackColor.blue() : 164;
+                    hasLightColor = true;
+                    fallbackLight = true;
+                }
+                if (!hasLightColor) {
+                    if (!isLightSwitch)
+                        continue;
+                    // A switch without RGB controls the room light in the
+                    // game. Keep that distinction in the editor preview.
+                    const quint64 positionKey =
+                            (quint64(quint32(x)) << 32) | quint32(y);
+                    if (!roomSwitchKeys.contains(positionKey)) {
+                        roomSwitchKeys.insert(positionKey);
+                        roomSwitchPositions.append(QPoint(x, y));
+                    }
+                    continue;
+                }
+
+                const QString key = QStringLiteral("%1:%2:%3:%4")
+                        .arg(x).arg(y)
+                        .arg(tilesetName)
+                        .arg(tile->id());
+                if (lightKeys.contains(key))
+                    continue;
+                lightKeys.insert(key);
+
+                bool radiusOk = false;
+                int radius = property(
+                            QStringLiteral("LightRadius")).toInt(&radiusOk);
+                if (!radiusOk || radius <= 0)
+                    radius = fallbackLight
+                            ? QSettings().value(
+                                  QStringLiteral(
+                                      "NightPreview/FallbackRadius"),
+                                  4).toInt()
+                            : 10;
+
+                NightPreviewLight light;
+                light.center = mRenderer->tileToPixelCoords(
+                            QPointF(x + 0.5, y + 0.5), level);
+                light.color = QColor(qBound(0, red, 255),
+                                     qBound(0, green, 255),
+                                     qBound(0, blue, 255));
+                const QPointF radiusXPoint =
+                        mRenderer->tileToPixelCoords(
+                            QPointF(x + radius + 0.5, y + 0.5), level);
+                const QPointF radiusYPoint =
+                        mRenderer->tileToPixelCoords(
+                            QPointF(x + 0.5, y + radius + 0.5), level);
+                light.radiusX = QLineF(light.center, radiusXPoint).length();
+                light.radiusY = QLineF(light.center, radiusYPoint).length();
+                lights.append(light);
+            }
+        }
+    }
+
+    if (!roomSwitchPositions.isEmpty()) {
+        if (mMapBuildingsInvalid) {
+            mMapBuildings->calculate(mMapComposite);
+            mMapBuildingsInvalid = false;
+        }
+
+        QSet<MapBuildingsNS::Room*> switchedRooms;
+        for (const QPoint &position : qAsConst(roomSwitchPositions)) {
+            if (MapBuildingsNS::Room *room =
+                    mMapBuildings->roomAt(position, level)) {
+                switchedRooms.insert(room);
+            }
+        }
+
+        for (MapBuildingsNS::Room *room : qAsConst(switchedRooms)) {
+            for (MapBuildingsNS::RoomRect *rect : qAsConst(room->rects)) {
+                QPolygonF polygon;
+                polygon << mRenderer->tileToPixelCoords(
+                               QPointF(rect->x, rect->y), level)
+                        << mRenderer->tileToPixelCoords(
+                               QPointF(rect->x + rect->w, rect->y), level)
+                        << mRenderer->tileToPixelCoords(
+                               QPointF(rect->x + rect->w,
+                                       rect->y + rect->h), level)
+                        << mRenderer->tileToPixelCoords(
+                               QPointF(rect->x, rect->y + rect->h), level);
+                litRooms.append(polygon);
+            }
+        }
+    }
+
+    mNightPreviewItem->setBounds(sceneRect());
+    mNightPreviewItem->setLights(lights);
+    mNightPreviewItem->setLitRooms(litRooms);
+    mNightPreviewItem->update();
+    qInfo() << "Night preview detected" << lights.size()
+            << "tile light source(s) and" << litRooms.size()
+            << "lit room polygon(s) at level" << level
+            << "- colors:" << explicitLightColors << "tiledef,"
+            << derivedLightColors << "powered-sprite,"
+            << fallbackLightColors << "fallback; configured tiledef files:"
+            << Preferences::instance()->tilePropertiesFiles().size();
 }
 
 void CellScene::showCellBorderChanged(bool visible)
@@ -7411,6 +7613,7 @@ void CellScene::checkHolesOnLevelZero()
     qInfo() << "Hole Detection found" << mHoleInFloor.size()
             << "level-zero coordinate(s) without any composite tile";
 }
+
 int CellScene::autoFixHolesOnLevelZero(QString *backupPath, QString *error)
 {
     if (backupPath)
@@ -7424,6 +7627,7 @@ int CellScene::autoFixHolesOnLevelZero(QString *backupPath, QString *error)
             *error = tr("The current cell map is not available.");
         return 0;
     }
+
     const QString mapPath = cell()->mapFilePath();
     if (mapPath.isEmpty() || !QFileInfo::exists(mapPath)) {
         if (error) {
@@ -7432,6 +7636,7 @@ int CellScene::autoFixHolesOnLevelZero(QString *backupPath, QString *error)
         }
         return 0;
     }
+
     MapLevel *mapLevel = mMap->mapLevelForZ(0);
     const int floorIndex = mapLevel
             ? mapLevel->indexOfLayer(
@@ -7447,6 +7652,7 @@ int CellScene::autoFixHolesOnLevelZero(QString *backupPath, QString *error)
         }
         return 0;
     }
+
     QVector<int> sources;
     for (int y = 0; y < floorLayer->height(); ++y) {
         for (int x = 0; x < floorLayer->width(); ++x) {
@@ -7463,6 +7669,7 @@ int CellScene::autoFixHolesOnLevelZero(QString *backupPath, QString *error)
         }
         return 0;
     }
+
     const QVector<int> nearest = nearestSourceCells(
                 floorLayer->width(), floorLayer->height(), sources);
     QVector<QPair<QPoint, Cell>> previousCells;
@@ -7488,6 +7695,7 @@ int CellScene::autoFixHolesOnLevelZero(QString *backupPath, QString *error)
             *error = tr("No detected hole could be repaired.");
         return 0;
     }
+
     const QFileInfo projectInfo(mDocument->worldDocument()->fileName());
     const QString timestamp =
             QDateTime::currentDateTime().toString(
@@ -7507,6 +7715,7 @@ int CellScene::autoFixHolesOnLevelZero(QString *backupPath, QString *error)
         }
         return 0;
     }
+
     const QString backupFileName =
             QStringLiteral("cell_%1_%2_%3")
             .arg(cell()->x()).arg(cell()->y())
@@ -7522,6 +7731,7 @@ int CellScene::autoFixHolesOnLevelZero(QString *backupPath, QString *error)
         }
         return 0;
     }
+
     QSaveFile output(mapPath);
     if (!output.open(QIODevice::WriteOnly)) {
         for (const auto &entry : std::as_const(previousCells))
@@ -7541,6 +7751,7 @@ int CellScene::autoFixHolesOnLevelZero(QString *backupPath, QString *error)
             *error = output.errorString();
         return 0;
     }
+
     if (CompositeLayerGroup *layerGroup =
             mMapComposite->layerGroupForLevel(0)) {
         layerGroup->regionAltered(floorLayer);
@@ -7556,240 +7767,11 @@ int CellScene::autoFixHolesOnLevelZero(QString *backupPath, QString *error)
     return previousCells.size();
 }
 
-int CellScene::basementGroundOpeningCount(WorldCellLot *lot) const
-{
-    if (!lot || lot->cell() != cell())
-        return 0;
-    SubMapItem *item = const_cast<CellScene *>(this)->itemForLot(lot);
-    if (!item || !item->subMap() || !item->subMap()->map())
-        return 0;
-    return basementGroundOpenings(lot, item->subMap()->map(),
-                                  world()->cellSize()).size();
-}
-
-int CellScene::pierceGroundAtBasementStairs(WorldCellLot *lot,
-                                            QStringList *backupPaths,
-                                            QString *error)
-{
-    if (backupPaths)
-        backupPaths->clear();
-    if (error)
-        error->clear();
-    if (!lot || lot->cell() != cell()) {
-        if (error)
-            *error = tr("The selected lot is not part of the current cell.");
-        return 0;
-    }
-    SubMapItem *item = itemForLot(lot);
-    if (!item || !item->subMap() || !item->subMap()->map()) {
-        if (error)
-            *error = tr("The selected lot map is not loaded.");
-        return 0;
-    }
-    const int cellSize = world()->cellSize();
-    const QVector<BasementGroundOpening> openings =
-            basementGroundOpenings(lot, item->subMap()->map(), cellSize);
-    if (openings.isEmpty()) {
-        if (error) {
-            *error = tr("No top staircase leading from level -1 to level 0 "
-                        "was found in the selected lot.");
-        }
-        return 0;
-    }
-    struct CellRepair
-    {
-        QPoint cellPosition;
-        WorldCell *cell = nullptr;
-        MapInfo *mapInfo = nullptr;
-        Tiled::Map *map = nullptr;
-        Tiled::TileLayer *floorLayer = nullptr;
-        QVector<QPair<QPoint, Tiled::Cell>> previousCells;
-        QString mapPath;
-        QString backupPath;
-    };
-    QHash<quint64, CellRepair> repairs;
-    for (const BasementGroundOpening &opening : openings) {
-        const QPoint cellPosition(
-                    floorDivide(opening.absolutePosition.x(), cellSize),
-                    floorDivide(opening.absolutePosition.y(), cellSize));
-        WorldCell *targetCell = world()->cellAt(cellPosition);
-        if (!targetCell || targetCell->mapFilePath().isEmpty() ||
-                !QFileInfo::exists(targetCell->mapFilePath())) {
-            if (error) {
-                *error = tr("The ground TMX is unavailable for cell %1, %2.")
-                        .arg(cellPosition.x()).arg(cellPosition.y());
-            }
-            return 0;
-        }
-        const quint64 cellKey = pointKey(cellPosition);
-        if (!repairs.contains(cellKey)) {
-            CellRepair repair;
-            repair.cellPosition = cellPosition;
-            repair.cell = targetCell;
-            repair.mapPath = targetCell->mapFilePath();
-            repair.mapInfo = MapManager::instance()->loadMap(repair.mapPath);
-            repair.map = repair.mapInfo ? repair.mapInfo->map() : nullptr;
-            Tiled::MapLevel *mapLevel = repair.map
-                    ? repair.map->mapLevelForZ(0) : nullptr;
-            const int floorIndex = mapLevel
-                    ? mapLevel->indexOfLayer(
-                        QStringLiteral("Floor"), Layer::TileLayerType)
-                    : -1;
-            repair.floorLayer = floorIndex >= 0
-                    ? mapLevel->layerAt(floorIndex)->asTileLayer()
-                    : nullptr;
-            if (!repair.map || !repair.floorLayer) {
-                if (error) {
-                    *error = tr("The level-zero Floor layer is unavailable "
-                                "for cell %1, %2.")
-                            .arg(cellPosition.x()).arg(cellPosition.y());
-                }
-                return 0;
-            }
-            repairs.insert(cellKey, repair);
-        }
-        CellRepair &repair = repairs[cellKey];
-        const QPoint local = opening.absolutePosition -
-                QPoint(cellPosition.x() * cellSize,
-                       cellPosition.y() * cellSize);
-        if (!repair.floorLayer->contains(local)) {
-            if (error) {
-                *error = tr("The staircase opening at %1, %2 is outside the "
-                            "target TMX bounds.")
-                        .arg(opening.absolutePosition.x())
-                        .arg(opening.absolutePosition.y());
-            }
-            return 0;
-        }
-        bool duplicate = false;
-        for (const auto &entry : std::as_const(repair.previousCells)) {
-            if (entry.first == local) {
-                duplicate = true;
-                break;
-            }
-        }
-        if (!duplicate && !repair.floorLayer->cellAt(local).isEmpty()) {
-            repair.previousCells.append(
-                        qMakePair(local, repair.floorLayer->cellAt(local)));
-        }
-    }
-    int squareCount = 0;
-    for (const CellRepair &repair : std::as_const(repairs))
-        squareCount += repair.previousCells.size();
-    if (!squareCount) {
-        if (error)
-            *error = tr("The detected staircase openings are already clear.");
-        return 0;
-    }
-    const QFileInfo projectInfo(worldDocument()->fileName());
-    const QString timestamp = QDateTime::currentDateTime().toString(
-                QStringLiteral("yyyyMMdd-HHmmss-zzz"));
-    QDir backupDirectory(projectInfo.absoluteDir().filePath(
-                QStringLiteral(".pztools-backups/basement-openings-%1")
-                .arg(timestamp)));
-    if (!QDir().mkpath(backupDirectory.absolutePath())) {
-        if (error) {
-            *error = tr("Could not create the basement-opening backup "
-                        "directory:\n%1")
-                    .arg(QDir::toNativeSeparators(
-                             backupDirectory.absolutePath()));
-        }
-        return 0;
-    }
-    for (auto it = repairs.begin(); it != repairs.end(); ++it) {
-        CellRepair &repair = it.value();
-        if (repair.previousCells.isEmpty())
-            continue;
-        const QString backupName = QStringLiteral("cell_%1_%2_%3")
-                .arg(repair.cellPosition.x()).arg(repair.cellPosition.y())
-                .arg(QFileInfo(repair.mapPath).fileName());
-        repair.backupPath = backupDirectory.filePath(backupName);
-        if (!QFile::copy(repair.mapPath, repair.backupPath)) {
-            if (error) {
-                *error = tr("Could not back up the TMX file before opening "
-                            "the ground:\n%1")
-                        .arg(QDir::toNativeSeparators(repair.backupPath));
-            }
-            return 0;
-        }
-    }
-    int expectedWrites = 0;
-    for (const CellRepair &repair : std::as_const(repairs)) {
-        if (!repair.previousCells.isEmpty())
-            ++expectedWrites;
-    }
-    QVector<CellRepair *> committed;
-    for (auto it = repairs.begin(); it != repairs.end(); ++it) {
-        CellRepair &repair = it.value();
-        if (repair.previousCells.isEmpty())
-            continue;
-        for (const auto &entry : std::as_const(repair.previousCells))
-            repair.floorLayer->setCell(entry.first.x(), entry.first.y(), Cell());
-        QSaveFile output(repair.mapPath);
-        if (!output.open(QIODevice::WriteOnly)) {
-            if (error)
-                *error = output.errorString();
-            break;
-        }
-        MapWriter writer;
-        writer.setLayerDataFormat(MapWriter::Base64Zlib);
-        writer.setDtdEnabled(false);
-        writer.writeMap(repair.map, &output,
-                        QFileInfo(repair.mapPath).absolutePath());
-        if (output.error() != QFile::NoError || !output.commit()) {
-            if (error)
-                *error = output.errorString();
-            break;
-        }
-        committed.append(&repair);
-        if (repair.map == mMap) {
-            if (CompositeLayerGroup *group =
-                    mMapComposite->layerGroupForLevel(0)) {
-                group->regionAltered(repair.floorLayer);
-            }
-        }
-        if (backupPaths)
-            backupPaths->append(repair.backupPath);
-    }
-    if (committed.size() != expectedWrites) {
-        bool rollbackFailed = false;
-        for (auto it = repairs.begin(); it != repairs.end(); ++it) {
-            CellRepair &repair = it.value();
-            if (repair.previousCells.isEmpty())
-                continue;
-            if (committed.contains(&repair)) {
-                QFile::remove(repair.mapPath);
-                if (!QFile::copy(repair.backupPath, repair.mapPath))
-                    rollbackFailed = true;
-            }
-            for (const auto &entry : std::as_const(repair.previousCells)) {
-                repair.floorLayer->setCell(entry.first.x(), entry.first.y(),
-                                           entry.second);
-            }
-        }
-        if (backupPaths)
-            backupPaths->clear();
-        if (rollbackFailed && error) {
-            *error += tr("\n\nOne or more TMX files could not be restored "
-                         "automatically. Use the dated backup directory:\n%1")
-                    .arg(QDir::toNativeSeparators(
-                             backupDirectory.absolutePath()));
-        }
-        return 0;
-    }
-    mMapComposite->synch();
-    checkHolesOnLevelZero();
-    update();
-    qInfo() << "Basement ground opening:" << squareCount
-            << "square(s) cleared for" << lot->mapName()
-            << "across" << repairs.size() << "cell map(s)";
-    return squareCount;
-}
-
 bool CellScene::validateHoleRepair(QString *error)
 {
     if (error)
         error->clear();
+
     const int width = 7;
     const int height = 5;
     const int leftSource = 1 + 2 * width;
@@ -7809,45 +7791,6 @@ bool CellScene::validateHoleRepair(QString *error)
     if (!nearestSourceCells(4, 3, {}).contains(-1)) {
         if (error)
             *error = QStringLiteral("No-source repair fixture is incorrect.");
-        return false;
-    }
-    return true;
-}
-
-bool CellScene::validateBasementPlacement(QString *error)
-{
-    if (error)
-        error->clear();
-    if (basementGroundOpening(QPoint(10, 20), QStringLiteral("N")) !=
-            QPoint(10, 19) ||
-            basementGroundOpening(QPoint(10, 20), QStringLiteral("W")) !=
-            QPoint(9, 20) ||
-            floorDivide(255, 256) != 0 ||
-            floorDivide(256, 256) != 1 ||
-            floorDivide(-1, 256) != -1 ||
-            floorDivide(-257, 256) != -2) {
-        if (error)
-            *error = tr("Basement stair opening geometry is invalid.");
-        return false;
-    }
-    World *testWorld = new World(1, 1);
-    WorldCell *testCell = testWorld->cellAt(0, 0);
-    WorldCellLot *testLot = new WorldCellLot(
-                testCell, QStringLiteral("basement-validation.tbx"),
-                20, 30, 0, 12, 10);
-    testCell->insertLot(0, testLot);
-    WorldDocument testDocument(testWorld, QString());
-    testDocument.setLotLevel(testLot, -2);
-    if (testLot->level() != -2 || testLot->pos() != QPoint(20, 30)) {
-        if (error)
-            *error = tr("Vertical lot placement changed the lot's world "
-                        "position.");
-        return false;
-    }
-    testDocument.undoStack()->undo();
-    if (testLot->level() != 0 || testLot->pos() != QPoint(20, 30)) {
-        if (error)
-            *error = tr("Vertical lot placement Undo is invalid.");
         return false;
     }
     return true;
@@ -7897,6 +7840,7 @@ void CellScene::handlePendingUpdates()
         if (sceneRect != this->sceneRect()) {
             setSceneRect(sceneRect);
             mDarkRectangle->setRect(sceneRect);
+            mNightPreviewItem->setBounds(sceneRect);
             updateBordersItem();
             mGridItem->updateBoundingRect();
 
@@ -7915,8 +7859,9 @@ void CellScene::handlePendingUpdates()
             bool visible = mDocument->isLotLevelVisible(lot->level()) &&
                     item->subMap()->isVisible() &&
                     SubMapTool::instance()->isCurrent();
-            if (mHighlightCurrentLevel)
-                visible &= item->occupiesLevel(document()->currentLevel());
+            if (mHighlightCurrentLevel) {
+                visible &= (document()->currentLevel() == lot->level());
+            }
             item->setVisible(visible);
         }
     }
@@ -8014,6 +7959,7 @@ QRect CellScene::roadCellBounds() const
     return QRect(cell()->x() * cellSize, cell()->y() * cellSize,
                  cellSize, cellSize);
 }
+
 void CellScene::synchRoadItem(Road *road)
 {
     CellRoadItem *item = itemForRoad(road);
@@ -8032,6 +7978,7 @@ void CellScene::synchRoadItem(Road *road)
         item->synchWithRoad();
     }
 }
+
 // Called when our MapComposite adds a sub-map asynchronously.
 void CellScene::mapCompositeNeedsSynch()
 {
@@ -8057,7 +8004,7 @@ void CellScene::updateCurrentLevelHighlight()
 
         foreach (SubMapItem *item, mSubMapItems)
             item->setVisible(item->subMap()->isVisible() &&
-                             mDocument->isLotLevelVisible(item->lot()->level()) &&
+                             mDocument->isLotLevelVisible(item->subMap()->levelOffset()) &&
                              SubMapTool::instance()->isCurrent());
 
         foreach (ObjectItem *item, mObjectItems)
@@ -8088,8 +8035,8 @@ void CellScene::updateCurrentLevelHighlight()
     // Hide object-like things not on the current level
     foreach (SubMapItem *item, mSubMapItems) {
         bool visible = item->subMap()->isVisible()
-                && item->occupiesLevel(currentLevel)
-                && mDocument->isLotLevelVisible(item->lot()->level())
+                && (item->subMap()->levelOffset() == currentLevel)
+                && mDocument->isLotLevelVisible(currentLevel)
                 && SubMapTool::instance()->isCurrent();
         item->setVisible(visible);
     }
@@ -8202,6 +8149,8 @@ void CellScene::tilesetChanged(Tileset *tileset)
         return;
 
     if (mMapComposite->isTilesetUsed(tileset)) {
+        // The VBO stores the missing-tile substitution made while gathering
+        // cells.  A repaint alone keeps that stale placeholder forever.
         mMapComposite->incrChangeCount();
         update();
     }

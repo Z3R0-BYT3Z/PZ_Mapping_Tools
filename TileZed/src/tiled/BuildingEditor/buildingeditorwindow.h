@@ -35,6 +35,7 @@ class QSplitter;
 class QStackedWidget;
 class QUndoGroup;
 class QGraphicsView;
+class QShowEvent;
 
 namespace Ui {
 class BuildingEditorWindow;
@@ -46,7 +47,6 @@ class Tile;
 class Tileset;
 namespace Internal {
 class TileDefFile;
-class TileSelectionScope;
 class Zoomable;
 }
 }
@@ -177,7 +177,7 @@ private:
 class BuildingEditorWindow : public QMainWindow
 {
     Q_OBJECT
-    
+
 public:
     static BuildingEditorWindow *instance()
     { return mInstance; }
@@ -186,6 +186,7 @@ public:
     ~BuildingEditorWindow();
 
     void closeEvent(QCloseEvent *event);
+    void showEvent(QShowEvent *event) override;
 
     bool openFile(const QString &fileName);
     bool openAutoSave(const QString &fileName);
@@ -300,6 +301,8 @@ private slots:
 
     void selectAll();
     void selectNone();
+    void fitBuildingToView();
+    void centerBuildingInView();
 
     void preferences();
 
@@ -370,7 +373,7 @@ private:
     QAction *mRedoAction;
     QAction *mRunLuaScriptAction = nullptr;
     QAction *mLuaConsoleAction = nullptr;
-    Tiled::Internal::TileSelectionScope *mTileSelectionScope = nullptr;
+    QAction *mNightPreviewAction = nullptr;
     QSettings &mSettings;
     QString mError;
     QString mLuaScriptFile;

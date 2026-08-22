@@ -17,7 +17,6 @@
 
 #include "packviewer.h"
 #include "ui_packviewer.h"
-#include "preferences.h"
 
 #include "packextractdialog.h"
 #include "zoomable.h"
@@ -104,7 +103,7 @@ void PackViewer::openPack()
 
     PROGRESS *progress = new PROGRESS(tr("Loading %1").arg(QFileInfo(fileName).completeBaseName()), this);
 
-    if (!mPackFile.read(fileName, false)) {
+    if (!mPackFile.read(fileName)) {
         delete progress;
         QMessageBox::warning(this, tr("Error reading .pack file"),
                              mPackFile.errorString());
@@ -137,8 +136,7 @@ void PackViewer::itemSelectionChanged()
     QList<QListWidgetItem*> items = ui->listWidget->selectedItems();
     if (items.size() == 1) {
         int row = ui->listWidget->row(items.first());
-        QPixmap pixmap = QPixmap::fromImage(
-                    PackFile::pageImage(mPackFile.pages().at(row)));
+        QPixmap pixmap = QPixmap::fromImage(mPackFile.pages().at(row).image);
         mRectItem->setRect(QRectF(QPoint(-1, -1), pixmap.size() + QSize(1, 1)));
         mRectItem->show();
         mPixmapItem->setPackPage(mPackFile.pages().at(row));
@@ -174,7 +172,7 @@ void PackViewer::extractImages()
     {
         PROGRESS progress(
                     tr("Opening the Versatile .pack Extractor...\n"
-                       "Indexing texture metadata."),
+                       "Preparing texture previews and hashes."),
                     this, true);
         dialog = new PackExtractDialog(mPackFile, this, &progress);
         if (dialog->initializationCanceled()) {
@@ -194,10 +192,7 @@ void PackViewer::saveAllPages()
     }
     QDir dir(path);
     for (const PackPage& packPage : mPackFile.pages()) {
-        PackFile::pageImage(packPage).save(
-                    dir.filePath(packPage.name + QStringLiteral(".png")),
-                    "PNG", -1);
-        PackFile::releaseDecodedImage(packPage);
+        packPage.image.save(dir.filePath(packPage.name + QStringLiteral(".png")), "PNG", -1);
     }
 }
 
@@ -209,9 +204,6 @@ void PackViewer::readSettings()
     if (!geom.isEmpty())
         restoreGeometry(geom);
     mPackDirectory = settings.value(QLatin1String("directory")).toString();
-    if (mPackDirectory.isEmpty())
-        mPackDirectory = Preferences::instance()->gameMediaPath(
-                    QStringLiteral("texturepacks"));
     settings.endGroup();
 }
 

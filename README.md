@@ -1,9 +1,11 @@
 # PZTools Unofficial
 
-PZTools Unofficial is a maintained Qt edition of the Project Zomboid mapping
-tools. It includes **PZWorldEd**, **TileZed**, and **BuildingEd**.
 
-The project continues the work in Tim Baker's
+An unofficial, maintained Qt 5 edition of the Project Zomboid mapping tools:
+**WorldEd**, **TileZed**, and **BuildingEd**.
+
+
+This repository continues the work in Tim Baker's
 [pzworlded](https://github.com/timbaker/pzworlded) and
 [tiled](https://github.com/timbaker/tiled) repositories. It preserves basement
 and negative-level support and adds current Build 42 mapping workflows,
@@ -23,6 +25,14 @@ provenance.
 This is a community project. It is not an official The Indie Stone release.
 Project Zomboid game assets are not included.
 
+## Modernized fork
+
+This Z3R0-BYT3Z edition tracks the current Unjammer feature baseline while
+retaining its modernized BuildingEd studio workspace, refreshed toolbar and
+dock presentation, portable Windows release checks, and fork-specific UI
+assets. Upstream functionality and compatibility fixes remain authoritative
+when the two implementations overlap.
+
 - [Current release changes](RELEASE_CHANGELOG.md)
 - [Documentation](DOCUMENTATION.md)
 - [Troubleshooting FAQ](docs/FAQ.md)
@@ -33,15 +43,13 @@ Project Zomboid game assets are not included.
 
 ![WorldEd displaying a generated terrain cell](docs/images/worlded-overview.png)
 
-## Included applications
 
-### PZWorldEd
+## August 7 and 8, 2026 update at a glance
 
-PZWorldEd manages PZW projects, cells, lots, roads, zones, world-map data,
-terrain images, Biomemap data, Zombie Heatmaps, WorldGen definitions, OSM
-terrain imports, and LOT generation.
 
-Important additions include:
+The latest two-day integration pass focuses on renderer performance, useful
+live diagnostics, safer conversion, and frequently requested editor workflow
+improvements:
 
 - Native256 projects with one source cell mapped to one output cell
 - Partial Chunks mode for selecting the 8 x 8-square chunks included in a

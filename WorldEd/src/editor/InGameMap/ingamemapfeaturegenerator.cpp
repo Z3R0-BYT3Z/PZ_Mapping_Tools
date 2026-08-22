@@ -327,13 +327,16 @@ bool validateGeneratedPolygon(ClipperLib::Path &path, WorldCell *cell,
                    .arg(part)
                    .arg(originalSize).arg(path.size());
     }
+
     QString reason;
     if (path.size() < 3)
         reason = QStringLiteral("fewer than 3 distinct vertices");
     else if (qFuzzyIsNull(ClipperLib::Area(path)))
         reason = QStringLiteral("zero area");
+
     if (reason.isEmpty())
         return true;
+
     ++rejectedCount;
     qWarning().noquote()
             << QStringLiteral("Generate Features discarded polygon: type=%1 cell=%2,%3 part=%4 vertices=%5->%6 reason=\"%7\"")
@@ -496,6 +499,7 @@ bool InGameMapFeatureGenerator::generateWorld(WorldDocument *worldDoc, InGameMap
             << "type" << typeStr
             << "cleaned" << mCleanedPolygonCount
             << "discarded" << mRejectedPolygonCount;
+
     if (!mFailures.isEmpty()) {
         QStringList errorList;
         for (const GenerateCellFailure &failure : mFailures) {
@@ -990,6 +994,9 @@ bool InGameMapFeatureGenerator::doWater(WorldCell *cell, MapInfo *mapInfo)
     for (int y = 0; y < bounds.height(); y++) {
         for (int x = 0; x < bounds.width(); x++) {
             if (isWaterAt(x, y)) {
+                // Merge consecutive water tiles into one rectangle. This is
+                // geometrically equivalent to adding every tile separately,
+                // but gives Clipper far fewer input paths to union.
                 int end = x + 1;
                 for (; end < bounds.width(); end++) {
                     if (isWaterAt(end, y) == false)
@@ -1032,6 +1039,7 @@ bool InGameMapFeatureGenerator::doWater(WorldCell *cell, MapInfo *mapInfo)
                                       QStringLiteral("outer"),
                                       mCleanedPolygonCount, mRejectedPolygonCount))
             continue;
+
         InGameMapFeature* feature = new InGameMapFeature(&cell->inGameMap());
         feature->properties().set(QStringLiteral("water"), QStringLiteral("river"));
         feature->mGeometry.mType = QStringLiteral("Polygon");
@@ -1071,6 +1079,7 @@ static void simplifyRoadPolygon(ClipperLib::Path &nodes, int cellSize,
 {
     if (nodes.size() < 3)
         return;
+
     std::vector<DPPoint> points;
     const std::int64_t scale = 1000;
     const size_t minimumSpacing = size_t(qMax(1, maximumPointSpacing));
@@ -1086,12 +1095,14 @@ static void simplifyRoadPolygon(ClipperLib::Path &nodes, int cellSize,
             lastNecessary = i;
         points.push_back({node.X * scale, node.Y * scale, necessary});
     }
+
     douglas_peucker(points, 0, points.size(), qMax(0.0, tolerance) * scale, 2, 0);
     nodes.clear();
     for (const DPPoint &point : points) {
         if (point.necessary)
             nodes.push_back({point.x / scale, point.y / scale});
     }
+
     for (size_t i = 0; i + 1 < nodes.size(); ++i) {
         const ClipperLib::IntPoint first = nodes[i];
         size_t end = i;
@@ -1104,6 +1115,7 @@ static void simplifyRoadPolygon(ClipperLib::Path &nodes, int cellSize,
             nodes.erase(nodes.begin() + i + 1, nodes.begin() + end);
     }
 }
+
 bool InGameMapFeatureGenerator::doRoads(WorldCell *worldCell, MapInfo *mapInfo)
 {
     auto &features = worldCell->inGameMap().features();
@@ -1117,10 +1129,12 @@ bool InGameMapFeatureGenerator::doRoads(WorldCell *worldCell, MapInfo *mapInfo)
         if (generatedRoad)
             mWorldDoc->removeInGameMapFeature(worldCell, feature->index());
     }
+
     DelayedMapLoader mapLoader;
     mapLoader.addMap(mapInfo);
     while (mapInfo->isLoading())
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+
     MapComposite mapComposite(mapInfo);
     while (mapComposite.waitingForMapsToLoad() || mapLoader.isLoading())
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -1128,6 +1142,7 @@ bool InGameMapFeatureGenerator::doRoads(WorldCell *worldCell, MapInfo *mapInfo)
         mError = mapLoader.errorString();
         return false;
     }
+
     auto *layerGroup = mapComposite.layerGroupForLevel(0);
     if (!layerGroup)
         return true;
@@ -1227,6 +1242,7 @@ bool InGameMapFeatureGenerator::doRoads(WorldCell *worldCell, MapInfo *mapInfo)
         if (!clipper.Execute(ClipperLib::ctUnion, tree,
                              ClipperLib::pftNonZero, ClipperLib::pftNonZero))
             return;
+
         QHash<ClipperLib::PolyNode*, pzPolygon*> polygonForNode;
         QList<pzPolygon*> polygons;
         for (ClipperLib::PolyNode *node = tree.GetFirst(); node; node = node->GetNext()) {
@@ -1240,6 +1256,7 @@ bool InGameMapFeatureGenerator::doRoads(WorldCell *worldCell, MapInfo *mapInfo)
                 polygons += polygon;
             }
         }
+
         for (pzPolygon *polygon : qAsConst(polygons)) {
             ClipperLib::Path outer = polygon->outer;
             simplifyRoadPolygon(outer, mapSize.width(),
@@ -1250,6 +1267,7 @@ bool InGameMapFeatureGenerator::doRoads(WorldCell *worldCell, MapInfo *mapInfo)
                                           mCleanedPolygonCount,
                                           mRejectedPolygonCount))
                 continue;
+
             InGameMapFeature *feature = new InGameMapFeature(&worldCell->inGameMap());
             feature->properties().set(key, value);
             feature->mGeometry.mType = QStringLiteral("Polygon");
@@ -1257,6 +1275,7 @@ bool InGameMapFeatureGenerator::doRoads(WorldCell *worldCell, MapInfo *mapInfo)
             for (const ClipperLib::IntPoint &point : outer)
                 coordinates += InGameMapPoint(point.X, point.Y);
             feature->mGeometry.mCoordinates += coordinates;
+
             for (ClipperLib::Path hole : polygon->inner) {
                 simplifyRoadPolygon(hole, mapSize.width(),
                                     simplificationTolerance, maximumPointSpacing);

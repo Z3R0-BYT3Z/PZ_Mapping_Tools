@@ -40,6 +40,14 @@ NewBuildingDialog::NewBuildingDialog(QWidget *parent) :
 
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
 
+    // Breeze's QGroupBox min-height rule can collapse these legacy nested
+    // layouts to the title line on Qt 5.14. Keep the actual controls visible
+    // regardless of the selected application theme.
+    ui->groupBox->setStyleSheet(QLatin1String(
+                "QGroupBox#groupBox { min-height: 64px; }"));
+    ui->groupBox_2->setStyleSheet(QLatin1String(
+                "QGroupBox#groupBox_2 { min-height: 104px; }"));
+
     QSettings &settings = BuildingPreferences::instance()->settings();
     QString templateName = settings.value(QLatin1String(KEY_TEMPLATE)).toString();
 

@@ -29,7 +29,7 @@ class BMPToTMXDialog;
 class BMPToTMXDialog : public QDialog
 {
     Q_OBJECT
-    
+
 public:
     explicit BMPToTMXDialog(WorldDocument *worldDoc, QWidget *parent = 0);
     ~BMPToTMXDialog();
@@ -46,9 +46,6 @@ private slots:
 
 private:
     bool validate();
-    bool ensureExportDirectory();
-    bool chooseExportDirectory();
-    QString exportDirectoryCreationFailure() const;
     void toSettings();
     void populateFallbackColors(quint32 groundColor,
                                 quint32 vegetationColor);

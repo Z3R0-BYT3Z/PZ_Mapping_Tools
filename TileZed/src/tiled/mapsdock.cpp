@@ -46,6 +46,7 @@ using namespace Tiled;
 using namespace Tiled::Internal;
 
 namespace {
+
 QString portableFolderNameError(const QString &name)
 {
     if (name.isEmpty())
@@ -86,7 +87,9 @@ QString portableFolderNameError(const QString &name)
     }
     return QString();
 }
+
 }
+
 MapsDock::MapsDock(MainWindow *mainWindow, QWidget *parent)
     : QDockWidget(parent)
     , mPreviewToggle(new QToolButton(this))
@@ -374,6 +377,7 @@ void MapsDock::newFolder()
     mMapsView->setCurrentIndex(created);
     mMapsView->scrollTo(created);
 }
+
 void MapsDock::editedMapsDirectory()
 {
     Preferences *prefs = Preferences::instance();
@@ -436,6 +440,7 @@ void MapsDock::setPreviewExpanded(bool expanded)
         mPreviewMapImage = nullptr;
     }
 }
+
 void MapsDock::onMapImageChanged(MapImage *mapImage)
 {
     if (mPreviewToggle->isChecked()
@@ -474,6 +479,7 @@ void MapsDock::retranslateUi()
                 tr("Map / Building Preview"));
     updatePreviewToggle();
 }
+
 void MapsDock::updatePreviewToggle()
 {
     const bool expanded = mPreviewToggle->isChecked();
@@ -515,9 +521,9 @@ MapsView::MapsView(MainWindow *mainWindow, QWidget *parent)
     setModel(model);
 
     QHeaderView* hHeader = header();
-    hHeader->showSection(1);
+    hHeader->showSection(1); // Size
     hHeader->hideSection(2);
-    hHeader->showSection(3);
+    hHeader->showSection(3); // Last modified
 
     setRootIndex(model->index(mapsDir.absolutePath()));
 
@@ -539,18 +545,21 @@ QSize MapsView::sizeHint() const
 {
     return QSize(360, 140);
 }
+
 QModelIndex MapsView::createFolder(
         QWidget *parent, QFileSystemModel *model,
         const QModelIndex &parentIndex)
 {
     if (!model || !parentIndex.isValid())
         return QModelIndex();
+
     bool accepted = false;
     const QString folderName = QInputDialog::getText(
                 parent, tr("New Folder"), tr("Folder name:"),
                 QLineEdit::Normal, tr("New Folder"), &accepted).trimmed();
     if (!accepted)
         return QModelIndex();
+
     const QString nameError =
             portableFolderNameError(folderName);
     if (!nameError.isEmpty()) {
@@ -558,6 +567,7 @@ QModelIndex MapsView::createFolder(
                     parent, tr("Create Folder"), nameError);
         return QModelIndex();
     }
+
     const QString parentPath = model->filePath(parentIndex);
     if (!QFileInfo(parentPath).isDir()) {
         QMessageBox::warning(
@@ -576,6 +586,7 @@ QModelIndex MapsView::createFolder(
                          QDir::toNativeSeparators(parentPath)));
         return QModelIndex();
     }
+
     const bool wasReadOnly = model->isReadOnly();
     model->setReadOnly(false);
     QModelIndex created = model->mkdir(parentIndex, folderName);
@@ -588,6 +599,7 @@ QModelIndex MapsView::createFolder(
                     .arg(QDir::toNativeSeparators(parentPath)));
         return QModelIndex();
     }
+
     qInfo() << "Maps browser created folder" << folderPath;
     return created;
 }

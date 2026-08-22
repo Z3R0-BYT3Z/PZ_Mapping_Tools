@@ -11,7 +11,6 @@
 #include <QDir>
 #include <QDialogButtonBox>
 #include <QFileDialog>
-#include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QHeaderView>
@@ -21,9 +20,7 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QRadioButton>
-#include <QRegularExpression>
 #include <QTableWidget>
-#include <QTemporaryDir>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -54,7 +51,6 @@ static QString colorsText(const QSet<QRgb> &colors)
 static int zoneId(const QString &type)
 {
     static const QHash<QString, int> ids = {
-        {QStringLiteral("water"), 0},
         {QStringLiteral("forest"), 59},
         {QStringLiteral("trailerpark"), 102}, {QStringLiteral("townzone"), 115},
         {QStringLiteral("farm"), 128}, {QStringLiteral("farmland"), 141},
@@ -70,81 +66,10 @@ static void appendUnique(QStringList *values, const QString &value)
         *values += value;
 }
 
-static bool overrideFileEnablesPixel171(const QString &filePath)
-{
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
-        return false;
-
-    QString contents = QString::fromUtf8(file.readAll());
-    contents.remove(QRegularExpression(
-                        QStringLiteral("--\\[\\[[\\s\\S]*?\\]\\]")));
-    QStringList activeLines;
-    for (QString line : contents.split(QLatin1Char('\n'))) {
-        const int comment = line.indexOf(QLatin1String("--"));
-        if (comment >= 0)
-            line.truncate(comment);
-        activeLines += line;
-    }
-    return activeLines.join(QLatin1Char('\n')).contains(
-                QRegularExpression(
-                    QStringLiteral("\\bpixel\\s*=\\s*171\\b")));
-}
-
-static QString detectedPixel171Override(const QString &projectFilePath,
-                                        const QString &outputDirectory)
-{
-    QStringList candidates;
-    const QDir outputDir(outputDirectory);
-    candidates += outputDir.filePath(QLatin1String("WorldGenOverride.lua"));
-    if (QFileInfo(outputDir.absolutePath()).fileName().compare(
-                QLatin1String("maps"), Qt::CaseInsensitive) == 0) {
-        candidates += QDir(outputDir.absolutePath())
-                .filePath(QLatin1String("../WorldGenOverride.lua"));
-    }
-
-    if (!projectFilePath.isEmpty()) {
-        QDir projectDir(QFileInfo(projectFilePath).absolutePath());
-        candidates += projectDir.filePath(
-                    QLatin1String("WorldGenOverride.lua"));
-
-        QDir outputMapDir(outputDir.absolutePath());
-        if (outputMapDir.dirName().compare(
-                    QLatin1String("maps"), Qt::CaseInsensitive) == 0) {
-            outputMapDir.cdUp();
-        }
-        const QString mapName = outputMapDir.dirName();
-        for (int depth = 0; depth < 5; ++depth) {
-            if (!mapName.isEmpty()) {
-                candidates += projectDir.filePath(
-                            QStringLiteral("media/maps/%1/WorldGenOverride.lua")
-                            .arg(mapName));
-            }
-            if (!projectDir.cdUp())
-                break;
-        }
-    }
-
-    QSet<QString> checked;
-    for (const QString &candidate : std::as_const(candidates)) {
-        const QString cleanPath = QDir::cleanPath(
-                    QFileInfo(candidate).absoluteFilePath());
-        const QString key = cleanPath.toLower();
-        if (checked.contains(key))
-            continue;
-        checked.insert(key);
-        if (overrideFileEnablesPixel171(cleanPath))
-            return cleanPath;
-    }
-    return QString();
-}
-
-BiomeMapGeneratorDialog::BiomeMapGeneratorDialog(
-        World *world, const QString &projectFilePath, QWidget *parent)
+BiomeMapGeneratorDialog::BiomeMapGeneratorDialog(World *world, QWidget *parent)
     : QDialog(parent)
     , ui(new Ui::BiomeMapGeneratorDialog)
     , mWorld(world)
-    , mProjectFilePath(projectFilePath)
 {
     ui->setupUi(this);
 
@@ -174,11 +99,6 @@ BiomeMapGeneratorDialog::BiomeMapGeneratorDialog(
             this, &BiomeMapGeneratorDialog::browseZoneImage);
     connect(ui->zonesFromWorld, &QRadioButton::toggled,
             this, &BiomeMapGeneratorDialog::updateZoneSource);
-    connect(ui->unzonedFallback,
-            QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this](int) { updateUnzonedFallback(); });
-    connect(ui->outputDirectory, &QLineEdit::textChanged,
-            this, [this](const QString &) { updateUnzonedFallback(); });
     connect(ui->browseOutputDirectory, &QToolButton::clicked,
             this, &BiomeMapGeneratorDialog::browseOutputDirectory);
     connect(ui->browseFallbackDirectory, &QToolButton::clicked,
@@ -241,62 +161,6 @@ void BiomeMapGeneratorDialog::updateZoneSource()
     const bool fromPng = ui->zonesFromPng->isChecked();
     ui->zoneImagePath->setEnabled(fromPng);
     ui->browseZoneImage->setEnabled(fromPng);
-    ui->unzonedFallbackLabel->setEnabled(!fromPng);
-    ui->unzonedFallback->setEnabled(!fromPng);
-    ui->unzonedFallbackStatus->setEnabled(!fromPng);
-    updateUnzonedFallback();
-}
-
-int BiomeMapGeneratorDialog::effectiveUnzonedFallback(
-        QString *overridePath) const
-{
-    const QString detected = detectedPixel171Override(
-                mProjectFilePath, ui->outputDirectory->text().trimmed());
-    if (overridePath)
-        *overridePath = detected;
-    if (ui->unzonedFallback->currentIndex() == 1)
-        return 64;
-    if (ui->unzonedFallback->currentIndex() == 2)
-        return 171;
-    return detected.isEmpty() ? 64 : 171;
-}
-
-void BiomeMapGeneratorDialog::updateUnzonedFallback()
-{
-    if (ui->zonesFromPng->isChecked()) {
-        ui->unzonedFallbackStatus->setText(
-                    tr("The selected PNG supplies every green-channel value."));
-        return;
-    }
-
-    QString overridePath;
-    const int value = effectiveUnzonedFallback(&overridePath);
-    if (ui->unzonedFallback->currentIndex() == 0) {
-        if (value == 171) {
-            ui->unzonedFallbackStatus->setText(
-                        tr("Automatic selected green 171 (Vegitation). "
-                           "An active pixel 171 entry was found in:\n%1")
-                        .arg(QDir::toNativeSeparators(overridePath)));
-        } else {
-            ui->unzonedFallbackStatus->setText(
-                        tr("Automatic selected green 64 (ForagingNav). "
-                           "No active pixel 171 WorldGenOverride.lua entry "
-                           "was detected for this output."));
-        }
-    } else if (value == 171 && overridePath.isEmpty()) {
-        ui->unzonedFallbackStatus->setText(
-                    tr("Green 171 was selected explicitly, but no active "
-                       "pixel 171 WorldGenOverride.lua entry was detected. "
-                       "Vanilla Build 42.20 will not define this zone."));
-    } else if (value == 171) {
-        ui->unzonedFallbackStatus->setText(
-                    tr("Green 171 (Vegitation) is enabled by:\n%1")
-                    .arg(QDir::toNativeSeparators(overridePath)));
-    } else {
-        ui->unzonedFallbackStatus->setText(
-                    tr("Green 64 (ForagingNav) is active in Vanilla Build "
-                       "42.20 and requires no map override."));
-    }
 }
 
 void BiomeMapGeneratorDialog::browseOutputDirectory()
@@ -459,11 +323,9 @@ void BiomeMapGeneratorDialog::generate()
                 mainImage, vegetationImage, &unknownColors);
     QStringList rasterizedZoneTypes;
     QStringList objectsLuaTypes;
-    QString overridePath;
-    const int unzonedFallback = effectiveUnzonedFallback(&overridePath);
     const QImage zoneLayer = ui->zonesFromWorld->isChecked()
-            ? createZoneLayer(mainImage.size(), unzonedFallback,
-                              &rasterizedZoneTypes, &objectsLuaTypes)
+            ? createZoneLayer(mainImage.size(), &rasterizedZoneTypes,
+                              &objectsLuaTypes)
             : QImage(zoneImagePath);
     if (zoneLayer.isNull() || zoneLayer.size() != mainImage.size()) {
         QMessageBox::warning(this, tr("Invalid Zone Layer"),
@@ -486,15 +348,12 @@ void BiomeMapGeneratorDialog::generate()
     if (!analysis.biomeValuesWithoutEffect.isEmpty())
         warnings += tr("Red IDs with no biome or ore effect: %1")
                 .arg(valuesText(analysis.biomeValuesWithoutEffect));
-    QSet<int> unresolvedOverrides = analysis.valuesRequiringOverride;
-    if (!overridePath.isEmpty())
-        unresolvedOverrides.remove(171);
-    if (!unresolvedOverrides.isEmpty()) {
+    if (!analysis.valuesRequiringOverride.isEmpty()) {
         warnings += tr("BiomeMap ID(s) requiring a map-specific "
                        "WorldGenOverride.lua entry: %1. Vanilla Build 42.20 "
                        "leaves ID 171 disabled, so it has no biome or zone "
                        "definition unless the map enables it.")
-                .arg(valuesText(unresolvedOverrides));
+                .arg(valuesText(analysis.valuesRequiringOverride));
     }
     if (!analysis.unknownZoneValues.isEmpty()) {
         QMessageBox::critical(this, tr("Invalid Foraging Zone IDs"),
@@ -559,11 +418,6 @@ void BiomeMapGeneratorDialog::generate()
             .arg(tileCount)
             .arg(QDir::toNativeSeparators(outputDirectory.absolutePath()));
     if (ui->zonesFromWorld->isChecked()) {
-        resultMessage += tr("\n\nUnzoned terrain uses green %1 (%2).")
-                .arg(unzonedFallback)
-                .arg(unzonedFallback == 171
-                     ? tr("Vegitation, map override")
-                     : tr("ForagingNav, Vanilla-safe"));
         resultMessage += tr("\n\nGreen-channel zone types rasterized from this "
                             "project:\n%1")
                 .arg(rasterizedZoneTypes.isEmpty()
@@ -595,8 +449,8 @@ void BiomeMapGeneratorDialog::generate()
 }
 
 QImage BiomeMapGeneratorDialog::createZoneLayer(
-        const QSize &size, int unzonedFallbackId,
-        QStringList *rasterizedTypes, QStringList *objectsLuaTypes) const
+        const QSize &size, QStringList *rasterizedTypes,
+        QStringList *objectsLuaTypes) const
 {
     if (!mWorld || size != mWorld->size() * mWorld->cellSize())
         return QImage();
@@ -606,8 +460,7 @@ QImage BiomeMapGeneratorDialog::createZoneLayer(
         objectsLuaTypes->clear();
 
     QImage image(size, QImage::Format_ARGB32);
-    const int fallback = qBound(0, unzonedFallbackId, 255);
-    image.fill(qRgb(fallback, fallback, fallback));
+    image.fill(qRgb(64, 64, 64));
     QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing, false);
     const int cellSize = mWorld->cellSize();
@@ -650,85 +503,6 @@ QImage BiomeMapGeneratorDialog::createZoneLayer(
     if (objectsLuaTypes)
         objectsLuaTypes->sort(Qt::CaseInsensitive);
     return image;
-}
-
-bool BiomeMapGeneratorDialog::validateFallbackBehavior(QString *summary,
-                                                       QString *error)
-{
-    if (zoneId(QStringLiteral("Water")) != 0) {
-        if (error)
-            *error = QStringLiteral("Water zones do not map to green-channel value 0.");
-        return false;
-    }
-
-    QTemporaryDir temporary;
-    if (!temporary.isValid()) {
-        if (error)
-            *error = QStringLiteral("Could not create the fallback test directory.");
-        return false;
-    }
-
-    const QString projectPath = QDir(temporary.path())
-            .filePath(QLatin1String("FallbackTest.pzw"));
-    const QString mapsPath = QDir(temporary.path())
-            .filePath(QLatin1String("media/maps/FallbackTest/maps"));
-    if (!QDir().mkpath(mapsPath)) {
-        if (error)
-            *error = QStringLiteral("Could not create the fallback fixture path.");
-        return false;
-    }
-
-    World world(1, 1, WorldGridFormat::Native256);
-    BiomeMapGeneratorDialog dialog(&world, projectPath);
-    dialog.ui->zonesFromWorld->setChecked(true);
-    dialog.ui->outputDirectory->setText(mapsPath);
-    dialog.ui->unzonedFallback->setCurrentIndex(0);
-    if (dialog.effectiveUnzonedFallback() != 64) {
-        if (error)
-            *error = QStringLiteral("Automatic fallback did not select Vanilla-safe green 64 without an override.");
-        return false;
-    }
-
-    const QString overrideFile = QDir(mapsPath)
-            .filePath(QLatin1String("../WorldGenOverride.lua"));
-    QFile file(overrideFile);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text) ||
-            file.write("biome_map_config = {\n    { pixel = 171, biome = \"vegitation\", zone = \"Vegitation\" },\n}\n") < 0) {
-        if (error)
-            *error = QStringLiteral("Could not write the pixel 171 override fixture.");
-        return false;
-    }
-    file.close();
-
-    QString detectedPath;
-    if (dialog.effectiveUnzonedFallback(&detectedPath) != 171 ||
-            QDir::cleanPath(detectedPath) != QDir::cleanPath(overrideFile)) {
-        if (error)
-            *error = QStringLiteral("Automatic fallback did not detect the active pixel 171 override.");
-        return false;
-    }
-
-    const QImage overrideZone = dialog.createZoneLayer(
-                QSize(256, 256), 171, nullptr, nullptr);
-    dialog.ui->unzonedFallback->setCurrentIndex(1);
-    const QImage vanillaZone = dialog.createZoneLayer(
-                QSize(256, 256), dialog.effectiveUnzonedFallback(),
-                nullptr, nullptr);
-    if (overrideZone.isNull() || vanillaZone.isNull() ||
-            qGreen(overrideZone.pixel(127, 127)) != 171 ||
-            qGreen(vanillaZone.pixel(127, 127)) != 64) {
-        if (error)
-            *error = QStringLiteral("Generated zone layers did not preserve the selected green fallback value.");
-        return false;
-    }
-
-    if (summary) {
-        *summary = QStringLiteral(
-                    "Water maps to green 0, automatic fallback selected 64 without an override and 171 with an active map override");
-    }
-    if (error)
-        error->clear();
-    return true;
 }
 
 bool BiomeMapGeneratorDialog::saveTiles(const QImage &image,

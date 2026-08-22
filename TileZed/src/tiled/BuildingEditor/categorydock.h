@@ -23,12 +23,15 @@
 #include <QModelIndex>
 
 class QComboBox;
+class QImage;
+class QLabel;
 class QLineEdit;
 class QListWidget;
 class QMenu;
 class QSettings;
 class QSplitter;
 class QStackedWidget;
+class QTabBar;
 
 namespace Tiled {
 class Tile;
@@ -57,7 +60,7 @@ class CategoryDock : public QDockWidget
     Q_OBJECT
 public:
     CategoryDock(QWidget *parent = 0);
-    
+
     Building *currentBuilding() const;
     Room *currentRoom() const;
 
@@ -66,16 +69,16 @@ public:
     bool validateAllTileCategories();
 
 signals:
-    
+
 private slots:
     void currentDocumentChanged(BuildingEditor::BuildingDocument *doc);
     void catalogLoaded();
 
-    void categoryFilterEdited(const QString &text);
-
     void categoryScaleChanged(qreal scale);
     void categoryViewMousePressed();
     void categoryActivated(const QModelIndex &index);
+    void applyCategoryFilter(const QString &text);
+    void assetKindChanged(int index);
 
     void categorySelectionChanged();
     void tileSelectionChanged();
@@ -121,6 +124,10 @@ private:
 
     void selectAndDisplay(BuildingTileEntry *entry);
     void selectAndDisplay(FurnitureTile *ftile);
+    void updateTilePreview(const QModelIndex &index);
+    void updateFurniturePreview(const QModelIndex &index);
+    void setPreview(const QImage &image, const QString &title,
+                    const QString &detail);
 
 private:
     BuildingDocument *mCurrentDocument;
@@ -138,11 +145,15 @@ private:
     struct
     {
         QSplitter *categorySplitter;
+        QLineEdit *filterEdit;
+        QTabBar *kindTabs;
         QListWidget *categoryList;
-        QLineEdit *categoryFilter;
         QStackedWidget *categoryStack;
         BuildingTileEntryView *tilesetView;
         FurnitureView *furnitureView;
+        QLabel *previewImage;
+        QLabel *previewTitle;
+        QLabel *previewDetail;
         QComboBox *scaleComboBox;
     } _ui, *ui;
 };

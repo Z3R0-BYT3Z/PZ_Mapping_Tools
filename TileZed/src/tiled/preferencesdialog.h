@@ -27,8 +27,6 @@
 
 class QModelIndex;
 class QCheckBox;
-class QComboBox;
-class QLineEdit;
 
 namespace Ui {
 class PreferencesDialog;
@@ -72,7 +70,6 @@ private slots:
     void defaultGridColor();
     void defaultBackgroundColor();
     void browseThumbnailDirectory();
-    void browseProjectZomboidDirectory();
     void browseWorlded();
     void removePZW();
     void raisePZW();
@@ -95,8 +92,6 @@ private:
     QStringList mLanguages;
     ObjectTypesModel *mObjectTypesModel;
     QCheckBox *mSyncThemeCheckBox;
-    QLineEdit *mProjectZomboidDirectory;
-    QComboBox *mAutoSaveCombo;
 };
 
 

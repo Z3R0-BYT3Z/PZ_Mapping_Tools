@@ -1,35 +1,35 @@
-# PZTools logs and useful issue reports
+# PZTools logs, diagnostics, and useful issue reports
 
 This reference applies to PZWorldEd, TileZed, and BuildingEd in the portable
 PZTools distribution.
 
-## Log location
+## Where logs are stored
 
-Each application writes a new UTF-8 log under:
+Each application writes a new UTF-8 log at startup:
 
 ```text
 PZTools-Qt5-Latest/
-`-- settings/
-    `-- logs/
-        |-- PZWorldEd-YYYYMMDD-HHMMSS-mmm-PID.log
-        |-- TileZed-YYYYMMDD-HHMMSS-mmm-PID.log
-        `-- BuildingEd-YYYYMMDD-HHMMSS-mmm-PID.log
+└── settings/
+    └── logs/
+        ├── PZWorldEd-YYYYMMDD-HHMMSS-mmm-PID.log
+        ├── TileZed-YYYYMMDD-HHMMSS-mmm-PID.log
+        └── BuildingEd-YYYYMMDD-HHMMSS-mmm-PID.log
 ```
 
-The newest 20 files per application are retained. A new session never appends
-to an unrelated older log.
+The logger retains the newest 20 files per application. A new run never
+appends to an unrelated older session.
 
-The first lines identify the log path, installation root, active
-configuration directory, settings file, operating system, CPU, logical
-processor count, total and available RAM, display adapters, Qt version, ABI,
-and process bitness.
+The first lines identify:
 
-No username, hostname, serial number, IP address, or stable hardware identifier
-is collected. Remote desktop sessions can expose only the remote display
-adapter. When WorldEd creates an OpenGL context, it also records the actual
-OpenGL vendor, renderer, and version selected by the driver.
+- the exact log path;
+- the portable installation root;
+- the application configuration directory;
+- the active INI file.
 
-## Reading a log line
+This makes it possible to detect a copied executable, a mixed release, or a
+different portable installation immediately.
+
+## How to read a log line
 
 ```text
 2026-08-03 17:52:43.735 [INFO] [pid:16620 thread:2f34 name:MiniMapRenderWorker] message
@@ -37,45 +37,64 @@ OpenGL vendor, renderer, and version selected by the driver.
 
 | Field | Meaning |
 |---|---|
-| Timestamp | Local date and time with milliseconds |
-| `DEBUG` | Detailed support information around an operation |
-| `INFO` | Normal startup, selected paths, counts, phases, and completion |
-| `WARNING` | Recoverable issue, missing optional data, rejected entry, or fallback |
-| `CRITICAL` | The requested operation could not complete |
-| `FATAL` | Process-ending Qt failure |
-| PID | Exact process that wrote the file |
-| Thread and name | UI, reader, renderer, or worker context |
+| Timestamp | Local date and time, including milliseconds. |
+| `DEBUG` | Developer detail. Usually useful only around the failing operation. |
+| `INFO` | Normal startup, selected paths, counts, phases, and successful validations. |
+| `WARNING` | Recoverable problem, missing optional data, rejected entry, or fallback. Review the surrounding lines. |
+| `CRITICAL` | The requested operation could not complete, or a serious runtime failure was caught. |
+| `FATAL` | Process-ending Qt failure. |
+| PID | Identifies the exact process that wrote the file. |
+| Thread and optional name | Distinguishes the UI thread from readers, renderers, and minimap workers. |
+| Source suffix | Development builds may include the source file and line. |
 
-An unhandled Windows exception is recorded with its exception code, address,
-module path, and module-relative offset when Windows provides them.
+An unhandled Windows exception is logged with its exception code, address,
+module path, and module-relative offset when Windows provides them. An
+unhandled C++ exception or `std::terminate()` is also recorded.
 
-## Normal startup
+## PNG color-profile warning policy
+
+Only the exact libpng warning
+`iCCP: known incorrect sRGB profile` is suppressed. It is non-fatal embedded
+color-profile noise and does not identify a bad tile layout or failed decode.
+All other PNG warnings and errors remain logged.
+
+If Windows reports **Bad Image** before an application window opens, the Qt
+runtime or DLL loader may have failed before PZTools could install its logger.
+In that case, record the DLL named by Windows and re-extract or verify the
+release before changing editor preferences.
+
+## What normal startup can look like
 
 The editors intentionally discover and preload the complete valid Tiles
-catalogue. A large 2x installation can take several seconds and use multiple
-gigabytes of memory. Normal logs include discovery, registration, decoding,
-loaded and missing totals, and timing summaries.
+catalogue. A current 2x installation can take tens of seconds and several
+gigabytes of memory. Normal logs include discovery, registration, decode
+progress, loaded/missing/unresolved totals, and timing summaries.
 
-- **loaded** means a readable PNG resolved and decoded.
-- **missing** means neither supported scale resolved and a placeholder is used.
-- **unresolved** means metadata exists but no readable image was confirmed.
-- **invalid** means image geometry, metadata, or encoded data was rejected.
+These are different states:
 
-Only the exact libpng warning `iCCP: known incorrect sRGB profile` is
-suppressed. Other PNG warnings and errors remain visible.
+- **loaded**: a readable 2x or 1x PNG was resolved and decoded;
+- **missing**: neither scale could be read and a placeholder is used;
+- **unresolved catalogue entry**: metadata exists but no image has yet been
+  confirmed for that logical name;
+- **invalid**: dimensions, grid geometry, format metadata, or encoded data
+  failed a specific validation.
 
-If Windows reports **Bad Image** before a window opens, the runtime can fail
-before the logger starts. Record the named DLL, then re-extract the release
-before changing preferences.
+Do not report only a changing total. Include the nearby paths, summary, and
+first warning or critical line that explains why the total changed.
 
-## Rules and Blends delays
+WorldEd now reports its interactive startup phases after the main window has
+been shown: Tilesets.txt, installed-sheet discovery, complete catalogue
+preparation, Building catalog files, and thumbnail settings. A log containing
+`WorldEd interactive startup tasks begin` but no corresponding completion
+identifies the phase where startup is still working or failed.
 
-TileZed records slow BMP Rules regeneration. These messages concern the
-terrain `Rules.txt` imported through BMP Tools, not an Automapper manifest.
+Every application log now starts with a privacy-limited machine summary:
 
-Each TMX contains one Rules snapshot and one Blends snapshot. Import replaces
-the selected snapshot in memory. Saving persists the replacement. Reload after
-Import is unnecessary. Identical imports are treated as a no-op.
+- operating system, kernel build, and CPU architecture
+- CPU model and logical processor count
+- total RAM and RAM available at startup
+- operating-system-reported GPU/display adapters
+- Qt version, Qt ABI, and process bitness
 
 WorldEd BMP To TMX provides **Update Rules/Blends metadata only** for existing
 TMX maps assigned to all world cells or only the selected cells. It replaces
@@ -111,24 +130,152 @@ Blends checks only.
 ## Reproducing a problem
 
 1. Close unrelated PZTools instances.
-2. Start the executable from the current release `bin` directory.
-3. Perform the shortest sequence that reproduces the issue.
+2. Start the deployed executable from `PZTools-Qt5-Latest/bin`.
+3. Perform the smallest sequence that reproduces the issue.
 4. Close the application normally when possible.
-5. Select the newest log for that application and PID.
-6. Keep the complete log for crashes and startup failures.
+5. Sort `settings/logs` by modification time and select the newest file for
+   that application and PID.
+6. Keep roughly 30 lines before and after the first relevant warning or
+   critical message. Attach the complete log for a crash or startup problem.
 
-## Useful issue report
+Do not use a log from a source build directory to describe behavior observed
+in a different deployed executable.
+
+## Maintainer regression commands
+
+Run these against the deployed binaries, where the matching Qt DLLs and
+plugins are present.
+
+### TileZed and BuildingEd
+
+```powershell
+.\TileZed.exe --validate-automapper-rules
+.\TileZed.exe --validate-brush-performance
+.\TileZed.exe --validate-depthmap-editor
+.\TileZed.exe --validate-pack-tools
+.\TileZed.exe --validate-tiledef-split
+.\TileZed.exe --validate-tileset-catalog
+.\BuildingEd.exe --validate-building-categories
+.\BuildingEd.exe --validate-tileset-catalog
+```
+
+Data-dependent checks:
+
+```powershell
+.\TileZed.exe --validate-loot-distributions <game-root> [project-or-mod-root]
+.\BuildingEd.exe --validate-loot-distributions <game-root> [project-or-mod-root]
+```
+
+GUI render checks write an explicit PNG:
+
+```powershell
+.\TileZed.exe --render-pack-comparator <output.png>
+.\TileZed.exe --render-pack-extractor <output.png>
+.\TileZed.exe --render-tiledef-comparator <output.png>
+.\TileZed.exe --render-loot-distributions <game-root> <output.png> [project-root]
+```
+
+### PZWorldEd
+
+```powershell
+.\PZWorldEd.exe --validate-preview-overlays
+.\PZWorldEd.exe --validate-biomemap-config
+.\PZWorldEd.exe --validate-hole-repair
+.\PZWorldEd.exe --validate-native-256-lot-geometry
+.\PZWorldEd.exe --validate-streets=<streets.xml>
+.\PZWorldEd.exe --validate-bmp-generation=<project.pzw>
+.\PZWorldEd.exe --validate-ingamemap=<worldmap.xml>
+.\PZWorldEd.exe --validate-worldgen-preview=<game-or-WorldGen-path>
+.\PZWorldEd.exe --validate-worldgen-prefab-import=<source.tmx-or-tbx>
+.\PZWorldEd.exe --validate-worldgen-project-overlay=<game-path>::<project-overlay-path>
+.\PZWorldEd.exe --validate-world-defaults=..\config\WorldDefaults.txt
+.\PZWorldEd.exe --validate-tileset-cleanup
+.\PZWorldEd.exe --validate-ingamemap-forest-export
+.\PZWorldEd.exe --audit-tileset-cleanup=<TMX-TBX-or-project-folder>
+```
+
+Explicit catalogue maintenance:
+
+```powershell
+.\PZWorldEd.exe --rebuild-tileset-catalog=<Tiles-path>
+```
+
+The rebuild command backs up and rewrites `Tilesets.txt`; it is not a
+read-only validator and is not run during normal startup.
+
+WorldGen render checks:
+
+```powershell
+.\PZWorldEd.exe --render-worldgen-preview=<game-or-WorldGen-path> --worldgen-preview-output=<output.png>
+.\PZWorldEd.exe --render-worldgen-prefab=<game-or-WorldGen-path> --worldgen-preview-output=<output.png>
+.\PZWorldEd.exe --render-worldgen-prefab-window=<game-or-WorldGen-path> --worldgen-preview-output=<output.png>
+.\PZWorldEd.exe --render-tileset-cleanup=<project-folder> --worldgen-preview-output=<output.png>
+```
+
+`--validate-ingamemap` writes
+`<worldmap.xml>.validated.bin`. Remove only that exact generated file after
+review. Render commands overwrite only the explicitly selected output path.
+
+Because these are Windows GUI-subsystem executables, a PowerShell invocation
+may return before the process exits and may not provide a useful
+`$LASTEXITCODE`. Wait for the exact process to finish and confirm the explicit
+`PASS` or `FAIL` line in the newest matching log.
+
+## What each main validator proves
+
+| Command | Coverage |
+|---|---|
+| `--validate-automapper-rules` | Preferred manifest selection, legacy manifest compatibility, and isolation of WorldEd `Rules.txt`. |
+| `--validate-brush-performance` | Sparse brush Undo storage and representative painting data integrity. |
+| `--validate-depthmap-editor` | Geometry parsing, depth-atlas editing, and PNG output. |
+| `--validate-pack-tools` | Pack reading, reconstructed images, hashing, comparison, and extraction. |
+| `--validate-tiledef-split` | Build 42 TileDef limits and the 512/1 split workflow. |
+| `--validate-tileset-catalog` | Recovery and loading of valid one-row sheets instead of zero-column rejection. |
+| `--validate-building-categories` | Templates, Tile mode, Furniture groups, Ortho/Iso categories, Lua placement, and Undo/Redo. |
+| `--validate-loot-distributions` | Game/project registry loading, merged provenance, and unresolved-reference policy. |
+| `--validate-preview-overlays` | Raster/OpenGL environment-preview overlay anchor alignment. |
+| `--validate-biomemap-config` | Embedded Build 42.20 Pixel, Biome, Ore Selector, Zone, availability table, and `map_forest` selector definition. |
+| `--validate-hole-repair` | Deterministic nearest-existing-tile propagation used by Hole Detection automatic repair. |
+| `--validate-native-256-lot-geometry` | Direct 1:1 native-256 cell, square, chunk, negative-origin, and cross-cell lot mapping. |
+| `--validate-bmp-generation` | Project BMP-to-TMX inputs, including `Rules.txt` versus `MapBaseXML.txt`. |
+| `--validate-worldgen-preview` | WorldGen definitions, inheritance, catalogue counts, and representative preview generation. |
+| `--validate-worldgen-prefab-import` | Strict z=0 TMX/TBX-to-prefab conversion and format limits. |
+| `--validate-world-defaults` | Duplicate-safe parsing and counts for enums, properties, templates, object types, and object groups. |
+| `--validate-tileset-cleanup` | Stale TMX handling, complete valid-header retention, 2x/1x path repair, missing-reference preservation, backup exclusion, and stable TBX ID remapping. |
+| `--validate-ingamemap-forest-export` | Forest and non-Forest XML/binary separation, Forest PNG coverage, pyramid ZIP levels, metadata bounds, and atomic four-file export. |
+| `--audit-tileset-cleanup` | Read-only report for real TMX/TBX files, including missing/outside TBX dependencies; it never applies cleanup. |
+
+## Minimum useful issue report
 
 Include:
 
-- application name and release
-- exact steps
-- expected and observed behavior
-- newest matching log
-- relevant PZW, TMX, TBX, PNG, Rules, Blends, Lua, `.tiles`, or `.pack` file
-- project grid format when relevant
-- screenshot for visual or layout issues
-- Raster and OpenGL behavior when rendering is involved
-- approximate map dimensions and brush size for performance issues
+- application name;
+- release date or commit;
+- exact action and smallest reproduction sequence;
+- expected and observed behavior;
+- affected PZW, TMX, TBX, `.tiles`, `.pack`, PNG, Rules, or Lua path;
+- project grid format, when relevant;
+- newest matching log;
+- screenshot for visual/layout/rendering issues;
+- whether Raster and OpenGL behave differently, when renderer code is
+  involved;
+- whether the problem also occurs with Automapper Interactive disabled;
+- whether the delay begins specifically after **BMP Tool > Import Rules** and
+  **Reload**, and the matching terrain `Rules.txt` / `Blends.txt`;
+- whether the file is game data, project data, or generated output.
 
-Do not include personal information that is unrelated to the problem.
+For a performance report, also include the approximate map dimensions,
+selected tool/brush size, visible docks, tileset scale, and pause duration.
+
+## Before declaring a regression
+
+- Confirm the executable path belongs to the current portable release.
+- Confirm the log's installation root matches that release.
+- Confirm the project is using the intended 300 or 256 grid.
+- Confirm `config` is the catalogue directory and `settings` is not.
+- Confirm the Tiles path points to the parent Tiles tree, not to an unrelated
+  extracted folder.
+- For Automapper, confirm the TMX is saved and use
+  `automapping-rules.txt`; press **Reload** after correcting a rule.
+- For WorldGen or loot editing, confirm the game path is read-only and the
+  project output is outside the game installation.

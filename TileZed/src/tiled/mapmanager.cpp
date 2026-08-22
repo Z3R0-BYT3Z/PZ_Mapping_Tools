@@ -17,7 +17,6 @@
 
 #include "mapmanager.h"
 
-#include "../portablesettings.h"
 #include "mapcomposite.h"
 #include "preferences.h"
 #include "tilemetainfomgr.h"
@@ -97,12 +96,7 @@ MapManager::MapManager() :
     qRegisterMetaType<BuildingEditor::Building*>("BuildingEditor::Building*");
     qRegisterMetaType<MapInfo*>("MapInfo*");
 
-    const int mapReaderCount =
-            PortableSettings::recommendedWorkerCount(8, 1);
-    mMapReaderThread.resize(mapReaderCount);
-    qInfo() << "Map reader workers:" << mapReaderCount
-            << "for" << qMax(1, QThread::idealThreadCount())
-            << "logical processors";
+    mMapReaderThread.resize(4);
     mMapReaderWorker.resize(mMapReaderThread.size());
     for (int i = 0; i < mMapReaderThread.size(); i++) {
         mMapReaderThread[i] = new InterruptibleThread;
@@ -783,11 +777,17 @@ void MapManager::mapLoadedByThread(Map *map, MapInfo *mapInfo)
                 continue;
             if (tileset->tileHeight() == missingTile->height()
                     && tileset->tileWidth() == missingTile->width()) {
+                // Replace the all-red image with something nicer.
                 for (int i = 0; i < tileset->tileCount(); i++)
                     tileset->tileAt(i)->setImage(missingTile);
             }
         }
     }
+    // Preserve every TMX's complete, ordered header. This is required by old
+    // projects whose adjacent cells contain the same catalogue in a different
+    // firstgid/order. BMP rules and blend layers also reference sheets that
+    // are absent from Map::usedTilesets(), so every declaration must be ready
+    // before either a current or adjacent map reaches the renderer.
     const QList<Tileset *> declaredTilesets = map->tilesets();
     TilesetManager::instance()->addReferences(declaredTilesets, false);
     QList<Tileset *> usedTilesets = map->usedTilesets().values();

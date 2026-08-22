@@ -14,24 +14,33 @@
  * You should have received a copy of the GNU General Public License along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
+
 #ifndef REMOVETILESETSDIALOG_H
 #define REMOVETILESETSDIALOG_H
+
 #include <QDialog>
+
 namespace Ui {
 class RemoveTilesetsDialog;
 }
+
 class RemoveTilesetsDialog : public QDialog
 {
     Q_OBJECT
+
 public:
     explicit RemoveTilesetsDialog(QWidget *parent = nullptr);
     ~RemoveTilesetsDialog();
+
     void setTilesets(const QStringList &tilesets);
     QStringList tilesetsToRemove() const;
+
 private slots:
     void checkAll();
     void uncheckAll();
+
 private:
     Ui::RemoveTilesetsDialog *ui;
 };
-#endif
+
+#endif // REMOVETILESETSDIALOG_H

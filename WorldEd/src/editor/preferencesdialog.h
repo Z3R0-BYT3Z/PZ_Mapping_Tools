@@ -25,7 +25,6 @@ class WorldDocument;
 class QListWidgetItem;
 class QListWidget;
 class QCheckBox;
-class QComboBox;
 class QDoubleSpinBox;
 class QSpinBox;
 
@@ -47,12 +46,11 @@ private slots:
     void gridColorChanged(const QColor &gridColor);
 
     void accept();
-    
+
 private:
     Ui::PreferencesDialog *ui;
     WorldDocument *mWorldDoc;
     QString mTilesDirectory;
-    QString mProjectZomboidDirectory;
     QColor mGridColor;
     QDoubleSpinBox *mRoadSimplificationHighway;
     QSpinBox *mRoadPointSpacingHighway;
