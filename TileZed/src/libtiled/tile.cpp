@@ -36,6 +36,11 @@
 
 using namespace Tiled;
 
+bool Tile::hasResolvedSource() const
+{
+    return mTileset && mTileset->isLoaded() && !mTileset->isMissing();
+}
+
 void Tile::setImage(const QImage &image)
 {
     mImage = QImage();

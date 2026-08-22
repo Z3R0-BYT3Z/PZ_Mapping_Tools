@@ -86,6 +86,8 @@ public:
      */
     const QImage &image() const { return mImage; }
 
+    bool hasResolvedSource() const;
+
     /**
      * Sets the image of this tile.
      */

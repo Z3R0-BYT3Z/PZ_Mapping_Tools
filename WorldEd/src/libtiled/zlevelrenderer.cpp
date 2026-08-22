@@ -616,20 +616,19 @@ void ZLevelRenderer::drawTileLayerGroup(QPainter *painter, ZTileLayerGroup *laye
                                 ? mPreviewOverlayResolver(
                                       sourceTile, columnItr)
                                 : nullptr;
-                        if (tile->properties().contains(QLatin1String("invisible"))) {
+                        const bool transparentTile = tile->image().isNull()
+                                && tile->hasResolvedSource();
+                        if (tile->properties().contains(QLatin1String("invisible"))
+                                || transparentTile) {
                             if (isShowInvisibleTiles() == false)
                                 continue;
                             if (Tile *placeholder = placeholderTile(true))
                                 tile = placeholder;
 
                         }
-                        if (tile->image().isNull()) {
-                            Tileset *tileset = tile->tileset();
-                            if (!tileset || tileset->isMissing()
-                                    || !tileset->isLoaded()) {
-                                if (Tile *placeholder = placeholderTile(false))
-                                    tile = placeholder;
-                            }
+                        if (tile->image().isNull() && !tile->hasResolvedSource()) {
+                            if (Tile *placeholder = placeholderTile(false))
+                                tile = placeholder;
                         }
                         QImage img = tile->image();
                         const QPoint offset = tile->tileset()->tileOffset() + tile->offset();

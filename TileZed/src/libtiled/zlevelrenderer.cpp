@@ -481,7 +481,10 @@ void ZLevelRenderer::drawTileLayerGroup(QPainter *painter, ZTileLayerGroup *laye
                     const Cell *cell = cells[i];
                     if (!cell->isEmpty()) {
                         Tile *tile = cell->tile;
-                        if (tile->properties().contains(QLatin1String("invisible"))) {
+                        const bool transparentTile = tile->image().isNull()
+                                && tile->hasResolvedSource();
+                        if (tile->properties().contains(QLatin1String("invisible"))
+                                || transparentTile) {
                             if (isShowInvisibleTiles() == false)
                                 continue;
                             if (g_invisible_tile == nullptr) {
@@ -494,19 +497,15 @@ void ZLevelRenderer::drawTileLayerGroup(QPainter *painter, ZTileLayerGroup *laye
                                 tile = g_invisible_tile;
 
                         }
-                        if (tile->image().isNull()) {
-                            Tileset *tileset = tile->tileset();
-                            if (!tileset || tileset->isMissing()
-                                    || !tileset->isLoaded()) {
-                                if (g_missing_tile == nullptr) {
-                                    Tileset *ts = new Tileset(QLatin1String("MISSING"), 64, 128);
-                                    if (ts->loadFromImage(QImage(QLatin1String(":/images/missing-tile.png")), QLatin1String(":/images/missing-tile.png"))) {
-                                        g_missing_tile = ts->tileAt(0);
-                                    }
+                        if (tile->image().isNull() && !tile->hasResolvedSource()) {
+                            if (g_missing_tile == nullptr) {
+                                Tileset *ts = new Tileset(QLatin1String("MISSING"), 64, 128);
+                                if (ts->loadFromImage(QImage(QLatin1String(":/images/missing-tile.png")), QLatin1String(":/images/missing-tile.png"))) {
+                                    g_missing_tile = ts->tileAt(0);
                                 }
-                                if (g_missing_tile)
-                                    tile = g_missing_tile;
                             }
+                            if (g_missing_tile)
+                                tile = g_missing_tile;
                         }
                         QImage img = layerGroup->useImageBlack(columnItr.x(), columnItr.y()) ? tile->imageBlack() : tile->image();
                         const QPoint offset = tile->tileset()->tileOffset() + tile->offset();
