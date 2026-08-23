@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>800</width>
-    <height>600</height>
+    <width>1280</width>
+    <height>800</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -34,7 +34,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>800</width>
+     <width>1280</width>
      <height>17</height>
     </rect>
    </property>
@@ -91,6 +91,8 @@
     <addaction name="actionZoomIn"/>
     <addaction name="actionZoomOut"/>
     <addaction name="actionNormalSize"/>
+    <addaction name="actionFitBuilding"/>
+    <addaction name="actionCenterBuilding"/>
    </widget>
    <widget class="QMenu" name="menuBuilding">
     <property name="title">
@@ -331,6 +333,33 @@
    </property>
    <property name="shortcut">
     <string>Ctrl+0</string>
+   </property>
+  </action>
+  <action name="actionFitBuilding">
+   <property name="icon">
+    <iconset resource="buildingeditor.qrc">
+     <normaloff>:/BuildingEditor/icons/icon_crop.png</normaloff>:/BuildingEditor/icons/icon_crop.png</iconset>
+   </property>
+   <property name="text">
+    <string>Fit Building to View</string>
+   </property>
+   <property name="toolTip">
+    <string>Zoom and center so the entire building is visible</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Shift+0</string>
+   </property>
+  </action>
+  <action name="actionCenterBuilding">
+   <property name="icon">
+    <iconset resource="../tiled.qrc">
+     <normaloff>:/images/16x16/zoom-original.png</normaloff>:/images/16x16/zoom-original.png</iconset>
+   </property>
+   <property name="text">
+    <string>Center Building</string>
+   </property>
+   <property name="toolTip">
+    <string>Center the building without changing zoom</string>
    </property>
   </action>
   <action name="actionPreferences">
