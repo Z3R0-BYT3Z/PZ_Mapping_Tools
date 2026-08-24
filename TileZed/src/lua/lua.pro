@@ -24,7 +24,6 @@ SOURCES += \
     src/lzio.c \
     src/lvm.c \
     src/lundump.c \
-    src/luac.c \
     src/ltm.c \
     src/ltablib.c \
     src/ltable.c \
@@ -84,4 +83,3 @@ HEADERS += \
     src/lcode.h \
     src/lauxlib.h \
     src/lapi.h
-
