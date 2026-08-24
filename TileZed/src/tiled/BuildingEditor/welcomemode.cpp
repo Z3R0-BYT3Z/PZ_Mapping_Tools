@@ -34,6 +34,7 @@
 #include <QAction>
 #include <QCompleter>
 #include <QApplication>
+#include <QColor>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
@@ -65,15 +66,14 @@ LinkItem::LinkItem(const QString &text1, const QString &text2, QGraphicsItem *pa
     mRemoveItem(0),
     mRemoveBGItem(0)
 {
-    const QPalette palette = QApplication::palette();
     mBackgroundItem = new QGraphicsRectItem(this);
-    mBackgroundItem->setBrush(palette.brush(QPalette::AlternateBase));
+    mBackgroundItem->setBrush(QColor(42, 50, 61));
     mBackgroundItem->setPen(Qt::NoPen);
     mBackgroundItem->setVisible(false);
 
     mPrimaryTextItem = new QGraphicsTextItem(this);
     mPrimaryTextItem->setPlainText(text1);
-    mPrimaryTextItem->setDefaultTextColor(palette.color(QPalette::Link));
+    mPrimaryTextItem->setDefaultTextColor(QColor(92, 200, 235));
 
     mBoundingRect = sceneRectOfItem(mPrimaryTextItem);
 
@@ -81,7 +81,7 @@ LinkItem::LinkItem(const QString &text1, const QString &text2, QGraphicsItem *pa
         mSecondaryTextItem = new QGraphicsTextItem(this);
         QString s = QFontMetrics(mSecondaryTextItem->font()).elidedText(text2, Qt::ElideRight, 400 - 40);
         mSecondaryTextItem->setPlainText(s);
-        mSecondaryTextItem->setDefaultTextColor(palette.color(QPalette::Mid));
+        mSecondaryTextItem->setDefaultTextColor(QColor(144, 153, 168));
         mSecondaryTextItem->setPos(0, mPrimaryTextItem->boundingRect().height());
 
         mFilePath = text2;
@@ -163,14 +163,13 @@ void LinkItem::allowRemove()
 
 void LinkItem::applyTheme()
 {
-    const QPalette palette = QApplication::palette();
-    mBackgroundItem->setBrush(palette.brush(QPalette::AlternateBase));
-    mPrimaryTextItem->setDefaultTextColor(palette.color(QPalette::Link));
+    mBackgroundItem->setBrush(QColor(42, 50, 61));
+    mPrimaryTextItem->setDefaultTextColor(QColor(92, 200, 235));
     if (mSecondaryTextItem)
-        mSecondaryTextItem->setDefaultTextColor(palette.color(QPalette::Mid));
+        mSecondaryTextItem->setDefaultTextColor(QColor(144, 153, 168));
     if (QGraphicsRectItem *removeBackground =
             qgraphicsitem_cast<QGraphicsRectItem *>(mRemoveBGItem)) {
-        removeBackground->setBrush(palette.brush(QPalette::Midlight));
+        removeBackground->setBrush(QColor(56, 65, 78));
     }
 }
 
@@ -187,9 +186,8 @@ WelcomeMode::WelcomeMode(QObject *parent) :
     mWidget->setObjectName(QLatin1String("WelcomeModeWidget"));
     ui->setupUi(mWidget);
 
-    const QPalette palette = QApplication::palette();
-    ui->graphicsView->setPalette(palette);
-    ui->graphicsView->setBackgroundBrush(palette.brush(QPalette::Base));
+    const QColor canvasColor(21, 26, 32);
+    ui->graphicsView->setBackgroundBrush(canvasColor);
 
     QGraphicsScene *scene = new QGraphicsScene(ui->graphicsView);
     ui->graphicsView->setScene(scene);
@@ -369,6 +367,8 @@ WelcomeMode::WelcomeMode(QObject *parent) :
     connect(ui->findEdit, &QLineEdit::textEdited, this, &WelcomeMode::findTextEdited);
     connect(ui->findPrev, &QToolButton::clicked, this, &WelcomeMode::findPrev);
     connect(ui->findNext, &QToolButton::clicked, this, &WelcomeMode::findNext);
+
+    applyTheme();
 }
 
 void WelcomeMode::readSettings(QSettings &settings)
@@ -409,19 +409,20 @@ void WelcomeMode::onActivated(const QModelIndex &index)
 
 void WelcomeMode::applyTheme()
 {
-    const QPalette palette = QApplication::palette();
-    ui->graphicsView->setPalette(palette);
-    ui->graphicsView->setBackgroundBrush(palette.brush(QPalette::Base));
+    const QColor canvasColor(21, 26, 32);
+    const QColor textColor(232, 237, 244);
+    const QColor dividerColor(56, 63, 75);
+    ui->graphicsView->setBackgroundBrush(canvasColor);
     const QList<QGraphicsItem *> items = ui->graphicsView->scene()->items();
     for (QGraphicsItem *item : items) {
         if (item->parentItem())
             continue;
         if (QGraphicsTextItem *textItem =
                 qgraphicsitem_cast<QGraphicsTextItem *>(item)) {
-            textItem->setDefaultTextColor(palette.color(QPalette::WindowText));
+            textItem->setDefaultTextColor(textColor);
         } else if (QGraphicsLineItem *lineItem =
                    qgraphicsitem_cast<QGraphicsLineItem *>(item)) {
-            lineItem->setPen(QPen(palette.color(QPalette::Mid)));
+            lineItem->setPen(QPen(dividerColor));
         }
     }
     mNewItem->applyTheme();

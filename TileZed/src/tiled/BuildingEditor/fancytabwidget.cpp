@@ -39,6 +39,7 @@
 #include <QVBoxLayout>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPalette>
 #include <QSplitter>
 #include <QStackedLayout>
 #include <QStatusBar>
@@ -78,6 +79,14 @@ void FancyTab::setFader(float value)
 FancyTabBar::FancyTabBar(QWidget *parent)
     : QWidget(parent)
 {
+    setObjectName(QLatin1String("StudioModeRail"));
+    QPalette studioPalette = palette();
+    studioPalette.setColor(QPalette::Window, QColor(32, 36, 43));
+    studioPalette.setColor(QPalette::WindowText, QColor(174, 182, 194));
+    studioPalette.setColor(QPalette::Highlight, QColor(46, 85, 103));
+    studioPalette.setColor(QPalette::HighlightedText, QColor(234, 248, 252));
+    studioPalette.setColor(QPalette::Mid, QColor(48, 54, 64));
+    setPalette(studioPalette);
     m_hoverIndex = -1;
     m_currentIndex = -1;
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
@@ -353,6 +362,7 @@ private:
 FancyTabWidget::FancyTabWidget(QWidget *parent)
     : QWidget(parent)
 {
+    setObjectName(QLatin1String("FancyTabWidget"));
     m_tabBar = new FancyTabBar(this);
 
     m_selectionWidget = new QWidget(this);

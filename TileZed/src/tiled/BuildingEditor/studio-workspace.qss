@@ -11,6 +11,77 @@ QMainWindow[objectName="AttributeEditMode.Widget"] {
     font-size: 10pt;
 }
 
+QWidget#StudioModeRail {
+    background: #20242B;
+    color: #D7DCE5;
+    border-right: 1px solid #303640;
+}
+
+QWidget#WelcomeModeWidget {
+    background: #171C22;
+    color: #D7DCE5;
+}
+QWidget#WelcomeModeWidget QGraphicsView {
+    background: #151A20;
+    border: none;
+}
+QWidget#WelcomeModeWidget QWidget#widget {
+    background: #222831;
+}
+QWidget#WelcomeModeWidget QTreeView {
+    color: #D7DCE5;
+    background: #171C22;
+    alternate-background-color: #1C222A;
+    border: 1px solid #38414D;
+    border-radius: 6px;
+    outline: none;
+}
+QWidget#WelcomeModeWidget QTreeView::item {
+    min-height: 28px;
+    padding: 3px 6px;
+}
+QWidget#WelcomeModeWidget QTreeView::item:hover {
+    background: #2A323D;
+}
+QWidget#WelcomeModeWidget QTreeView::item:selected {
+    background: #315F73;
+    color: #EAF8FC;
+}
+QWidget#WelcomeModeWidget QLineEdit,
+QWidget#WelcomeModeWidget QComboBox {
+    min-height: 30px;
+    color: #DDE2EA;
+    background: #171C22;
+    border: 1px solid #3A4350;
+    border-radius: 6px;
+    padding: 2px 8px;
+}
+QWidget#WelcomeModeWidget QLineEdit:focus,
+QWidget#WelcomeModeWidget QComboBox:focus {
+    border-color: #57C8E8;
+}
+QWidget#WelcomeModeWidget QToolButton {
+    min-width: 28px;
+    min-height: 28px;
+    color: #D7DCE5;
+    background: #2A313C;
+    border: 1px solid #38414E;
+    border-radius: 5px;
+}
+QWidget#WelcomeModeWidget QToolButton:hover {
+    background: #35404C;
+    border-color: #57C8E8;
+}
+QWidget#WelcomeModeWidget QLabel {
+    color: #AEB6C2;
+}
+QWidget#WelcomeModeWidget QLabel#label {
+    color: #8993A3;
+    background: #171C22;
+    border: 1px solid #38414D;
+    border-radius: 6px;
+}
+
 QMainWindow#BuildingEditorWindow > QMenuBar {
     background: #20252D;
     color: #D7DCE5;
