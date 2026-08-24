@@ -187,6 +187,8 @@ WelcomeMode::WelcomeMode(QObject *parent) :
     ui->setupUi(mWidget);
 
     const QColor canvasColor(21, 26, 32);
+    const QColor textColor(232, 237, 244);
+    const QColor dividerColor(56, 63, 75);
     ui->graphicsView->setBackgroundBrush(canvasColor);
 
     QGraphicsScene *scene = new QGraphicsScene(ui->graphicsView);
@@ -200,12 +202,12 @@ WelcomeMode::WelcomeMode(QObject *parent) :
 //    QGraphicsPixmapItem *pitem = scene->addPixmap(QPixmap::fromImage(QImage(QLatin1String(":/images/tiled-icon-32.png"))));
     pitem->setPos(x, y + 4);
     QGraphicsTextItem *item = scene->addText(tr("BuildingEd"), QFont(QLatin1String("Helvetica"), 16, 1));
-    item->setDefaultTextColor(palette.color(QPalette::WindowText));
+    item->setDefaultTextColor(textColor);
     item->setPos(x + 24 + 6, y);
     QRectF r = sceneRectOfItem(item) | sceneRectOfItem(pitem);
     r.translate(0, 12);
     QGraphicsLineItem *line = scene->addLine(r.left(), r.bottom(), 400, r.bottom());
-    line->setPen(QPen(palette.color(QPalette::Mid)));
+    line->setPen(QPen(dividerColor));
 
     x = 40;
     y = r.bottom() + 16;
@@ -227,7 +229,7 @@ WelcomeMode::WelcomeMode(QObject *parent) :
 
 //    y += 36;
     item = scene->addText(tr("Recent Buildings"), QFont(QLatin1String("Helvetica"), 16, 1));
-    item->setDefaultTextColor(palette.color(QPalette::WindowText));
+    item->setDefaultTextColor(textColor);
     item->setPos(x, y);
 
     y += item->boundingRect().height() + 12;
@@ -239,7 +241,7 @@ WelcomeMode::WelcomeMode(QObject *parent) :
     setAutoSaveFiles();
     if (!mAutoSaveItems.isEmpty()) {
         QGraphicsTextItem *item2 = scene->addText(tr("Restore Autosave"), QFont(QLatin1String("Helvetica"), 16, 1));
-        item2->setDefaultTextColor(palette.color(QPalette::WindowText));
+        item2->setDefaultTextColor(textColor);
         item2->setPos(400 + 48, sceneRectOfItem(item).y());
     }
 
