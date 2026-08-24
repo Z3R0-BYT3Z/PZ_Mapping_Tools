@@ -1055,7 +1055,8 @@ PackExtractDialog::PackExtractDialog(PackFile &packFile,
     ui->outputEdit->setText(
                 settings.value(
                     QStringLiteral("OutputDirectory"),
-                    Preferences::instance()->tilesDirectory()).toString());
+                    Tiled::Internal::Preferences::instance()
+                    ->tilesDirectory()).toString());
     settings.endGroup();
     ui->buttonBox->button(QDialogButtonBox::Ok)->setText(tr("Extract"));
     populateTextures(initializationProgress);
