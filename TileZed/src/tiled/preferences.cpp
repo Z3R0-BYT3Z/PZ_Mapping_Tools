@@ -320,7 +320,11 @@ Preferences::Preferences()
             !mSettings->contains(QLatin1String("TilesetBackgroundColor"));
     mTilesetBackgroundColor = QColor(mSettings->value(QLatin1String("TilesetBackgroundColor"), QColor(Qt::white).name()).toString());
     mShowCellBorder = mSettings->value(QLatin1String("ShowCelLBorder"), true).toBool();
-    mTheme = mSettings->value(QLatin1String("Theme"), QLatin1String("Default")).toString();
+    mTheme = mSettings->value(
+                QLatin1String("Theme"),
+                QLatin1String("Mapping Discord (B42)")).toString();
+    if (mTheme == QLatin1String("Default"))
+        mTheme = QStringLiteral("Mapping Discord (B42)");
     if (PortableSettings::syncThemeAcrossApplications())
         mTheme = PortableSettings::sharedTheme(mTheme);
 #endif

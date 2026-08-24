@@ -1233,6 +1233,38 @@ bool BuildingEditorWindow::writeBuilding(BuildingDocument *doc, const QString &f
     if (!doc)
         return false;
 
+    QStringList unavailableTilesets;
+    const QStringList requestedTilesets = doc->building()->tilesetNames();
+    for (const QString &tilesetName : requestedTilesets) {
+        Tileset *tileset = TileMetaInfoMgr::instance()->tileset(tilesetName);
+        if (!tileset || !tileset->isLoaded() || tileset->isMissing())
+            unavailableTilesets += tilesetName;
+    }
+    unavailableTilesets.removeDuplicates();
+    unavailableTilesets.sort(Qt::CaseInsensitive);
+    if (!unavailableTilesets.isEmpty()) {
+        if (!fileName.endsWith(QLatin1String(".autosave"))) {
+            const int shown = qMin(12, unavailableTilesets.count());
+            QStringList details = unavailableTilesets.mid(0, shown);
+            if (unavailableTilesets.count() > shown) {
+                details += tr("... and %1 more")
+                        .arg(unavailableTilesets.count() - shown);
+            }
+            QMessageBox::critical(
+                        this,
+                        tr("Unsafe Building Save Blocked"),
+                        tr("This building references %1 unavailable tileset(s). "
+                           "Saving now could discard or replace unresolved tile "
+                           "references. The file was not changed.\n\n%2\n\n"
+                           "Use Tools > .pack Viewer / Extractor in TileZed to "
+                           "extract the required Build 42 tilesets into the "
+                           "configured Tiles directory, then reopen the building.")
+                        .arg(unavailableTilesets.count())
+                        .arg(details.join(QLatin1Char('\n'))));
+        }
+        return false;
+    }
+
     QString error;
     if (!doc->write(fileName, error)) {
         QMessageBox::critical(this, tr("Error Saving Building"), error);

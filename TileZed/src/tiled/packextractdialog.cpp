@@ -2,6 +2,7 @@
 #include "ui_packextractdialog.h"
 
 #include "texturepackfile.h"
+#include "preferences.h"
 #include "zprogress.h"
 
 #include "BuildingEditor/buildingtiles.h"
@@ -1053,7 +1054,8 @@ PackExtractDialog::PackExtractDialog(PackFile &packFile,
                                false).toBool());
     ui->outputEdit->setText(
                 settings.value(
-                    QStringLiteral("OutputDirectory")).toString());
+                    QStringLiteral("OutputDirectory"),
+                    Preferences::instance()->tilesDirectory()).toString());
     settings.endGroup();
     ui->buttonBox->button(QDialogButtonBox::Ok)->setText(tr("Extract"));
     populateTextures(initializationProgress);
