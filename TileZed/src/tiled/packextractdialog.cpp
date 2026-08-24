@@ -656,7 +656,32 @@ bool performExtraction(const PackFile &pack,
             const int rows = maximumIndex / options.columns + 1;
             const qint64 sheetWidth =
                     qint64(options.columns) * cellWidth;
-            const qint64 sheetHeight = qint64(rows) * cellHeight;
+            qint64 sheetHeight = qint64(rows) * cellHeight;
+            QImage existingSheet;
+            const QString existingPath = output.filePath(
+                        safeFileName(group.key()) + QStringLiteral(".png"));
+            if (options.conflict == OverwriteExisting &&
+                    QFileInfo::exists(existingPath)) {
+                existingSheet.load(existingPath);
+                if (!existingSheet.isNull()) {
+                    if (existingSheet.width() != sheetWidth ||
+                            existingSheet.height() % cellHeight != 0) {
+                        *errorString = QObject::tr(
+                                    "The existing tilesheet %1 is %2x%3, "
+                                    "which is incompatible with the selected "
+                                    "%4x%5 geometry and %6 columns.")
+                                .arg(QDir::toNativeSeparators(existingPath))
+                                .arg(existingSheet.width())
+                                .arg(existingSheet.height())
+                                .arg(cellWidth).arg(cellHeight)
+                                .arg(options.columns);
+                        return false;
+                    }
+                    sheetHeight = qMax(
+                                sheetHeight,
+                                qint64(existingSheet.height()));
+                }
+            }
             if (sheetWidth <= 0 || sheetHeight <= 0 ||
                     sheetWidth > 32768 || sheetHeight > 32768 ||
                     sheetWidth * sheetHeight > 64LL * 1024 * 1024) {
@@ -677,6 +702,14 @@ bool performExtraction(const PackFile &pack,
             }
             sheet.fill(Qt::transparent);
             QPainter painter(&sheet);
+            // Build 42 splits some logical tilesets across multiple .pack
+            // files (for example Tiles2x.pack and Tiles2x.floor.pack).  When
+            // overwriting a reconstructed sheet, preserve tiles extracted
+            // from earlier packs and paint the current pack's indexes over
+            // them.  Starting from a transparent image here used to discard
+            // the earlier fragments and produced incomplete roof sheets.
+            if (!existingSheet.isNull())
+                painter.drawImage(QPoint(0, 0), existingSheet);
             for (const QPair<int, int> &selection : group.value()) {
                 const PackPage &page =
                         pack.pages().at(selection.first);
