@@ -394,11 +394,11 @@ void TileEditMode::currentDocumentChanged(BuildingDocument *doc)
 
 void TileEditMode::documentAboutToClose(int index, BuildingDocument *doc)
 {
-    Q_UNUSED(doc)
     // At this point, the document is not in the DocumentManager's list of documents.
     // Removing the current tab will cause another tab to be selected and
     // the current document to change.
     mTabWidget->removeTab(index);
+    mDocumentStuff.remove(doc);
 }
 
 void TileEditMode::currentDocumentTabChanged(int index)

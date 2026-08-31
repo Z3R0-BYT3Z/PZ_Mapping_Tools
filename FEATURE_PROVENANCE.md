@@ -26,11 +26,12 @@ implementation.
 | Line | Role | Earliest evidence used |
 |---|---|---|
 | `timbaker/pzworlded` | Original WorldEd foundation and later upstream work | Full upstream history through `8d01befa83df1afc50f08e9faad00dde4e42925c` |
-| `timbaker/tiled` | Original TileZed, BuildingEd, and Tiled-derived foundation | Full upstream history through `3c577009ba09512521977648d261da4d011c67f8` |
+| `timbaker/tiled` | Original TileZed, BuildingEd, and Tiled-derived foundation | Full upstream history through `f4c25c2a119747b588981563987a1817b74dd7d5` |
 | `Unjammer/WorldEd` | Historical unofficial WorldEd continuation | [`fd4ed27dab993c4f8b85091f463fe6f8067eeccc`](https://github.com/Unjammer/WorldEd/commit/fd4ed27dab993c4f8b85091f463fe6f8067eeccc), 2023-03-06 |
 | `Unjammer/TileZed` | Historical unofficial TileZed and BuildingEd continuation | [`b5fb778e54c5a36c32b29b8df9489cbcd295a20a`](https://github.com/Unjammer/TileZed/commit/b5fb778e54c5a36c32b29b8df9489cbcd295a20a), 2023-03-06 |
 | Local Qt 5 reconstruction branches | Selective reconstruction from Tim baselines plus preserved Unjammer behavior | 2026-07-22 |
 | `Unjammer/PZ_Mapping_Tools` | Current combined maintained source and public releases | [`2ae112db61f582c086dcb3f892e1271bae1ea174`](https://github.com/Unjammer/PZ_Mapping_Tools/commit/2ae112db61f582c086dcb3f892e1271bae1ea174), 2026-07-24 |
+| `Z3R0-BYT3Z/PZ_Mapping_Tools` | BuildingEd Studio interface and distribution-specific workflow extensions | Studio implementation commits beginning with `84d6a820`, 2026-08-23 |
 | Preserved C# mapping utilities | Earlier Alree / Unjammer experiments and working tools, not current C++ source | Verified Git commits from 2022-03-10 and preserved source from 2022 onward |
 
 The precise combined-tree baselines and branch relationships are documented in
@@ -54,6 +55,8 @@ The precise combined-tree baselines and branch relationships are documented in
 - `THIRD_PARTY_COMPONENT`: external code, library, algorithm, or theme asset.
 - `IDEA_OR_FEEDBACK`: a request, test case, or idea without implementation
   authorship.
+- `ZERO_STUDIO_EXTENSION`: BuildingEd Studio interface, packaging, or workflow
+  code implemented by Zero / Z3R0-BYT3Z on the maintained Unjammer engine.
 - `NEEDS_FURTHER_VERIFICATION`: available evidence does not support a more
   exact attribution or date.
 
@@ -94,6 +97,9 @@ The precise combined-tree baselines and branch relationships are documented in
 | Rosewood prison BuildingDefs export | Maintained global overlap collection already covers the case differently | Tim [`8d01befa`](https://github.com/timbaker/pzworlded/commit/8d01befa83df1afc50f08e9faad00dde4e42925c), 2026-08-11 | Upstream rewrite not imported | `NOT_PORTED_ALREADY_FIXED` |
 | BuildingEd category filters | Existing categories retained | Tim [`39ec9c97`](https://github.com/timbaker/tiled/commit/39ec9c977921aab5cea2e13b437e9fbb06d210db), 2026-08-08 | Applicable UI behavior selectively adapted | `TIM_UPSTREAM_PORT` |
 | Current About and provenance UI | Combined-tree implementation, 2026-08-15 | None | Current | `UNJAMMER_ORIGINAL` |
+| BuildingEd Studio workspace | Z3R0-BYT3Z `84d6a820`, `b3b270f6`, and `cc145555`, 2026-08-23 | Uses inherited BuildingEd modes and actions | Current distribution-specific interface | `ZERO_STUDIO_EXTENSION` |
+| Unresolved-tileset building save guard | Z3R0-BYT3Z `09a620bd`, 2026-08-24 | Uses inherited tileset validation state | Current distribution-specific safeguard | `ZERO_STUDIO_EXTENSION` |
+| Windows release-verification scripts | Z3R0-BYT3Z `8e736023`, 2026-08-23 | No application-code equivalent | Current distribution packaging check | `ZERO_STUDIO_EXTENSION` |
 
 ## Historical Feature Timeline
 
@@ -362,7 +368,7 @@ authorship.
 
 ## Tim Baker Upstream Review
 
-The two post-baseline ranges contain 58 commits. Platform-only packaging commits
+The two post-baseline ranges contain 67 commits. Platform-only packaging commits
 were inspected as part of the range audit and grouped where they have the same
 decision. Every user-facing or correctness change is listed separately below.
 
@@ -396,6 +402,14 @@ decision. Every user-facing or correctness change is listed separately below.
 | TileZed `c8a4e143` | 2026-08-04 | Tile name as `tileset_index` tooltip | Tile IDs and names existed since 2023 | Not ported — already implemented | `NOT_PORTED_ALREADY_IMPLEMENTED` |
 | TileZed `29f85d5f` | 2026-08-05 | Qt 5.15 compilation | Current target is Qt 5.14.2 with separate compatibility | Not applicable | Tim upstream only |
 | TileZed [`39ec9c97`](https://github.com/timbaker/tiled/commit/39ec9c977921aab5cea2e13b437e9fbb06d210db) | 2026-08-08 | Building category filters | Existing category UI was retained | Ported with adaptation | `TIM_UPSTREAM_PORT` |
+| TileZed [`fc29849e`](https://github.com/timbaker/tiled/commit/fc29849e40878d3059d69bd31ffac21169184003) | 2026-08-18 | West-wall trim for expanded window-frame shapes | No | Ported | `TIM_FIX_PORTED` |
+| TileZed [`cd7dc721`](https://github.com/timbaker/tiled/commit/cd7dc721bb4f80b97701bb14ef4f097e5ea9102a) | 2026-08-18 | Correct image-black mask coordinates and bounds | No | Ported | `TIM_FIX_PORTED` |
+| TileZed `801e8c27` | 2026-08-18 | MapBuildings cosmetic cleanup | Maintained MapBuildings differs | Not ported | Tim upstream only |
+| TileZed `3d2093b1` | 2026-08-19 | Check Buildings internal-name editing, Pause, and Stop | Separate maintained workflow | Not ported | Tim upstream only |
+| TileZed `dc8c6422` | 2026-08-24 | Linux distribution script fix | Windows Qt 5 line differs | Not applicable | Tim upstream only |
+| TileZed [`e2dd2d3a`](https://github.com/timbaker/tiled/commit/e2dd2d3afe633076f61b468fb2086d9e224d5406) | 2026-08-25 | BuildingEd opening-hang protection | Maintained startup and progress flow differs | Ported with adaptation | `TIM_FIX_PORTED` |
+| TileZed `fbf2ee73`, `0548c0db` | 2026-08-25 | Tileset background color preference and dock refresh | Unrelated preference change | Not ported | Tim upstream only |
+| TileZed [`f4c25c2a`](https://github.com/timbaker/tiled/commit/f4c25c2a119747b588981563987a1817b74dd7d5) | 2026-08-25 | BuildingEd opening-crash protection during map construction | Maintained renderer has additional deferred state | Ported with adaptation | `TIM_FIX_PORTED` |
 
 **Not ported: equivalent functionality was already implemented in the Unjammer
 continuation before the recorded upstream changes** where the table uses
