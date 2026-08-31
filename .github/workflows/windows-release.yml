@@ -33,7 +33,15 @@ jobs:
         with:
           arch: x64
 
+      - name: Restore compiler outputs
+        id: build-cache
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: windows-msvc-${{ hashFiles('WorldEd/**', 'TileZed/**', 'shared/**') }}
+
       - name: Build PZWorldEd
+        if: steps.build-cache.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           mkdir build\worlded
@@ -42,6 +50,7 @@ jobs:
           nmake /NOLOGO
 
       - name: Build TileZed and BuildingEd
+        if: steps.build-cache.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           mkdir build\tilezed
@@ -123,6 +132,15 @@ jobs:
           foreach ($exe in @('PZWorldEd.exe', 'TileZed.exe', 'BuildingEd.exe')) {
             windeployqt --release --compiler-runtime --dir $bin (Join-Path $bin $exe)
           }
+
+          $vcRuntime = Get-ChildItem $env:VCToolsRedistDir -Recurse -File -Filter 'vcruntime140.dll' |
+            Where-Object { $_.DirectoryName -match '\\x64\\Microsoft\.VC\d+\.CRT$' } |
+            Sort-Object { $_.DirectoryName.Length } |
+            Select-Object -First 1
+          if (-not $vcRuntime) {
+            throw "The official x64 Visual C++ redistributable directory was not found below $env:VCToolsRedistDir"
+          }
+          Copy-Item (Join-Path $vcRuntime.DirectoryName '*.dll') $bin -Force
 
           Copy-Item "$env:GITHUB_WORKSPACE\tools\release\Verify-PZToolsRelease.ps1" $package -Force
           Copy-Item "$env:GITHUB_WORKSPACE\tools\release\Verify-PZToolsRelease.cmd" $package -Force
