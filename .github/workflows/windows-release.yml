@@ -1,0 +1,161 @@
+name: Windows Release Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - integration/unjammer-20260828a
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Qt 5.14.2
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "5.14.2"
+          arch: win64_msvc2017_64
+          cache: true
+
+      - name: Configure MSVC x64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build PZWorldEd
+        shell: cmd
+        run: |
+          mkdir build\worlded
+          cd build\worlded
+          qmake "%GITHUB_WORKSPACE%\WorldEd\PZWorldEd.pro" -spec win32-msvc CONFIG+=release
+          nmake /NOLOGO
+
+      - name: Build TileZed and BuildingEd
+        shell: cmd
+        run: |
+          mkdir build\tilezed
+          cd build\tilezed
+          qmake "%GITHUB_WORKSPACE%\TileZed\tiled.pro" -spec win32-msvc CONFIG+=release
+          nmake /NOLOGO
+
+      - name: Assemble portable package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $package = Join-Path $env:GITHUB_WORKSPACE 'package\PZTools-BuildingEd-Studio'
+          $bin = Join-Path $package 'bin'
+          New-Item -ItemType Directory -Force -Path $bin | Out-Null
+
+          foreach ($name in @('PZWorldEd.exe', 'TileZed.exe', 'BuildingEd.exe')) {
+            $file = Get-ChildItem "$env:GITHUB_WORKSPACE\build" -Recurse -File -Filter $name |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if (-not $file) { throw "Required build output was not found: $name" }
+            Copy-Item $file.FullName (Join-Path $bin $name) -Force
+          }
+
+          foreach ($name in @('worlded.dll', 'zlib1.dll')) {
+            $file = Get-ChildItem "$env:GITHUB_WORKSPACE\build" -Recurse -File -Filter $name |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if (-not $file) { throw "Required runtime output was not found: $name" }
+            Copy-Item $file.FullName (Join-Path $bin $name) -Force
+          }
+
+          foreach ($name in @('tiled.dll', 'tmxviewer.exe')) {
+            $file = Get-ChildItem "$env:GITHUB_WORKSPACE\build" -Recurse -File -Filter $name |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($file) { Copy-Item $file.FullName (Join-Path $bin $name) -Force }
+          }
+
+          $config = Join-Path $package 'config'
+          New-Item -ItemType Directory -Force -Path $config | Out-Null
+          $catalogues = @{
+            'Rules.txt' = 'WorldEd\Rules.txt'
+            'Blends.txt' = 'WorldEd\Blends.txt'
+            'Tilesets.txt' = 'TileZed\Tilesets.txt'
+            'TMXConfig.txt' = 'TileZed\src\tiled\BuildingEditor\TMXConfig.txt'
+            'BuildingTiles.txt' = 'TileZed\src\tiled\BuildingEditor\BuildingTiles.txt'
+            'BuildingFurniture.txt' = 'TileZed\src\tiled\BuildingEditor\BuildingFurniture.txt'
+            'BuildingTemplates.txt' = 'TileZed\src\tiled\BuildingEditor\BuildingTemplates.txt'
+            'RoomNames.txt' = 'TileZed\RoomNames.txt'
+            'RoomTone.txt' = 'TileZed\RoomTone.txt'
+            'WorldDefaults.txt' = 'WorldEd\WorldDefaults.txt'
+          }
+          foreach ($entry in $catalogues.GetEnumerator()) {
+            Copy-Item (Join-Path $env:GITHUB_WORKSPACE $entry.Value) (Join-Path $config $entry.Key) -Force
+          }
+
+          foreach ($directory in @('brushes', 'docs', 'licenses', 'lua', 'plugins', 'themes', 'translations')) {
+            New-Item -ItemType Directory -Force -Path (Join-Path $package $directory) | Out-Null
+          }
+          Copy-Item "$env:GITHUB_WORKSPACE\TileZed\brushes\*" "$package\brushes" -Recurse -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\docs\*" "$package\docs" -Recurse -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\licenses\*" "$package\licenses" -Recurse -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\TileZed\lua\*" "$package\lua" -Recurse -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\TileZed\translations\*" "$package\translations" -Recurse -Force
+
+          $documents = @{
+            'AUTHORS.txt' = 'AUTHORS.txt'
+            'COPYING.txt' = 'COPYING'
+            'SOURCE-OFFER.txt' = 'SOURCE-OFFER.txt'
+            'THIRD_PARTY_NOTICES.txt' = 'THIRD_PARTY_NOTICES.txt'
+            'UPSTREAM-HISTORY.md' = 'UPSTREAM-HISTORY.md'
+            'README.md' = 'README.md'
+            'BUILDING.md' = 'BUILDING.md'
+            'FEATURE_PROVENANCE.md' = 'FEATURE_PROVENANCE.md'
+            'RELEASE_CHANGELOG.md' = 'RELEASE_CHANGELOG.md'
+          }
+          foreach ($entry in $documents.GetEnumerator()) {
+            $source = Join-Path $env:GITHUB_WORKSPACE $entry.Value
+            if (Test-Path $source) { Copy-Item $source (Join-Path $package $entry.Key) -Force }
+          }
+
+          foreach ($exe in @('PZWorldEd.exe', 'TileZed.exe', 'BuildingEd.exe')) {
+            windeployqt --release --no-compiler-runtime --dir $bin (Join-Path $bin $exe)
+          }
+
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\release\Verify-PZToolsRelease.ps1" $package -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\release\Verify-PZToolsRelease.cmd" $package -Force
+
+      - name: Verify package
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\tools\release\Verify-PZToolsRelease.ps1" `
+            -ReleaseRoot "$env:GITHUB_WORKSPACE\package\PZTools-BuildingEd-Studio" `
+            -WriteManifest
+
+      - name: Create release archive
+        shell: pwsh
+        run: |
+          $archive = "$env:GITHUB_WORKSPACE\PZTools-BuildingEd-Studio-Windows-x64.zip"
+          Compress-Archive `
+            -Path "$env:GITHUB_WORKSPACE\package\PZTools-BuildingEd-Studio" `
+            -DestinationPath $archive `
+            -CompressionLevel Optimal
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: PZTools-BuildingEd-Studio-Windows-x64
+          path: PZTools-BuildingEd-Studio-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PZTools-Windows-verification
+          path: package/PZTools-BuildingEd-Studio/PZTools-release-verification.txt
+          if-no-files-found: warn
+          retention-days: 30
