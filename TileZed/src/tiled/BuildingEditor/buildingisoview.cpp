@@ -412,6 +412,13 @@ BuildingIsoScene::BuildingIsoScene(QObject *parent) :
             this, &BuildingIsoScene::showLowerFloorsChanged);
     connect(prefs(), &BuildingPreferences::showOnlyFloorsChanged,
             this, &BuildingIsoScene::showOnlyFloorsChanged);
+    connect(prefs(), &BuildingPreferences::showInvisibleTilesChanged,
+            this, [this](bool show) {
+        if (mBuildingMap && mBuildingMap->mapRenderer()) {
+            mBuildingMap->mapRenderer()->setShowInvisibleTiles(show);
+            update();
+        }
+    });
 
     connect(ToolManager::instance(), &ToolManager::currentToolChanged,
             this, &BuildingIsoScene::currentToolChanged);
@@ -999,6 +1006,8 @@ void BuildingIsoScene::BuildingToMap()
     }
 
     mBuildingMap = new BuildingMap(building());
+    mBuildingMap->mapRenderer()->setShowInvisibleTiles(
+                prefs()->showInvisibleTiles());
     connect(mBuildingMap, &BuildingMap::aboutToRecreateLayers, this, &BuildingIsoScene::aboutToRecreateLayers);
     connect(mBuildingMap, &BuildingMap::layersRecreated, this, &BuildingIsoScene::layersRecreated);
     connect(mBuildingMap, &BuildingMap::mapResized, this, &BuildingIsoScene::mapResized);
