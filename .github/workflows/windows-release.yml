@@ -121,7 +121,7 @@ jobs:
           }
 
           foreach ($exe in @('PZWorldEd.exe', 'TileZed.exe', 'BuildingEd.exe')) {
-            windeployqt --release --no-compiler-runtime --dir $bin (Join-Path $bin $exe)
+            windeployqt --release --compiler-runtime --dir $bin (Join-Path $bin $exe)
           }
 
           Copy-Item "$env:GITHUB_WORKSPACE\tools\release\Verify-PZToolsRelease.ps1" $package -Force
