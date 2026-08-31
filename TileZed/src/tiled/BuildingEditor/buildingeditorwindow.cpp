@@ -623,6 +623,18 @@ BuildingEditorWindow::BuildingEditorWindow(QWidget *parent) :
     connect(prefs, &BuildingPreferences::highlightUnlitRoomsChanged,
             this, &BuildingEditorWindow::highlightUnlitRoomsChanged);
 
+
+    QAction *showInvisibleTilesAction = new QAction(
+                tr("Show Invisible Tiles"), this);
+    showInvisibleTilesAction->setCheckable(true);
+    showInvisibleTilesAction->setChecked(prefs->showInvisibleTiles());
+    showInvisibleTilesAction->setToolTip(tr(
+        "Show markers for explicitly invisible and fully transparent tiles"));
+    ui->menuView->addAction(showInvisibleTilesAction);
+    connect(showInvisibleTilesAction, &QAction::toggled,
+            prefs, &BuildingPreferences::setShowInvisibleTiles);
+    connect(prefs, &BuildingPreferences::showInvisibleTilesChanged,
+            showInvisibleTilesAction, &QAction::setChecked);
     ui->menuView->addSeparator();
     QAction *renderDiagnosticsAction = new QAction(
                 tr("Render Diagnostics"), this);
