@@ -84,6 +84,7 @@
 #include <QComboBox>
 #include <QDebug>
 #include <QDesktopServices>
+#include <QDockWidget>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -444,6 +445,24 @@ BuildingEditorWindow::BuildingEditorWindow(QWidget *parent) :
 {
     ui->setupUi(this);
     AppIssueNotifier::attach(this);
+
+    mTileInspectorDock = new QDockWidget(tr("Tile Inspector"), this);
+    mTileInspectorDock->setObjectName(QLatin1String("tileInspectorDock"));
+    mTileInspectorDock->setAllowedAreas(
+                Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+
+    mTileInspectorLabel = new QLabel(mTileInspectorDock);
+    mTileInspectorLabel->setTextFormat(Qt::PlainText);
+    mTileInspectorLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    mTileInspectorLabel->setWordWrap(true);
+    mTileInspectorLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    mTileInspectorLabel->setMargin(8);
+    mTileInspectorLabel->setText(
+                tr("Move the cursor over a tile to inspect it."));
+
+    mTileInspectorDock->setWidget(mTileInspectorLabel);
+    addDockWidget(Qt::RightDockWidgetArea, mTileInspectorDock);
+    ui->menuView->addAction(mTileInspectorDock->toggleViewAction());
 
     QFile studioStyle(QLatin1String(":/BuildingEditor/studio-workspace.qss"));
     if (studioStyle.open(QIODevice::ReadOnly | QIODevice::Text))
@@ -3392,6 +3411,121 @@ void BuildingEditorWindow::currentModeChanged()
 void BuildingEditorWindow::viewAddedForDocument(BuildingDocument *doc, BuildingIsoView *view)
 {
     mDocumentStuff[doc]->viewAddedForDocument(view);
+
+    connect(view, &BuildingIsoView::mouseCoordinateChanged,
+            this, [this, view](const QPoint &tilePos) {
+        if (!mTileInspectorLabel || !view || !view->scene())
+            return;
+
+        const QString tileName =
+                view->scene()->tileUnderPoint(tilePos.x(), tilePos.y());
+
+        QStringList lines;
+        lines << tr("Position: %1, %2")
+                    .arg(tilePos.x())
+                    .arg(tilePos.y());
+
+        if (tileName.isEmpty()) {
+            lines << tr("Tile: <none>");
+            mTileInspectorLabel->setText(lines.join(QLatin1Char('\n')));
+            return;
+        }
+
+        lines << tr("Tile: %1").arg(tileName);
+
+        const int split = tileName.lastIndexOf(QLatin1Char('_'));
+        bool idOk = false;
+        int tileId = -1;
+        QString tilesetName = tileName;
+
+        if (split > 0) {
+            tileId = tileName.mid(split + 1).toInt(&idOk);
+            if (idOk)
+                tilesetName = tileName.left(split);
+        }
+
+        lines << tr("Tileset: %1").arg(tilesetName);
+        if (idOk)
+            lines << tr("Index: %1").arg(tileId);
+
+        Tiled::Tileset *tileset =
+                TileMetaInfoMgr::instance()->tileset(tilesetName);
+
+        if (!tileset) {
+            lines << tr("State: UNRESOLVED");
+            mTileInspectorLabel->setText(lines.join(QLatin1Char('\n')));
+            return;
+        }
+
+        Tiled::Tile *tile = nullptr;
+        if (idOk && tileId >= 0 && tileId < tileset->tileCount())
+            tile = tileset->tileAt(tileId);
+
+        QStringList states;
+
+        if (tileset->isMissing())
+            states << tr("MISSING");
+        else if (!tileset->isLoaded())
+            states << tr("NOT LOADED");
+
+        if (!idOk)
+            states << tr("UNPARSEABLE TILE ID");
+        else if (!tile)
+            states << tr("INVALID INDEX");
+
+        if (tile) {
+            if (tile->properties().contains(QLatin1String("invisible")))
+                states << tr("INVISIBLE");
+
+            if (tile->image().isNull() && tile->hasResolvedSource())
+                states << tr("TRANSPARENT");
+        }
+
+        if (states.isEmpty())
+            states << tr("LOADED");
+
+        lines << tr("State: %1")
+                    .arg(states.join(QLatin1String(" | ")));
+
+        lines << QString();
+        lines << tr("1x source:");
+        lines << (tileset->imageSource().isEmpty()
+                  ? tr("<none>")
+                  : tileset->imageSource());
+
+        lines << tr("2x source:");
+        lines << (tileset->imageSource2x().isEmpty()
+                  ? tr("<none>")
+                  : tileset->imageSource2x());
+
+        lines << QString();
+        lines << tr("Sheet: %1 x %2")
+                    .arg(tileset->imageWidth())
+                    .arg(tileset->imageHeight());
+        lines << tr("Columns: %1").arg(tileset->columnCount());
+
+        if (tile) {
+            lines << tr("Tile size: %1 x %2")
+                        .arg(tile->width())
+                        .arg(tile->height());
+            lines << tr("Image offset: %1, %2")
+                        .arg(tile->offset().x())
+                        .arg(tile->offset().y());
+
+            const Tiled::Properties &properties = tile->properties();
+            if (!properties.isEmpty()) {
+                lines << QString();
+                lines << tr("Properties:");
+                for (auto it = properties.constBegin();
+                     it != properties.constEnd(); ++it) {
+                    lines << QString::fromLatin1("  %1 = %2")
+                                .arg(it.key(), it.value());
+                }
+            }
+        }
+
+        mTileInspectorLabel->setText(lines.join(QLatin1Char('\n')));
+    });
 }
 
 #if 0

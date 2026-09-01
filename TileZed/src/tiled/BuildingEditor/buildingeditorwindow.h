@@ -31,6 +31,7 @@ class KeyboardShortcutWindow;
 
 class QAction;
 class QComboBox;
+class QDockWidget;
 class QLabel;
 class QSplitter;
 class QStackedWidget;
@@ -390,6 +391,8 @@ private:
     Core::Internal::FancyTabWidget *mTabWidget;
 
     bool mDocumentChanging;
+    QDockWidget *mTileInspectorDock = nullptr;
+    QLabel *mTileInspectorLabel = nullptr;
     QList<QAction*> mDiagnosticActions;
 };
 
